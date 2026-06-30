@@ -1,0 +1,786 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum ProjectStatus {
+  DRAFT
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+enum ProjectPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ViewType {
+  LIST
+  KANBAN
+  CALENDAR
+  TIMELINE
+  DASHBOARD
+}
+
+enum EventType {
+  MEETING
+  TASK
+  DEADLINE
+  REMINDER
+  OTHER
+}
+
+enum AttendeeResponseStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  MAYBE
+}
+
+enum CustomFieldEntityType {
+  TASK
+  PROJECT
+  CONTACT
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  MULTISELECT
+  JSON
+}
+
+model Tenant {
+  id             String          @id @default(uuid())
+  name           String
+  slug           String          @unique
+  legalName      String?
+  documentNumber String?
+  email          String?
+  phone          String?
+  status         TenantStatus    @default(TRIAL)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  subscriptions  Subscription[]
+  tenantUsers    TenantUser[]
+  roles          Role[]
+  teams          Team[]
+  teamMembers    TeamMember[]
+  projects       Project[]
+  projectMembers ProjectMember[]
+  projectViews   ProjectView[]
+  taskStatuses   TaskStatus[]
+  taskPriorities TaskPriority[]
+  tasks          Task[]
+  taskAssignees  TaskAssignee[]
+  taskTags       TaskTag[]
+  taskTagLinks   TaskTagLink[]
+  taskChecklists TaskChecklist[]
+  taskChecklistItems TaskChecklistItem[]
+  taskComments   TaskComment[]
+  attachments    Attachment[]
+  contacts       Contact[]
+  events         Event[]
+  eventAttendees EventAttendee[]
+  notifications  Notification[]
+  activityLogs   ActivityLog[]
+  auditLogs      AuditLog[]
+  usageCounters  UsageCounter[]
+  automations    Automation[]
+  customFields   CustomField[]
+  customFieldValues CustomFieldValue[]
+
+  @@map("tenants")
+}
+
+model Plan {
+  id            String         @id @default(uuid())
+  name          String
+  description   String?
+  maxUsers      Int?
+  maxProjects   Int?
+  maxStorageMb  Int?
+  monthlyPrice  Decimal?       @db.Decimal(10, 2)
+  annualPrice   Decimal?       @db.Decimal(10, 2)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id          String             @id @default(uuid())
+  tenantId    String
+  planId      String
+  status      SubscriptionStatus @default(TRIALING)
+  startedAt   DateTime?
+  expiresAt   DateTime?
+  trialEndsAt DateTime?
+  cancelledAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan        Plan               @relation(fields: [planId], references: [id])
+
+  @@index([tenantId])
+  @@index([planId])
+  @@map("subscriptions")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  avatarUrl    String?
+  phone        String?
+  isActive     Boolean       @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  tenantUsers  TenantUser[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model TenantUser {
+  id           String        @id @default(uuid())
+  tenantId     String
+  userId       String
+  roleId       String?
+  jobTitle     String?
+  department   String?
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         Role?         @relation(fields: [roleId], references: [id])
+
+  managedTeams Team[]        @relation("TeamManager")
+  teamMembers  TeamMember[]
+  ownedProjects Project[]    @relation("ProjectOwner")
+  projectMembers ProjectMember[]
+  createdViews ProjectView[]
+  assignedTasks Task[]       @relation("TaskAssignee")
+  reportedTasks Task[]       @relation("TaskReporter")
+  checklistDoneItems TaskChecklistItem[] @relation("ChecklistDoneBy")
+  comments     TaskComment[]
+  uploadedAttachments Attachment[]
+  createdEvents Event[]      @relation("EventCreator")
+  eventAttendees EventAttendee[]
+  notifications Notification[]
+  activityLogs ActivityLog[]
+  automations  Automation[]
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("tenant_users")
+}
+
+model Role {
+  id            String           @id @default(uuid())
+  tenantId      String?
+  name          String
+  description   String?
+  isSystemRole  Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  tenant        Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUsers   TenantUser[]
+  rolePermissions RolePermission[]
+
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model Permission {
+  id            String           @id @default(uuid())
+  code          String           @unique
+  name          String
+  description   String?
+  module        String?
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id            String       @id @default(uuid())
+  roleId        String
+  permissionId  String
+
+  role          Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    Permission   @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model Team {
+  id                   String        @id @default(uuid())
+  tenantId             String
+  name                 String
+  description          String?
+  managerTenantUserId  String?
+  color                String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  tenant               Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  manager              TenantUser?   @relation("TeamManager", fields: [managerTenantUserId], references: [id])
+  members              TeamMember[]
+  projects             Project[]
+  tasks                Task[]
+
+  @@index([tenantId])
+  @@index([managerTenantUserId])
+  @@map("teams")
+}
+
+model TeamMember {
+  id             String      @id @default(uuid())
+  tenantId       String
+  teamId         String
+  tenantUserId   String
+  createdAt      DateTime    @default(now())
+
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  team           Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tenantUser     TenantUser  @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, tenantUserId])
+  @@index([tenantId])
+  @@index([teamId])
+  @@index([tenantUserId])
+  @@map("team_members")
+}
+
+model Project {
+  id                  String          @id @default(uuid())
+  tenantId            String
+  name                String
+  code                String?
+  description         String?
+  status              ProjectStatus   @default(DRAFT)
+  priority            ProjectPriority @default(NORMAL)
+  ownerTenantUserId   String?
+  teamId              String?
+  startDate           DateTime?
+  dueDate             DateTime?
+  completedAt         DateTime?
+  progressPercent     Int             @default(0)
+  color               String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  archivedAt          DateTime?
+
+  tenant              Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner               TenantUser?     @relation("ProjectOwner", fields: [ownerTenantUserId], references: [id])
+  team                Team?           @relation(fields: [teamId], references: [id])
+  members             ProjectMember[]
+  views               ProjectView[]
+  tasks               Task[]
+  attachments         Attachment[]
+  events              Event[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([ownerTenantUserId])
+  @@index([teamId])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id             String      @id @default(uuid())
+  tenantId       String
+  projectId      String
+  tenantUserId   String
+  roleInProject  String?
+  createdAt      DateTime    @default(now())
+
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project        Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tenantUser     TenantUser  @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, tenantUserId])
+  @@index([tenantId])
+  @@index([projectId])
+  @@index([tenantUserId])
+  @@map("project_members")
+}
+
+model ProjectView {
+  id           String      @id @default(uuid())
+  tenantId     String
+  projectId    String
+  name         String
+  type         ViewType
+  configJson   Json?
+  createdById  String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy    TenantUser? @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([projectId])
+  @@map("project_views")
+}
+
+model TaskStatus {
+  id           String      @id @default(uuid())
+  tenantId     String
+  name         String
+  slug         String
+  color        String?
+  position     Int         @default(0)
+  category     String?
+  isDefault    Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tasks        Task[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, position])
+  @@map("task_statuses")
+}
+
+model TaskPriority {
+  id           String      @id @default(uuid())
+  tenantId     String
+  name         String
+  level        Int
+  color        String?
+  createdAt    DateTime    @default(now())
+
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tasks        Task[]
+
+  @@unique([tenantId, level])
+  @@index([tenantId])
+  @@map("task_priorities")
+}
+
+model Task {
+  id                    String        @id @default(uuid())
+  tenantId              String
+  projectId             String
+  parentTaskId          String?
+  title                 String
+  description           String?
+  statusId              String
+  priorityId            String?
+  assigneeTenantUserId  String?
+  reporterTenantUserId  String?
+  teamId                String?
+  startDate             DateTime?
+  dueDate               DateTime?
+  completedAt           DateTime?
+  estimatedMinutes      Int?
+  spentMinutes          Int?
+  storyPoints           Int?
+  kanbanPosition        Int?          @default(0)
+  sortOrder             Int           @default(0)
+  isBlocked             Boolean       @default(false)
+  blockedReason         String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  archivedAt            DateTime?
+
+  tenant                Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project               Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentTask            Task?         @relation("TaskHierarchy", fields: [parentTaskId], references: [id])
+  subtasks              Task[]        @relation("TaskHierarchy")
+  status                TaskStatus    @relation(fields: [statusId], references: [id])
+  priority              TaskPriority? @relation(fields: [priorityId], references: [id])
+  assignee              TenantUser?   @relation("TaskAssignee", fields: [assigneeTenantUserId], references: [id])
+  reporter              TenantUser?   @relation("TaskReporter", fields: [reporterTenantUserId], references: [id])
+  team                  Team?         @relation(fields: [teamId], references: [id])
+
+  assignees             TaskAssignee[]
+  tagLinks              TaskTagLink[]
+  checklists            TaskChecklist[]
+  comments              TaskComment[]
+  attachments           Attachment[]
+  relatedEvents         Event[]
+
+  @@index([tenantId])
+  @@index([tenantId, projectId])
+  @@index([tenantId, assigneeTenantUserId])
+  @@index([tenantId, statusId])
+  @@index([tenantId, dueDate])
+  @@index([tenantId, archivedAt])
+  @@map("tasks")
+}
+
+model TaskAssignee {
+  id             String      @id @default(uuid())
+  tenantId       String
+  taskId         String
+  tenantUserId   String
+  assignedAt     DateTime    @default(now())
+
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  task           Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tenantUser     TenantUser  @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, tenantUserId])
+  @@index([tenantId])
+  @@index([taskId])
+  @@index([tenantUserId])
+  @@map("task_assignees")
+}
+
+model TaskTag {
+  id           String        @id @default(uuid())
+  tenantId     String
+  name         String
+  color        String?
+  createdAt    DateTime      @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  taskLinks    TaskTagLink[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("task_tags")
+}
+
+model TaskTagLink {
+  id           String      @id @default(uuid())
+  tenantId     String
+  taskId       String
+  tagId        String
+
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  task         Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag          TaskTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, tagId])
+  @@index([tenantId])
+  @@index([taskId])
+  @@index([tagId])
+  @@map("task_tag_links")
+}
+
+model TaskChecklist {
+  id           String              @id @default(uuid())
+  tenantId     String
+  taskId       String
+  title        String
+  position     Int                 @default(0)
+  createdAt    DateTime            @default(now())
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  task         Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  items        TaskChecklistItem[]
+
+  @@index([tenantId])
+  @@index([taskId])
+  @@map("task_checklists")
+}
+
+model TaskChecklistItem {
+  id                    String      @id @default(uuid())
+  tenantId              String
+  checklistId           String
+  content               String
+  isDone                Boolean     @default(false)
+  doneByTenantUserId    String?
+  doneAt                DateTime?
+  position              Int         @default(0)
+  createdAt             DateTime    @default(now())
+
+  tenant                Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  checklist             TaskChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  doneBy                TenantUser? @relation("ChecklistDoneBy", fields: [doneByTenantUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([checklistId])
+  @@map("task_checklist_items")
+}
+
+model TaskComment {
+  id                  String      @id @default(uuid())
+  tenantId            String
+  taskId              String
+  authorTenantUserId  String
+  content             String
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  deletedAt           DateTime?
+
+  tenant              Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  task                Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author              TenantUser  @relation(fields: [authorTenantUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([taskId])
+  @@index([authorTenantUserId])
+  @@map("task_comments")
+}
+
+model Attachment {
+  id                        String      @id @default(uuid())
+  tenantId                  String
+  taskId                    String?
+  projectId                 String?
+  uploadedByTenantUserId    String
+  fileName                  String
+  filePath                  String
+  mimeType                  String?
+  fileSize                  Int?
+  createdAt                 DateTime    @default(now())
+
+  tenant                    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  task                      Task?       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project                   Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy                TenantUser  @relation(fields: [uploadedByTenantUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([taskId])
+  @@index([projectId])
+  @@map("attachments")
+}
+
+model Contact {
+  id           String      @id @default(uuid())
+  tenantId     String
+  name         String
+  company      String?
+  department   String?
+  role         String?
+  email        String?
+  phone        String?
+  mobile       String?
+  extension    String?
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("contacts")
+}
+
+model Event {
+  id                    String      @id @default(uuid())
+  tenantId              String
+  title                 String
+  description           String?
+  type                  EventType   @default(OTHER)
+  startAt               DateTime
+  endAt                 DateTime?
+  allDay                Boolean     @default(false)
+  createdByTenantUserId String
+  relatedProjectId      String?
+  relatedTaskId         String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  tenant                Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy             TenantUser  @relation("EventCreator", fields: [createdByTenantUserId], references: [id])
+  relatedProject        Project?    @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+  relatedTask           Task?       @relation(fields: [relatedTaskId], references: [id], onDelete: SetNull)
+  attendees             EventAttendee[]
+
+  @@index([tenantId])
+  @@index([startAt])
+  @@map("events")
+}
+
+model EventAttendee {
+  id             String                  @id @default(uuid())
+  tenantId       String
+  eventId        String
+  tenantUserId   String
+  responseStatus AttendeeResponseStatus  @default(PENDING)
+
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  event          Event                   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tenantUser     TenantUser              @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, tenantUserId])
+  @@index([tenantId])
+  @@index([eventId])
+  @@index([tenantUserId])
+  @@map("event_attendees")
+}
+
+model Notification {
+  id            String      @id @default(uuid())
+  tenantId      String
+  tenantUserId  String
+  type          String
+  title         String
+  message       String?
+  payloadJson   Json?
+  isRead        Boolean     @default(false)
+  readAt        DateTime?
+  createdAt     DateTime    @default(now())
+
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser    TenantUser  @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, tenantUserId, isRead])
+  @@map("notifications")
+}
+
+model ActivityLog {
+  id                String      @id @default(uuid())
+  tenantId          String
+  actorTenantUserId String?
+  entityType        String
+  entityId          String
+  action            String
+  oldValuesJson     Json?
+  newValuesJson     Json?
+  createdAt         DateTime    @default(now())
+
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor             TenantUser? @relation(fields: [actorTenantUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([entityType, entityId])
+  @@map("activity_logs")
+}
+
+model AuditLog {
+  id          String      @id @default(uuid())
+  tenantId    String
+  actorUserId String?
+  action      String
+  targetType  String
+  targetId    String?
+  ipAddress   String?
+  userAgent   String?
+  metadataJson Json?
+  createdAt   DateTime    @default(now())
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actorUser   User?       @relation(fields: [actorUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model UsageCounter {
+  id           String      @id @default(uuid())
+  tenantId     String
+  metricCode   String
+  currentValue Int         @default(0)
+  periodStart  DateTime?
+  periodEnd    DateTime?
+  updatedAt    DateTime    @updatedAt
+
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, metricCode])
+  @@index([tenantId])
+  @@map("usage_counters")
+}
+
+model Automation {
+  id                   String      @id @default(uuid())
+  tenantId             String
+  name                 String
+  description          String?
+  triggerType          String
+  conditionsJson       Json?
+  actionsJson          Json?
+  isActive             Boolean     @default(true)
+  createdByTenantUserId String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  tenant               Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy            TenantUser? @relation(fields: [createdByTenantUserId], references: [id])
+
+  @@index([tenantId])
+  @@map("automations")
+}
+
+model CustomField {
+  id           String                 @id @default(uuid())
+  tenantId     String
+  entityType   CustomFieldEntityType
+  name         String
+  fieldType    CustomFieldType
+  configJson   Json?
+  isRequired   Boolean                @default(false)
+  createdAt    DateTime               @default(now())
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  values       CustomFieldValue[]
+
+  @@index([tenantId])
+  @@map("custom_fields")
+}
+
+model CustomFieldValue {
+  id             String      @id @default(uuid())
+  tenantId       String
+  customFieldId  String
+  entityId       String
+  valueText      String?
+  valueNumber    Decimal?    @db.Decimal(18, 4)
+  valueDate      DateTime?
+  valueBoolean   Boolean?
+  valueJson      Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customField    CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([customFieldId])
+  @@index([entityId])
+  @@map("custom_field_values")
+}

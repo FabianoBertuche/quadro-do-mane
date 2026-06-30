@@ -1,0 +1,24 @@
+-- =============================================================================
+-- Cleanup periódico da denylist de tokens JWT
+-- =============================================================================
+-- A denylist de access tokens JWT vive na tabela `token_denylist` (criada
+-- pela migration 20260630150000_token_denylist). Cada linha tem um
+-- `expires_at` igual ao tempo de expiração natural do JWT (até 15m).
+--
+-- IMPORTANTE: Este banco é Render Postgres, que NÃO tem `pg_cron` nativo.
+-- O cleanup é feito por um endpoint HTTP exposto pela própria API:
+--   POST /admin/cleanup-denylist
+--   Header: X-Cleanup-Token: <CLEANUP_TOKEN>
+-- Esse endpoint deve ser chamado 1x/dia por um Cron Job externo
+-- (Render Cron Job, GitHub Actions schedule, EasyCron, etc.).
+--
+-- Se em algum momento você migrar para Supabase, habilite pg_cron e use
+-- o script abaixo (descomente):
+--
+--   CREATE EXTENSION IF NOT EXISTS pg_cron;
+--   SELECT cron.schedule(
+--     'cleanup_token_denylist',
+--     '13 3 * * *',
+--     $$DELETE FROM token_denylist WHERE expires_at < NOW();$$
+--   );
+-- =============================================================================

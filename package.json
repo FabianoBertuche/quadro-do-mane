@@ -1,0 +1,22 @@
+{
+  "name": "quadro-do-mane",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Quadro do Mané - SaaS Task Management Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build:api": "npm run build --workspace=apps/api",
+    "build:web": "npm run build --workspace=apps/web",
+    "db:migrate": "npm run migrate --workspace=apps/api",
+    "db:seed": "npm run seed --workspace=apps/api",
+    "db:generate": "npm run generate --workspace=apps/api"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.11"
+  }
+}

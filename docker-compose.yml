@@ -1,0 +1,23 @@
+# Sem a chave `version` no topo — está obsoleta no Docker Compose v2+.
+#
+# Em produção, recomenda-se usar o PostgreSQL gerenciado (Supabase, RDS etc.)
+# e remover este compose inteiro. Este arquivo serve apenas para dev local
+# espelhando o mínimo necessário: apenas Postgres (a denylist de JWT passou
+# a usar a tabela `token_denylist`; o Redis foi removido).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quadro-postgres
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: quadro_do_mane
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
