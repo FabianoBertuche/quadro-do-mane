@@ -1,0 +1,14 @@
+node_modules
+.next
+dist
+.env
+.env.local
+.env.*.local
+.git
+.gitignore
+.turbo
+coverage
+*.tgz
+*.log
+*.tsbuildinfo
+tsbuildinfo

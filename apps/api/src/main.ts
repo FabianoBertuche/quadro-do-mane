@@ -44,14 +44,21 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);
 
+  // Health check endpoint (for Render.com health checks)
+  const httpApp = app.getHttpAdapter().getInstance();
+  httpApp.get('/health', (_req: any, res: any) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
   // Força inicialização do EncryptionService para falhar rápido se a chave estiver errada
   app.get(EncryptionService);
 
-  const port = config.get<number>('API_PORT', 3001);
-  await app.listen(port);
+  // Render assigns a random PORT; fallback to API_PORT for local dev
+  const port = Number(process.env.PORT) || config.get<number>('API_PORT', 3001);
+  await app.listen(port, '0.0.0.0');
   // eslint-disable-next-line no-console
-  console.log(`🚀 API running on http://localhost:${port}/api`);
+  console.log(`🚀 API running on http://0.0.0.0:${port}/api`);
   // eslint-disable-next-line no-console
-  console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
+  console.log(`📚 Swagger docs: http://0.0.0.0:${port}/api/docs`);
 }
 bootstrap();
