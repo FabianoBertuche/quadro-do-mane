@@ -10,6 +10,7 @@
   "scripts": {
     "setup": "node scripts/generate-env.js",
     "start": "node scripts/start-all.js",
+    "dev": "node scripts/dev-all.js",
     "regen-keys": "node scripts/regenerate-secrets.js",
     "kill-port": "node scripts/kill-port.js",
     "dev:api": "npm run dev --workspace=apps/api",
