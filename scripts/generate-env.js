@@ -1,30 +1,50 @@
-#!/usr/bin/env python3
-"""Gera .env com secrets fortes para Quadro do Mané."""
-import secrets
-from pathlib import Path
+#!/usr/bin/env node
+/**
+ * Generate .env file with strong secrets for Quadro do Mané.
+ * Usage: node scripts/generate-env.js [--force]
+ */
 
-env_path = Path(".env")
+'use strict';
 
-# Secrets de 64 bytes hex (>= 32 bytes exigidos pela validação)
-JWT_SECRET = secrets.token_hex(64)
-JWT_REFRESH_SECRET = secrets.token_hex(64)
-# Encryption key de 32 bytes hex
-ENCRYPTION_KEY = secrets.token_hex(32)
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-content = f"""# Quadro do Mané — variáveis de ambiente (geradas em {__import__('datetime').datetime.utcnow().isoformat()}Z)
+// Parse CLI arguments
+const args = process.argv.slice(2);
+const force = args.includes('--force') || args.includes('-f');
+
+// Paths
+const rootDir = process.cwd();
+const envPath = path.join(rootDir, '.env');
+
+// Guard: if .env already exists and --force not set, exit early
+if (fs.existsSync(envPath) && !force) {
+  console.log('.env already exists. Use --force to overwrite.');
+  process.exit(0);
+}
+
+// Generate secrets (same lengths as Python version)
+const JWT_SECRET = crypto.randomBytes(64).toString('hex');
+const JWT_REFRESH_SECRET = crypto.randomBytes(64).toString('hex');
+const ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
+
+// Build .env content
+const timestamp = new Date().toISOString().replace('Z', '');
+const content = `# Quadro do Mané — variáveis de ambiente (geradas em ${timestamp}Z)
 # NÃO versionar este arquivo. Mantenha fora do git.
 
 # ─── Database ─────────────────────────────────────────────────────────────
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/quadro_do_mane?schema=public"
 
 # ─── JWT ─────────────────────────────────────────────────────────────────
-JWT_SECRET="{JWT_SECRET}"
+JWT_SECRET="${JWT_SECRET}"
 JWT_EXPIRES_IN="15m"
-JWT_REFRESH_SECRET="{JWT_REFRESH_SECRET}"
+JWT_REFRESH_SECRET="${JWT_REFRESH_SECRET}"
 JWT_REFRESH_EXPIRES_IN="7d"
 
 # ─── Encryption (AES-256-GCM) ─────────────────────────────────────────────
-ENCRYPTION_KEY="{ENCRYPTION_KEY}"
+ENCRYPTION_KEY="${ENCRYPTION_KEY}"
 
 # ─── API ─────────────────────────────────────────────────────────────────
 API_PORT=3001
@@ -54,7 +74,13 @@ BCRYPT_ROUNDS=12
 # ─── Seed ────────────────────────────────────────────────────────────────
 SEED_ADMIN_EMAIL=admin@quadrodomane.local
 SEED_ADMIN_PASSWORD="AlterarNoPrimeiroLogin123!"
-"""
+`;
 
-env_path.write_text(content, encoding="utf-8")
-print(f"OK: .env gerado com secrets de {len(JWT_SECRET)} chars cada")
+// Write .env
+try {
+  fs.writeFileSync(envPath, content, 'utf-8');
+  console.log(`OK: .env generated with secrets of ${JWT_SECRET.length} chars each`);
+} catch (error) {
+  console.error('Failed to write .env:', error.message);
+  process.exit(1);
+}

@@ -8,6 +8,10 @@
     "packages/*"
   ],
   "scripts": {
+    "setup": "node scripts/generate-env.js",
+    "start": "node scripts/start-all.js",
+    "regen-keys": "node scripts/regenerate-secrets.js",
+    "kill-port": "node scripts/kill-port.js",
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
     "build:api": "npm run build --workspace=apps/api",
