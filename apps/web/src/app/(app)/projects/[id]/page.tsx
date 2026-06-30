@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 
 export default function ProjectDetailPage() {
   const params = useParams();
+  const id = params?.id as string | undefined;
   const queryClient = useQueryClient();
 
   const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
@@ -17,11 +18,12 @@ export default function ProjectDetailPage() {
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [selectedUserId, setSelectedUserId] = useState('');
   const { data: project, isLoading } = useQuery({
-    queryKey: ['project', params.id],
-    queryFn: () => api.get(`/projects/${params.id}`).then((r) => {
+    queryKey: ['project', id],
+    queryFn: () => api.get(`/projects/${id}`).then((r) => {
       setSelectedTeamId(r.data.teamId || '');
       return r.data;
     }),
+    enabled: !!id,
   });
 
   const { data: teams } = useQuery({
@@ -35,25 +37,25 @@ export default function ProjectDetailPage() {
   });
 
   const updateTeamMutation = useMutation({
-    mutationFn: (teamId: string) => api.patch(`/projects/${params.id}`, { teamId: teamId || null }),
+    mutationFn: (teamId: string) => api.patch(`/projects/${id}`, { teamId: teamId || null }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['project', params.id] });
+      queryClient.invalidateQueries({ queryKey: ['project', id] });
       setIsTeamModalOpen(false);
     },
   });
 
   const addMemberMutation = useMutation({
-    mutationFn: (tenantUserId: string) => api.post(`/projects/${params.id}/members`, { tenantUserId }),
+    mutationFn: (tenantUserId: string) => api.post(`/projects/${id}/members`, { tenantUserId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['project', params.id] });
+      queryClient.invalidateQueries({ queryKey: ['project', id] });
       setIsMemberModalOpen(false);
       setSelectedUserId('');
     },
   });
 
   const removeMemberMutation = useMutation({
-    mutationFn: (tenantUserId: string) => api.delete(`/projects/${params.id}/members/${tenantUserId}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', params.id] }),
+    mutationFn: (tenantUserId: string) => api.delete(`/projects/${id}/members/${tenantUserId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', id] }),
   });
 
   if (isLoading) return <div className="animate-pulse h-96 rounded-2xl bg-muted" />;

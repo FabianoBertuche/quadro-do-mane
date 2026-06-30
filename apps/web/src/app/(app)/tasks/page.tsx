@@ -10,7 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 export default function TasksPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const projectId = searchParams.get('projectId');
+  const projectId = searchParams?.get('projectId') ?? null;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState({

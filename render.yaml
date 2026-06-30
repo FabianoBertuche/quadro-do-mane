@@ -12,14 +12,8 @@ services:
     healthCheckPath: /health
     autoDeploy: true
 
-    buildCommand: >
-      npm install &&
-      cd apps/api &&
-      npx prisma generate &&
-      npx prisma migrate deploy &&
-      cd ../.. &&
-      npm run build:api
-
+    installCommand: npm install
+    buildCommand: cd apps/api && npx prisma generate && npx prisma migrate deploy && cd ../.. && npm run build:api
     startCommand: npm run start:prod --workspace=apps/api
 
     envVars:
@@ -70,7 +64,8 @@ services:
     healthCheckPath: /
     autoDeploy: true
 
-    buildCommand: npm install && npm run build:web
+    installCommand: npm install
+    buildCommand: npm run build:web
     startCommand: npm run start --workspace=apps/web
 
     envVars:

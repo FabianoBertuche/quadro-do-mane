@@ -88,7 +88,7 @@ function TaskCard({ task, isDragging, onClick }: { task: any; isDragging?: boole
 export default function KanbanPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const projectId = searchParams.get('projectId');
+  const projectId = searchParams?.get('projectId') ?? null;
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
 
