@@ -13,8 +13,8 @@ services:
     autoDeploy: true
 
     installCommand: npm install
-    buildCommand: cd apps/api && npx prisma generate && npx nest build
-    startCommand: cd apps/api && npx prisma migrate deploy && node dist/main
+    buildCommand: cd apps/api && npx prisma generate && npx nest build && ls dist/
+    startCommand: cd apps/api && npx prisma migrate deploy && node dist/main.js
 
     envVars:
       - key: NODE_ENV
