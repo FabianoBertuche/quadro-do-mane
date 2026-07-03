@@ -64,7 +64,7 @@ services:
     healthCheckPath: /
     autoDeploy: true
 
-    installCommand: npm install
+    installCommand: npm install && rm -f apps/web/package-lock.json
     buildCommand: cd apps/web && npx next build
     startCommand: cd apps/web && npx next start
 
