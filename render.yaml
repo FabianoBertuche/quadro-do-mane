@@ -65,7 +65,7 @@ services:
     autoDeploy: true
 
     installCommand: npm install
-    buildCommand: cd apps/web && npx next build --no-turbopack
+    buildCommand: cd apps/web && npx next build
     startCommand: cd apps/web && npx next start
 
     envVars:
