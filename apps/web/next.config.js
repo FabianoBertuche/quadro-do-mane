@@ -2,9 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['utils', 'ui'],
-  turbopack: {
-    root: '../..',
-  },
   // Proxy é feito via src/pages/api/[...path].ts (preserva Set-Cookie)
 };
 
