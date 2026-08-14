@@ -61,7 +61,7 @@ services:
       NODE_ENV: production
     depends_on:
       - postgres
-    entrypoint: ["sh","-c","npx prisma migrate deploy --schema=prisma/schema.prisma && npm run seed"]
+    entrypoint: ["sh","-c","npx prisma generate --schema=prisma/schema.prisma && npx prisma migrate deploy --schema=prisma/schema.prisma && npm run seed"]
     restart: 'no'
 
   web:
