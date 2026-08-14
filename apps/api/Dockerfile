@@ -3,7 +3,8 @@ WORKDIR /usr/src/app
 
 # install deps (including dev) for build
 COPY package*.json ./
-RUN npm ci
+# Use `npm install` to allow installs when package-lock.json is missing
+RUN npm install
 
 # copy source and build
 COPY . .
@@ -16,7 +17,8 @@ ENV NODE_ENV=production
 
 # install only production deps
 COPY package*.json ./
-RUN npm ci --only=production
+# Use `npm install --omit=dev` when no lockfile is present
+RUN npm install --omit=dev
 
 # copy built app and production node_modules
 COPY --from=builder /usr/src/app/dist ./dist
