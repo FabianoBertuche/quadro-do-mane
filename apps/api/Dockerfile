@@ -15,6 +15,11 @@ FROM node:20-bullseye-slim
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 
+# Ensure OpenSSL / libssl are available for Prisma query engine
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends openssl ca-certificates libssl1.1 \
+	&& rm -rf /var/lib/apt/lists/*
+
 # install only production deps
 COPY package*.json ./
 # Use `npm install --omit=dev` when no lockfile is present
