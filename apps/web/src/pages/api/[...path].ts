@@ -38,6 +38,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   const opts: http.RequestOptions = {
     method: req.method,
     headers,
+    timeout: 15_000,
   };
 
   const chunks: Buffer[] = [];
@@ -81,6 +82,23 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       console.error(`[api-proxy] error proxying ${req.method} ${req.url}:`, err);
       if (!res.headersSent) {
         res.status(502).json({ message: 'Backend indisponível', error: err.message });
+      } else {
+        res.end();
+      }
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy(new Error('Proxy request timeout'));
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error(`[api-proxy] error proxying ${req.method} ${req.url}:`, err);
+      if (!res.headersSent) {
+        if (err.message === 'Proxy request timeout') {
+          res.status(504).json({ message: 'Tempo de conexão esgotou ao contatar o backend' });
+        } else {
+          res.status(502).json({ message: 'Backend indisponível', error: err.message });
+        }
       } else {
         res.end();
       }

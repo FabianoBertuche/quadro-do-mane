@@ -16,7 +16,7 @@ const path = require('path');
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-Quadro do Mané — Dev Mode
+Monte Moria — Dev Mode
 
 Usage: node scripts/dev-all.js
 

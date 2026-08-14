@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - --providers.docker=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.email=${TRAEFIK_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-quadro_do_mane}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  api:
+    build: ./apps/api
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      NODE_ENV: production
+      API_PORT: ${API_PORT:-3001}
+      # JWT_SECRET, JWT_REFRESH_SECRET and ENCRYPTION_KEY should be set in an external .env
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`${HOST_API}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=le"
+      - "traefik.http.services.api.loadbalancer.server.port=3001"
+    restart: unless-stopped
+
+  migrate:
+    build: ./apps/api
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      NODE_ENV: production
+    depends_on:
+      - postgres
+    entrypoint: ["sh","-c","npx prisma migrate deploy --schema=prisma/schema.prisma && npm run seed"]
+    restart: 'no'
+
+  web:
+    build: ./apps/web
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    depends_on:
+      - api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`${HOST_WEB}`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls.certresolver=le"
+      - "traefik.http.services.web.loadbalancer.server.port=3000"
+    restart: unless-stopped
+
+  code-server:
+    image: coder/code-server:latest
+    environment:
+      PASSWORD: ${CODE_SERVER_PASSWORD}
+      TZ: UTC
+    volumes:
+      - ./:/home/coder/project
+      - code_server_config:/config
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.code.rule=Host(`${HOST_EDITOR}`)"
+      - "traefik.http.routers.code.entrypoints=websecure"
+      - "traefik.http.routers.code.tls.certresolver=le"
+      - "traefik.http.services.code.loadbalancer.server.port=8080"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  traefik_letsencrypt:

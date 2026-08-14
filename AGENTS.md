@@ -1,4 +1,4 @@
-# Quadro do Mané
+# Monte Moria
 
 @agent google-antigravity
 @mode vibe-coding

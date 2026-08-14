@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate .env file with strong secrets for Quadro do Mané.
+ * Generate .env file with strong secrets for Monte Moria.
  * Usage: node scripts/generate-env.js [--force]
  */
 

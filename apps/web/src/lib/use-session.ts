@@ -101,3 +101,55 @@ export function useSession() {
 
   return { hydrated };
 }
+
+// Background refresh: tenta renovar sessão periodicamente para evitar logout
+// silencioso por inatividade. Intervalo padrão 12 horas.
+export function useBackgroundRefresh(intervalMs = 1000 * 60 * 60 * 12) {
+  const hydrated = useAuthStore((s) => s.hydrated);
+  const setSession = useAuthStore((s) => s.setSession);
+  const clearSession = useAuthStore((s) => s.clearSession);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    let timer: any = null;
+
+    async function doRefresh() {
+      try {
+        const res = await api.post('/auth/refresh', {});
+        if (cancelled) return;
+        if (res.data?.accessToken) {
+          setSession({
+            accessToken: res.data.accessToken,
+            refreshToken: res.data.refreshToken ?? useAuthStore.getState().refreshToken,
+          });
+        }
+      } catch (err) {
+        // Se falhar, tenta novamente uma vez após 30s antes de limpar sessão
+        try {
+          await new Promise((r) => setTimeout(r, 30000));
+          const retry = await api.post('/auth/refresh', {});
+          if (cancelled) return;
+          if (retry.data?.accessToken) {
+            setSession({
+              accessToken: retry.data.accessToken,
+              refreshToken: retry.data.refreshToken ?? useAuthStore.getState().refreshToken,
+            });
+            return;
+          }
+        } catch {
+          if (!cancelled) clearSession();
+        }
+      }
+    }
+
+    // Dispara imediatamente e agenda o próximo
+    doRefresh();
+    timer = setInterval(doRefresh, intervalMs);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [hydrated, intervalMs, setSession, clearSession]);
+}

@@ -55,7 +55,15 @@ export function middleware(req: NextRequest) {
   }
 
   const access = req.cookies.get(ACCESS_COOKIE)?.value;
+  // Bypass curto: se o cliente acabou de logar, um cookie não-HttpOnly
+  // `qd_client_auth` pode ser definido para permitir navegação imediata
+  // sem exigir refresh da página. Tem validade curta e é apenas um auxílio
+  // enquanto o backend configura os cookies HttpOnly.
+  const clientBypass = req.cookies.get('qd_client_auth')?.value;
   if (!access) {
+    if (clientBypass === '1') {
+      return NextResponse.next();
+    }
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('next', pathname);
     return NextResponse.redirect(loginUrl);

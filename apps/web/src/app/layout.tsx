@@ -6,7 +6,7 @@ import { QueryProvider } from '@/providers/query-provider';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Quadro do Mané',
+  title: 'Monte Moria',
   description: 'Sistema de gestão de tarefas e projetos corporativos',
 };
 

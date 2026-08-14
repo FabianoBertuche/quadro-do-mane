@@ -1,0 +1,12 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^npx ts-node \\.\\./\\.\\./check_admin_user\\.ts$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^npx ts-node \\.\\./\\.\\./fix_admin_account\\.ts$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

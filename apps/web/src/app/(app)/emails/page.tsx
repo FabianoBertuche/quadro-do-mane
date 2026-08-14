@@ -182,7 +182,7 @@ export default function EmailsPage() {
               O servidor {snapshot.server?.imapHost} já está configurado pelo
               administrador. Agora você precisa informar a sua senha pessoal
               (a mesma que você usa no seu cliente de e-mail) para que o
-              Quadro do Mané consiga abrir sua caixa de correio.
+              Monte Moria consiga abrir sua caixa de correio.
             </p>
             <Link
               href="/profile"

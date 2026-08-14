@@ -1,4 +1,15 @@
 node_modules
+.git
+.env
+.env.*
+.DS_Store
+logs
+dist
+coverage
+tmp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*node_modules
 .next
 dist
 .env

@@ -63,14 +63,14 @@ async function main() {
   // TENANT
   // ==========================================
   const tenant = await prisma.tenant.upsert({
-    where: { slug: 'quadro-do-mane-demo' },
+    where: { slug: 'monte-moria-demo' },
     update: {},
     create: {
-      name: 'Quadro do Mané Demo',
-      slug: 'quadro-do-mane-demo',
-      legalName: 'Quadro do Mané Demo LTDA',
+      name: 'Monte Moria Demo',
+      slug: 'monte-moria-demo',
+      legalName: 'Monte Moria Demo LTDA',
       documentNumber: '00.000.000/0001-00',
-      email: 'admin@quadrodomane.local',
+      email: 'admin@montemoria.local',
       phone: '+55 19 99999-9999',
       status: 'ACTIVE',
     },
@@ -265,7 +265,7 @@ async function main() {
   // ==========================================
   // ADMIN USER
   // ==========================================
-  const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@quadrodomane.local';
+  const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@montemoria.com.br';
   const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'AlterarNoPrimeiroLogin123!';
   const hashedPassword = await bcrypt.hash(adminPassword, BCRYPT_ROUNDS);
 

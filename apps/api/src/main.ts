@@ -8,6 +8,8 @@ import { EncryptionService } from './common/crypto/encryption.service';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.enableShutdownHooks();
+
   // Global prefix
   app.setGlobalPrefix('api');
 
@@ -36,7 +38,7 @@ async function bootstrap() {
 
   // Swagger
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Quadro do Mané API')
+    .setTitle('Monte Moria API')
     .setDescription('SaaS Task Management Platform API')
     .setVersion('1.0')
     .addBearerAuth()
@@ -61,4 +63,20 @@ async function bootstrap() {
   // eslint-disable-next-line no-console
   console.log(`📚 Swagger docs: http://0.0.0.0:${port}/api/docs`);
 }
-bootstrap();
+
+process.on('unhandledRejection', (reason, promise) => {
+  // eslint-disable-next-line no-console
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  // eslint-disable-next-line no-console
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+bootstrap().catch((error) => {
+  // eslint-disable-next-line no-console
+  console.error('Failed to bootstrap application:', error);
+  process.exit(1);
+});

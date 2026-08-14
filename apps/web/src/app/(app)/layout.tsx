@@ -3,11 +3,13 @@
 import { usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
-import { useSession } from '@/lib/use-session';
+import { useSession, useBackgroundRefresh } from '@/lib/use-session';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '';
   const { hydrated } = useSession();
+  // Mantém sessão ativa com refresh periódico
+  useBackgroundRefresh();
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

@@ -35,56 +35,81 @@ export class DashboardService {
   }
 
   async getWorkload(tenantId: string) {
-    const assignees = await this.prisma.task.groupBy({
+    const assigneeCounts = await this.prisma.task.groupBy({
       by: ['assigneeTenantUserId'],
-      where: { tenantId, archivedAt: null, completedAt: null },
+      where: {
+        tenantId,
+        archivedAt: null,
+        completedAt: null,
+        assigneeTenantUserId: { not: null },
+      },
       _count: { id: true },
     });
 
-    const result = [];
-    for (const item of assignees) {
-      if (!item.assigneeTenantUserId) continue;
-      const tenantUser = await this.prisma.tenantUser.findUnique({
-        where: { id: item.assigneeTenantUserId },
-        include: { user: { select: { name: true, avatarUrl: true } } },
-      });
-      result.push({
-        tenantUserId: item.assigneeTenantUserId,
-        name: tenantUser?.user?.name || 'Sem nome',
-        avatarUrl: tenantUser?.user?.avatarUrl,
-        taskCount: item._count.id,
-      });
+    const tenantUserIds = assigneeCounts
+      .map((item) => item.assigneeTenantUserId)
+      .filter((id): id is string => Boolean(id));
+
+    if (tenantUserIds.length === 0) {
+      return [];
     }
 
-    return result.sort((a, b) => b.taskCount - a.taskCount);
+    const tenantUsers = await this.prisma.tenantUser.findMany({
+      where: { id: { in: tenantUserIds } },
+      include: { user: { select: { name: true, avatarUrl: true } } },
+    });
+
+    const userMap = new Map(tenantUsers.map((tenantUser) => [tenantUser.id, tenantUser]));
+
+    return assigneeCounts
+      .map((item) => {
+        const tenantUser = item.assigneeTenantUserId
+          ? userMap.get(item.assigneeTenantUserId)
+          : undefined;
+
+        return {
+          tenantUserId: item.assigneeTenantUserId ?? 'unknown',
+          name: tenantUser?.user?.name ?? 'Sem nome',
+          avatarUrl: tenantUser?.user?.avatarUrl,
+          taskCount: item._count.id,
+        };
+      })
+      .sort((a, b) => b.taskCount - a.taskCount);
   }
 
   async getProductivity(tenantId: string) {
-    const now = new Date();
-    const weekData = [];
+    const weekData = await this.prisma.$queryRaw<Array<{ date: string; completed: number; created: number }>>`
+      SELECT
+        to_char(day, 'YYYY-MM-DD') AS date,
+        COALESCE(completed.count, 0) AS completed,
+        COALESCE(created.count, 0) AS created
+      FROM generate_series(
+        date_trunc('day', now() - interval '6 day'),
+        date_trunc('day', now()),
+        interval '1 day'
+      ) AS day
+      LEFT JOIN (
+        SELECT date_trunc('day', completed_at) AS day, COUNT(*) AS count
+        FROM "Task"
+        WHERE tenant_id = ${tenantId} AND completed_at IS NOT NULL
+          AND completed_at >= now() - interval '6 day'
+        GROUP BY date_trunc('day', completed_at)
+      ) AS completed ON completed.day = day
+      LEFT JOIN (
+        SELECT date_trunc('day', created_at) AS day, COUNT(*) AS count
+        FROM "Task"
+        WHERE tenant_id = ${tenantId}
+          AND created_at >= now() - interval '6 day'
+        GROUP BY date_trunc('day', created_at)
+      ) AS created ON created.day = day
+      ORDER BY day ASC;
+    `;
 
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-      const dayStart = new Date(date.setHours(0, 0, 0, 0));
-      const dayEnd = new Date(date.setHours(23, 59, 59, 999));
-
-      const completed = await this.prisma.task.count({
-        where: { tenantId, completedAt: { gte: dayStart, lte: dayEnd } },
-      });
-
-      const created = await this.prisma.task.count({
-        where: { tenantId, createdAt: { gte: dayStart, lte: dayEnd } },
-      });
-
-      weekData.push({
-        date: dayStart.toISOString().split('T')[0],
-        completed,
-        created,
-      });
-    }
-
-    return weekData;
+    return weekData.map((item) => ({
+      date: item.date,
+      completed: Number(item.completed),
+      created: Number(item.created),
+    }));
   }
 
   async getProjectProgress(tenantId: string) {
@@ -102,16 +127,21 @@ export class DashboardService {
       orderBy: { updatedAt: 'desc' },
     });
 
-    const result = [];
-    for (const project of projects) {
-      const completedTasks = await this.prisma.task.count({
-        where: { projectId: project.id, tenantId, status: { category: 'done' } },
-      });
+    const completedCounts = await this.prisma.task.groupBy({
+      by: ['projectId'],
+      where: { tenantId, status: { category: 'done' }, projectId: { in: projects.map((project) => project.id) } },
+      _count: { id: true },
+    });
+
+    const completedMap = new Map(completedCounts.map((item) => [item.projectId, item._count.id]));
+
+    return projects.map((project) => {
+      const completedTasks = completedMap.get(project.id) ?? 0;
       const progress = project._count.tasks > 0
         ? Math.round((completedTasks / project._count.tasks) * 100)
         : 0;
 
-      result.push({
+      return {
         id: project.id,
         name: project.name,
         code: project.code,
@@ -119,9 +149,7 @@ export class DashboardService {
         totalTasks: project._count.tasks,
         completedTasks,
         progress,
-      });
-    }
-
-    return result;
+      };
+    });
   }
 }

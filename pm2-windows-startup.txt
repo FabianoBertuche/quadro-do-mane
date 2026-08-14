@@ -1,0 +1,8 @@
+Este projeto usa PM2 no Windows. Para ativar o startup automático, execute:
+
+npx pm2-startup install
+npx pm2 save
+
+Se quiser remover o autostart:
+
+npx pm2-startup uninstall

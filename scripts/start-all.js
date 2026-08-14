@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bootstrap and start Quadro do Mané (cross-platform).
+ * Bootstrap and start Monte Moria (cross-platform).
  * Usage: node scripts/start-all.js [--help]
  */
 
@@ -14,7 +14,7 @@ const fs = require('fs');
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-Quadro do Mané — Bootstrap + Start
+Monte Moria — Bootstrap + Start
 
 Usage: node scripts/start-all.js
 
@@ -64,7 +64,7 @@ function sleep(ms) {
 // Main async function
 async function main() {
   console.log('================================================');
-  console.log('  Quadro do Mané — Bootstrap + Start');
+  console.log('  Monte Moria — Bootstrap + Start');
   console.log('================================================');
 
   // 1. Generate .env if missing
@@ -125,7 +125,7 @@ async function main() {
   console.log('  Web:    http://localhost:3000');
   console.log('');
   console.log('  Default login:');
-  console.log('    Email:    admin@quadrodomane.local');
+  console.log('    Email:    admin@montemoria.local');
   console.log('    Password: AlterarNoPrimeiroLogin123!');
   console.log('');
   console.log(`  PIDs: API=${apiPid}, Web=${webPid}`);

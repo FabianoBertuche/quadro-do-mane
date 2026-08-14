@@ -13,7 +13,7 @@ services:
     ports:
       - '5432:5432'
     environment:
-      POSTGRES_DB: quadro_do_mane
+      POSTGRES_DB: monte_moria
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     volumes:

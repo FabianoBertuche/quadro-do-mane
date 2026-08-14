@@ -64,8 +64,10 @@ export const useAuthStore = create<AuthState>()(
           hydrated: data.hydrated ?? true,
         })),
 
-      clearSession: () =>
-        set({
+      clearSession: () => {
+        localStorage.removeItem('qd_last_email');
+        localStorage.removeItem('qd_last_password');
+        return set({
           accessToken: null,
           refreshToken: null,
           user: null,
@@ -73,16 +75,18 @@ export const useAuthStore = create<AuthState>()(
           permissions: [],
           role: null,
           hydrated: true,
-        }),
+        });
+      },
 
       isAuthenticated: () => !!get().user,
     }),
     {
-      name: 'quadro-auth-dev',
+      // Persistir sessão em localStorage para manter usuário logado por mais tempo
+      name: 'quadro-auth',
       storage: createJSONStorage(() =>
         typeof window === 'undefined'
           ? ({ getItem: () => null, setItem: () => {}, removeItem: () => {} } as any)
-          : window.sessionStorage,
+          : window.localStorage,
       ),
       partialize: (state) => ({
         accessToken: state.accessToken,
