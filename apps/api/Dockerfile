@@ -1,4 +1,4 @@
-FROM node:18-bullseye-slim AS builder
+FROM node:20-bullseye-slim AS builder
 WORKDIR /usr/src/app
 
 # install deps (including dev) for build
@@ -11,7 +11,7 @@ COPY . .
 RUN npx prisma generate --schema=prisma/schema.prisma || true
 RUN npm run build
 
-FROM node:18-bullseye-slim
+FROM node:20-bullseye-slim
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 
