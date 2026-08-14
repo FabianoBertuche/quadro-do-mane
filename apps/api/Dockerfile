@@ -3,12 +3,13 @@ WORKDIR /usr/src/app
 
 # install deps (including dev) for build
 COPY package*.json ./
-# Use `npm install` to allow installs when package-lock.json is missing
-RUN npm install
+# Prefer `npm ci` when a lockfile is present for reproducible builds
+RUN npm ci || npm install
 
 # copy source and build
 COPY . .
-RUN npx prisma generate --schema=prisma/schema.prisma || true
+# Generate Prisma Client during the build (must succeed to include correct engines)
+RUN npx prisma generate --schema=prisma/schema.prisma
 RUN npm run build
 
 FROM node:20-bullseye-slim

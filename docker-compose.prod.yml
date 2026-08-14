@@ -28,6 +28,7 @@ services:
 
   api:
     build: ./apps/api
+    image: quadro-do-mane_api:latest
     env_file: .env
     environment:
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/quadro_do_mane?schema=public"
@@ -54,14 +55,14 @@ services:
     restart: unless-stopped
 
   migrate:
-    build: ./apps/api
+    image: quadro-do-mane_api:latest
     env_file: .env
     environment:
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/quadro_do_mane?schema=public"
       NODE_ENV: production
     depends_on:
       - postgres
-    entrypoint: ["sh","-c","npx prisma generate --schema=prisma/schema.prisma && npx prisma migrate deploy --schema=prisma/schema.prisma && npm run seed"]
+    entrypoint: ["sh","-c","npx prisma migrate deploy --schema=prisma/schema.prisma && npm run seed"]
     restart: 'no'
 
   web:
@@ -80,23 +81,9 @@ services:
       - "traefik.http.services.web.loadbalancer.server.port=3000"
     restart: unless-stopped
 
-  code-server:
-    image: coder/code-server:latest
-    environment:
-      PASSWORD: ${CODE_SERVER_PASSWORD}
-      TZ: UTC
-    volumes:
-      - ./:/home/coder/project
-      - code_server_config:/config
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.code.rule=Host(`${HOST_EDITOR}`)"
-      - "traefik.http.routers.code.entrypoints=websecure"
-      - "traefik.http.routers.code.tls.certresolver=le"
-      - "traefik.http.services.code.loadbalancer.server.port=8080"
-    restart: unless-stopped
+  # code-server removed for production
 
 volumes:
   postgres_data:
   traefik_letsencrypt:
-  code_server_config:
+  # code_server_config removed
