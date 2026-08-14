@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  # Force generation of engines compatible with Debian / glibc
+  // Force generation of engines compatible with Debian / glibc
   binaryTargets = ["debian-openssl-1.1.x", "native"]
 }
 
