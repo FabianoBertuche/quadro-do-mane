@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["debian-openssl-1.1.x", "native"]
 }
 
 datasource db {
@@ -83,6 +84,8 @@ model Tenant {
   emailSettings       EmailSetting[]
   emailTenantSettings EmailTenantSetting[]
   refreshTokens       RefreshToken[]
+  dailyRoutineItems   DailyRoutineItem[]
+  dailyRoutineLogs    DailyRoutineLog[]
 
   @@map("tenants")
 }
@@ -123,6 +126,9 @@ model TenantUser {
 
   emailSettings              EmailSetting[]
   emailTenantSettingsUpdated EmailTenantSetting[] @relation("EmailTenantSettingUpdater")
+  assignedRoutineItems       DailyRoutineItem[]   @relation("AssignedRoutineUser")
+  createdRoutineItems        DailyRoutineItem[]   @relation("CreatedRoutineUser")
+  dailyRoutineLogs           DailyRoutineLog[]
 
   @@unique([tenantId, userId])
   @@map("tenant_users")
@@ -710,8 +716,10 @@ enum ProjectViewType {
 enum SubscriptionStatus {
   ACTIVE
   TRIAL
+  TRIALING
   EXPIRED
   CANCELLED
+  PAST_DUE
 }
 
 model RefreshToken {
@@ -769,4 +777,49 @@ model TokenDenylist {
   @@index([expiresAt])
   @@index([userId])
   @@map("token_denylist")
+}
+
+model DailyRoutineItem {
+  id                   String            @id @default(uuid())
+  tenantId             String            @map("tenant_id")
+  assignedTenantUserId String            @map("assigned_tenant_user_id")
+  createdById          String            @map("created_by_id")
+  title                String
+  description          String?
+  scheduledTime        String?           @map("scheduled_time")
+  isActive             Boolean           @default(true) @map("is_active")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+
+  tenant               Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedTenantUser   TenantUser        @relation("AssignedRoutineUser", fields: [assignedTenantUserId], references: [id], onDelete: Cascade)
+  createdByTenantUser  TenantUser        @relation("CreatedRoutineUser", fields: [createdById], references: [id], onDelete: Cascade)
+  logs                 DailyRoutineLog[]
+
+  @@index([tenantId])
+  @@index([assignedTenantUserId])
+  @@index([createdById])
+  @@map("daily_routine_items")
+}
+
+model DailyRoutineLog {
+  id             String           @id @default(uuid())
+  tenantId       String           @map("tenant_id")
+  routineItemId  String           @map("routine_item_id")
+  tenantUserId   String           @map("tenant_user_id")
+  date           String
+  completedAt    DateTime         @default(now()) @map("completed_at")
+  isCompleted    Boolean          @default(true) @map("is_completed")
+  notes          String?
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  routineItem    DailyRoutineItem @relation(fields: [routineItemId], references: [id], onDelete: Cascade)
+  tenantUser     TenantUser       @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([routineItemId, tenantUserId, date])
+  @@index([tenantId])
+  @@index([routineItemId])
+  @@index([tenantUserId])
+  @@index([date])
+  @@map("daily_routine_logs")
 }

@@ -1,20 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class UploadService {
   private readonly logger = new Logger(UploadService.name);
+  private readonly uploadDir: string;
 
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
-  ) {}
+  ) {
+    this.uploadDir = path.join(process.cwd(), 'uploads');
+  }
 
-  /**
-   * File upload stub — to be connected to S3-compatible storage.
-   * In production, this would use @aws-sdk/client-s3 or similar.
-   */
   async uploadFile(params: {
     tenantId: string;
     uploadedByTenantUserId: string;
@@ -25,10 +26,14 @@ export class UploadService {
     fileSize: number;
     buffer: Buffer;
   }) {
-    // TODO: Upload buffer to S3 and get file path
-    const filePath = `uploads/${params.tenantId}/${Date.now()}-${params.fileName}`;
+    const tenantDir = path.join(this.uploadDir, params.tenantId);
+    fs.mkdirSync(tenantDir, { recursive: true });
 
-    this.logger.log(`File would be uploaded to: ${filePath}`);
+    const uniqueFileName = `${Date.now()}-${params.fileName}`;
+    const fullFilePath = path.join(tenantDir, uniqueFileName);
+    fs.writeFileSync(fullFilePath, params.buffer);
+
+    const filePath = `uploads/${params.tenantId}/${uniqueFileName}`;
 
     return this.prisma.attachment.create({
       data: {

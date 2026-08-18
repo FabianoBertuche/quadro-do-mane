@@ -53,6 +53,10 @@ export const TENANT_SCOPED_MODELS: ReadonlySet<string> = new Set([
   'Automation',
   'CustomField',
   'CustomFieldValue',
+
+  // Rotina diária
+  'DailyRoutineItem',
+  'DailyRoutineLog',
 ]);
 
 /**

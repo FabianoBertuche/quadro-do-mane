@@ -1,17 +1,22 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { join } from 'path';
 import { AppModule } from './app.module';
 import { EncryptionService } from './common/crypto/encryption.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   app.enableShutdownHooks();
 
   // Global prefix
   app.setGlobalPrefix('api');
+
+  // Static file serving for uploaded files
+  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/api/uploads' });
 
   // CORS dinâmico a partir do env (CORS_ORIGINS é uma lista separada por vírgula)
   const config = app.get(ConfigService);

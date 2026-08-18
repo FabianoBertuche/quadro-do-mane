@@ -15,8 +15,28 @@ export class AuditLogController {
   constructor(private readonly audit: AuditLogService) {}
 
   /**
-   * Lista os registros de auditoria do tenant atual.
-   * Suporta filtros simples: ?action=&actorUserId=&take= (default 100, max 500).
+   * Unified timeline: all system activity (audit + activity + login attempts).
+   * Filters: ?action=&actorUserId=&startDate=&endDate=&targetType=&take=
+   */
+  @Get('timeline')
+  @RequirePermissions('audit.view')
+  getTimeline(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('action') action?: string,
+    @Query('actorUserId') actorUserId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('targetType') targetType?: string,
+    @Query('take') take?: string,
+  ) {
+    const limit = Math.min(parseInt(take || '200', 10) || 200, 500);
+    return this.audit.getUnifiedTimeline(tenantId, {
+      action, actorUserId, startDate, endDate, targetType, take: limit,
+    });
+  }
+
+  /**
+   * Audit logs only (security events).
    */
   @Get()
   @RequirePermissions('audit.view')
@@ -24,9 +44,50 @@ export class AuditLogController {
     @CurrentUser('tenantId') tenantId: string,
     @Query('action') action?: string,
     @Query('actorUserId') actorUserId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('targetType') targetType?: string,
     @Query('take') take?: string,
   ) {
-    const limit = Math.min(parseInt(take || '100', 10) || 100, 500);
-    return this.audit.findAllFiltered(tenantId, { action, actorUserId, take: limit });
+    const limit = Math.min(parseInt(take || '200', 10) || 200, 500);
+    return this.audit.findAllFiltered(tenantId, {
+      action, actorUserId, startDate, endDate, targetType, take: limit,
+    });
+  }
+
+  /**
+   * Activity logs only (operational changes).
+   */
+  @Get('activity')
+  @RequirePermissions('audit.view')
+  findActivity(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('action') action?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('take') take?: string,
+  ) {
+    const limit = Math.min(parseInt(take || '200', 10) || 200, 500);
+    return this.audit.findActivityLogs(tenantId, {
+      action, startDate, endDate, take: limit,
+    });
+  }
+
+  /**
+   * Login attempts only.
+   */
+  @Get('logins')
+  @RequirePermissions('audit.view')
+  findLogins(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('actorUserId') actorUserId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('take') take?: string,
+  ) {
+    const limit = Math.min(parseInt(take || '200', 10) || 200, 500);
+    return this.audit.findLoginAttempts(tenantId, {
+      actorUserId, startDate, endDate, take: limit,
+    });
   }
 }

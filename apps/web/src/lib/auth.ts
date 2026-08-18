@@ -7,6 +7,7 @@ interface AuthUser {
   email: string;
   avatarUrl?: string;
   phone?: string;
+  tenantUserId?: string;
 }
 
 interface AuthTenant {
@@ -36,6 +37,7 @@ interface AuthState {
 
   setSession: (data: SessionPayload) => void;
   clearSession: () => void;
+  logout: () => void;
   isAuthenticated: () => boolean;
 }
 
@@ -65,6 +67,21 @@ export const useAuthStore = create<AuthState>()(
         })),
 
       clearSession: () => {
+        // DON'T remove qd_last_email / qd_last_password here
+        // This is called on session expiry - we want to remember the last user
+        return set({
+          accessToken: null,
+          refreshToken: null,
+          user: null,
+          tenant: null,
+          permissions: [],
+          role: null,
+          hydrated: false,
+        });
+      },
+
+      logout: () => {
+        // FULL logout - clear everything including remembered credentials
         localStorage.removeItem('qd_last_email');
         localStorage.removeItem('qd_last_password');
         return set({
@@ -74,7 +91,7 @@ export const useAuthStore = create<AuthState>()(
           tenant: null,
           permissions: [],
           role: null,
-          hydrated: true,
+          hydrated: false,
         });
       },
 

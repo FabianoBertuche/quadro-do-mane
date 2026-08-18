@@ -16,6 +16,9 @@ import {
   Rocket,
   Clock,
   Archive,
+  X,
+  Filter,
+  ExternalLink,
 } from 'lucide-react';
 import {
   BarChart,
@@ -194,6 +197,7 @@ export default function DashboardPage() {
     });
   }, [allProjects, progressByProjectId]);
 
+  const [drillDown, setDrillDown] = useState<{ title: string; filter: Record<string, string> } | null>(null);
   const [showAllProjects, setShowAllProjects] = useState(false);
   const visibleProjectProgress = showAllProjects
     ? sortedProjectProgress
@@ -212,12 +216,12 @@ export default function DashboardPage() {
   });
 
   const kpiCards = [
-    { label: 'Total de Tarefas', value: overview?.totalTasks ?? '-', icon: CheckSquare, color: 'bg-blue-500/10 text-blue-500', iconBg: 'bg-blue-500' },
-    { label: 'Em Andamento', value: overview?.inProgressTasks ?? '-', icon: PlayCircle, color: 'bg-amber-500/10 text-amber-500', iconBg: 'bg-amber-500' },
-    { label: 'Concluídas', value: overview?.completedTasks ?? '-', icon: CheckCircle2, color: 'bg-emerald-500/10 text-emerald-500', iconBg: 'bg-emerald-500' },
-    { label: 'Atrasadas', value: overview?.overdueTasks ?? '-', icon: AlertTriangle, color: 'bg-red-500/10 text-red-500', iconBg: 'bg-red-500' },
-    { label: 'Projetos Ativos', value: overview?.activeProjects ?? '-', icon: FolderKanban, color: 'bg-purple-500/10 text-purple-500', iconBg: 'bg-purple-500' },
-    { label: 'Taxa de Conclusão', value: overview?.completionRate ? `${overview.completionRate}%` : '-', icon: TrendingUp, color: 'bg-primary/10 text-primary', iconBg: 'bg-primary' },
+    { label: 'Total de Tarefas', value: overview?.totalTasks ?? '-', icon: CheckSquare, color: 'bg-blue-500/10 text-blue-500', iconBg: 'bg-blue-500', filter: {} as Record<string, string> },
+    { label: 'Em Andamento', value: overview?.inProgressTasks ?? '-', icon: PlayCircle, color: 'bg-amber-500/10 text-amber-500', iconBg: 'bg-amber-500', filter: { statusCategory: 'in_progress' } },
+    { label: 'Concluídas', value: overview?.completedTasks ?? '-', icon: CheckCircle2, color: 'bg-emerald-500/10 text-emerald-500', iconBg: 'bg-emerald-500', filter: { completed: 'true' } },
+    { label: 'Atrasadas', value: overview?.overdueTasks ?? '-', icon: AlertTriangle, color: 'bg-red-500/10 text-red-500', iconBg: 'bg-red-500', filter: { overdue: 'true' } },
+    { label: 'Projetos Ativos', value: overview?.activeProjects ?? '-', icon: FolderKanban, color: 'bg-purple-500/10 text-purple-500', iconBg: 'bg-purple-500', filter: {} as Record<string, string> },
+    { label: 'Taxa de Conclusão', value: overview?.completionRate ? `${overview.completionRate}%` : '-', icon: TrendingUp, color: 'bg-primary/10 text-primary', iconBg: 'bg-primary', filter: {} as Record<string, string> },
   ];
 
   const pieData = [
@@ -228,6 +232,7 @@ export default function DashboardPage() {
   ].filter((d) => d.value > 0);
 
   return (
+    <>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
@@ -237,7 +242,11 @@ export default function DashboardPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {kpiCards.map((card) => (
-          <div key={card.label} className="p-4 rounded-2xl bg-card border border-border shadow-sm hover:shadow-md transition-shadow">
+          <button
+            key={card.label}
+            onClick={() => setDrillDown({ title: card.label, filter: card.filter })}
+            className="p-4 rounded-2xl bg-card border border-border shadow-sm hover:shadow-md hover:border-primary/30 transition-all text-left cursor-pointer"
+          >
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${card.color}`}>
                 <card.icon className="w-5 h-5" />
@@ -247,7 +256,10 @@ export default function DashboardPage() {
                 <div className="text-xs text-muted-foreground">{card.label}</div>
               </div>
             </div>
-          </div>
+            <div className="mt-2 text-[10px] text-primary font-medium flex items-center gap-1">
+              <ExternalLink className="w-3 h-3" /> Clique para detalhar
+            </div>
+          </button>
         ))}
       </div>
 
@@ -434,6 +446,203 @@ export default function DashboardPage() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+
+    {drillDown && (
+      <DrillDownModal
+        title={drillDown.title}
+        filter={drillDown.filter}
+        onClose={() => setDrillDown(null)}
+      />
+    )}
+    </>
+  );
+}
+
+function DrillDownModal({
+  title,
+  filter,
+  onClose,
+}: {
+  title: string;
+  filter: Record<string, string>;
+  onClose: () => void;
+}) {
+  const [statusFilter, setStatusFilter] = useState(filter.statusId || '');
+  const [userFilter, setUserFilter] = useState(filter.assigneeTenantUserId || '');
+  const [localOverdue, setLocalOverdue] = useState(filter.overdue || '');
+  const [localCompleted, setLocalCompleted] = useState(filter.completed || '');
+
+  const params: Record<string, string> = {};
+  if (statusFilter) params.statusId = statusFilter;
+  if (userFilter) params.assigneeTenantUserId = userFilter;
+  if (localOverdue) params.overdue = localOverdue;
+  if (localCompleted) params.completed = localCompleted;
+
+  const { data: tasks = [], isLoading } = useQuery({
+    queryKey: ['tasks', 'drilldown', params],
+    queryFn: () => api.get('/tasks', { params }).then((r) => r.data),
+  });
+
+  const { data: users = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api.get('/users').then((r) => r.data),
+  });
+
+  const { data: statuses = [] } = useQuery({
+    queryKey: ['statuses'],
+    queryFn: () => api.get('/tasks/statuses').then((r) => r.data),
+  });
+
+  const priorityColors: Record<string, string> = {
+    Baixa: 'text-slate-500',
+    Normal: 'text-blue-500',
+    Alta: 'text-amber-500',
+    Urgente: 'text-red-500',
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-5xl max-h-[90vh] rounded-2xl bg-card border border-border shadow-2xl overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <div>
+            <h2 className="text-xl font-bold text-foreground">{title}</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">{tasks.length} tarefa{tasks.length !== 1 ? 's' : ''} encontrada{tasks.length !== 1 ? 's' : ''}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-muted text-muted-foreground transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div className="flex items-center gap-3 p-4 border-b border-border bg-muted/30 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Filter className="w-3.5 h-3.5" />
+            <span>Filtros:</span>
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-xs bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">Todos os status</option>
+            {statuses.map((s: any) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+          <select
+            value={userFilter}
+            onChange={(e) => setUserFilter(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-xs bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">Todos os usuários</option>
+            {users.map((u: any) => (
+              <option key={u.id} value={u.id}>{u.user?.name}</option>
+            ))}
+          </select>
+          <select
+            value={localCompleted}
+            onChange={(e) => {
+              setLocalCompleted(e.target.value);
+              if (e.target.value) setLocalOverdue('');
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">Todas</option>
+            <option value="true">Concluídas</option>
+          </select>
+          <select
+            value={localOverdue}
+            onChange={(e) => {
+              setLocalOverdue(e.target.value);
+              if (e.target.value) setLocalCompleted('');
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">Todas</option>
+            <option value="true">Atrasadas</option>
+          </select>
+        </div>
+
+        {/* Task List */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="p-6 space-y-3">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="h-12 bg-muted rounded-xl animate-pulse" />
+              ))}
+            </div>
+          ) : tasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <CheckSquare className="w-12 h-12 mb-3 opacity-30" />
+              <p className="text-sm">Nenhuma tarefa encontrada com os filtros selecionados.</p>
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase">Tarefa</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase">Status</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase">Prioridade</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase">Responsável</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase">Projeto</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase">Prazo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((task: any) => {
+                  const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && task.status?.category !== 'done';
+                  return (
+                    <tr key={task.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <span className="text-sm font-medium">{task.title}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {task.status && (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: task.status.color }} />
+                            {task.status.name}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {task.priority && (
+                          <span className={`text-xs font-medium ${priorityColors[task.priority.name] || ''}`}>
+                            {task.priority.name}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {task.assignee ? (
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
+                              <span className="text-[10px] font-semibold text-primary">{task.assignee.user?.name?.charAt(0)}</span>
+                            </div>
+                            <span className="text-xs">{task.assignee.user?.name}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-muted-foreground">{task.project?.name || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs ${isOverdue ? 'text-red-500 font-medium' : 'text-muted-foreground'}`}>
+                          {task.dueDate ? new Date(task.dueDate).toLocaleDateString('pt-BR') : '—'}
+                          {isOverdue && ' ⚠️'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

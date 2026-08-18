@@ -117,6 +117,8 @@ model Tenant {
   automations    Automation[]
   customFields   CustomField[]
   customFieldValues CustomFieldValue[]
+  dailyRoutineItems DailyRoutineItem[]
+  dailyRoutineLogs DailyRoutineLog[]
 
   @@map("tenants")
 }
@@ -198,6 +200,7 @@ model TenantUser {
   createdViews ProjectView[]
   assignedTasks Task[]       @relation("TaskAssignee")
   reportedTasks Task[]       @relation("TaskReporter")
+  taskAssignees TaskAssignee[]
   checklistDoneItems TaskChecklistItem[] @relation("ChecklistDoneBy")
   comments     TaskComment[]
   uploadedAttachments Attachment[]
@@ -206,6 +209,9 @@ model TenantUser {
   notifications Notification[]
   activityLogs ActivityLog[]
   automations  Automation[]
+  assignedRoutineItems DailyRoutineItem[] @relation("AssignedRoutineUser")
+  createdRoutineItems DailyRoutineItem[] @relation("CreatedRoutineUser")
+  dailyRoutineLogs DailyRoutineLog[]
 
   @@unique([tenantId, userId])
   @@index([tenantId])
@@ -783,4 +789,49 @@ model CustomFieldValue {
   @@index([customFieldId])
   @@index([entityId])
   @@map("custom_field_values")
+}
+
+model DailyRoutineItem {
+  id                   String            @id @default(uuid())
+  tenantId             String
+  assignedTenantUserId String
+  createdById          String
+  title                String
+  description          String?
+  scheduledTime        String?
+  isActive             Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  tenant               Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedTenantUser   TenantUser        @relation("AssignedRoutineUser", fields: [assignedTenantUserId], references: [id], onDelete: Cascade)
+  createdByTenantUser  TenantUser        @relation("CreatedRoutineUser", fields: [createdById], references: [id], onDelete: Cascade)
+  logs                 DailyRoutineLog[]
+
+  @@index([tenantId])
+  @@index([assignedTenantUserId])
+  @@index([createdById])
+  @@map("daily_routine_items")
+}
+
+model DailyRoutineLog {
+  id             String           @id @default(uuid())
+  tenantId       String
+  routineItemId  String
+  tenantUserId   String
+  date           String
+  completedAt    DateTime         @default(now())
+  isCompleted    Boolean          @default(true)
+  notes          String?
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  routineItem    DailyRoutineItem @relation(fields: [routineItemId], references: [id], onDelete: Cascade)
+  tenantUser     TenantUser       @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([routineItemId, tenantUserId, date])
+  @@index([tenantId])
+  @@index([routineItemId])
+  @@index([tenantUserId])
+  @@index([date])
+  @@map("daily_routine_logs")
 }

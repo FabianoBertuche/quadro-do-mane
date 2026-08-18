@@ -20,7 +20,23 @@ export class TasksController {
 
   @Get()
   @RequirePermissions('tasks.view')
-  findAll(@CurrentUser('tenantId') tenantId: string, @Query('projectId') projectId?: string) {
+  findAll(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('projectId') projectId?: string,
+    @Query('statusId') statusId?: string,
+    @Query('assigneeTenantUserId') assigneeTenantUserId?: string,
+    @Query('overdue') overdue?: string,
+    @Query('completed') completed?: string,
+  ) {
+    if (statusId || assigneeTenantUserId || overdue || completed) {
+      return this.tasksService.findByFilters(tenantId, {
+        projectId,
+        statusId,
+        assigneeTenantUserId,
+        overdue: overdue === 'true',
+        completed: completed === 'true',
+      });
+    }
     if (projectId) return this.tasksService.findByProject(tenantId, projectId);
     return this.tasksService.findAll(tenantId);
   }
@@ -41,6 +57,12 @@ export class TasksController {
   @RequirePermissions('tasks.view')
   findOne(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {
     return this.tasksService.findOne(tenantId, id);
+  }
+
+  @Get(':id/comments')
+  @RequirePermissions('tasks.view')
+  getComments(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {
+    return this.tasksService.getComments(tenantId, id);
   }
 
   @Post()
@@ -93,6 +115,16 @@ export class TasksController {
   @RequirePermissions('tasks.comment')
   removeComment(@CurrentUser('tenantId') tenantId: string, @Param('commentId') commentId: string) {
     return this.tasksService.removeComment(tenantId, commentId);
+  }
+
+  @Delete(':id/attachments/:attachmentId')
+  @RequirePermissions('tasks.edit')
+  removeAttachment(
+    @CurrentUser('tenantId') tenantId: string,
+    @Param('id') taskId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.tasksService.removeAttachment(tenantId, taskId, attachmentId);
   }
 
   @Post(':id/checklists')

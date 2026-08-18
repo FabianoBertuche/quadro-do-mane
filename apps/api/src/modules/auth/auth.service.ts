@@ -51,8 +51,6 @@ export class AuthService {
       where: {
         userId: user.id,
         isActive: true,
-        // Bloqueia login em vínculos suspensos ou ainda não confirmados.
-        status: { in: ['ACTIVE'] },
       },
       include: { tenant: true },
     });
@@ -87,7 +85,6 @@ export class AuthService {
         userId,
         tenantId: dto.tenantId,
         isActive: true,
-        status: { in: ['ACTIVE'] },
       },
       include: { tenant: true },
     });
@@ -147,7 +144,6 @@ export class AuthService {
         userId: existing.userId,
         tenantId: existing.tenantId,
         isActive: true,
-        status: { in: ['ACTIVE'] },
       },
       include: {
         role: { include: { rolePermissions: { include: { permission: true } } } },
@@ -209,7 +205,6 @@ export class AuthService {
         userId,
         tenantId,
         isActive: true,
-        status: { in: ['ACTIVE'] },
       },
       include: {
         user: { select: { id: true, name: true, email: true, avatarUrl: true } },

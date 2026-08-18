@@ -16,7 +16,7 @@ export class ProjectsService {
   async findAll(tenantId: string, actorTenantUserId?: string, actorRoleName?: string | null) {
     const isBroadViewer = actorRoleName === 'admin' || actorRoleName === 'gestor';
 
-    return this.prisma.project.findMany({
+    const projects = await this.prisma.project.findMany({
       where: {
         tenantId,
         archivedAt: null,
@@ -38,6 +38,31 @@ export class ProjectsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Calculate dynamic progress for each project
+    const projectIds = projects.map(p => p.id);
+    if (projectIds.length === 0) return projects;
+
+    const doneCounts = await this.prisma.task.groupBy({
+      by: ['projectId'],
+      where: {
+        projectId: { in: projectIds },
+        archivedAt: null,
+        status: { category: 'done' },
+      },
+      _count: { id: true },
+    });
+
+    const doneMap = new Map(doneCounts.map(d => [d.projectId, d._count.id]));
+
+    return projects.map(p => ({
+      ...p,
+      progressPercent: p._count.tasks > 0
+        ? Math.round(((doneMap.get(p.id) || 0) / p._count.tasks) * 100)
+        : 0,
+      completedTasks: doneMap.get(p.id) || 0,
+      totalTasks: p._count.tasks,
+    }));
   }
 
   async findOne(tenantId: string, id: string) {
@@ -52,7 +77,40 @@ export class ProjectsService {
       },
     });
     if (!project) throw new NotFoundException('Projeto não encontrado');
-    return project;
+
+    // Count tasks by status category
+    const taskCounts = await this.prisma.task.groupBy({
+      by: ['statusId'],
+      where: { projectId: id, archivedAt: null },
+      _count: { id: true },
+    });
+
+    const statusIds = taskCounts.map(t => t.statusId).filter(Boolean) as string[];
+    const statuses = statusIds.length > 0
+      ? await this.prisma.taskStatus.findMany({ where: { id: { in: statusIds } } })
+      : [];
+    const statusMap = new Map(statuses.map(s => [s.id, s.category]));
+
+    let totalTasks = 0;
+    let doneTasks = 0;
+    let inProgressTasks = 0;
+    let pendingTasks = 0;
+    for (const tc of taskCounts) {
+      const cat = tc.statusId ? statusMap.get(tc.statusId) || 'pending' : 'pending';
+      totalTasks += tc._count.id;
+      if (cat === 'done') doneTasks += tc._count.id;
+      else if (cat === 'in_progress') inProgressTasks += tc._count.id;
+      else pendingTasks += tc._count.id;
+    }
+
+    return {
+      ...project,
+      progressPercent: totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0,
+      totalTasks,
+      doneTasks,
+      inProgressTasks,
+      pendingTasks,
+    };
   }
 
   async create(tenantId: string, dto: CreateProjectDto) {

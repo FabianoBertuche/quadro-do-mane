@@ -1,35 +1,53 @@
+# ─── Stage 1: Build ──────────────────────────────────────────────────
 FROM node:20-bullseye-slim AS builder
 WORKDIR /usr/src/app
 
-# install deps (including dev) for build
-COPY package*.json ./
-# Prefer `npm ci` when a lockfile is present for reproducible builds
+# Copy root + workspace package.json files for npm workspaces resolution
+COPY package.json package-lock.json* ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages/database/package.json ./packages/database/
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/utils/package.json ./packages/utils/
+
+# Install all dependencies (including dev for build tools)
 RUN npm ci || npm install
 
-# copy source and build
+# Copy full source tree
 COPY . .
-# Generate Prisma Client during the build (must succeed to include correct engines)
-RUN npx prisma generate --schema=prisma/schema.prisma
-RUN npm run build
 
+# Generate Prisma Client (must match runtime platform)
+RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
+
+# Build the API workspace only
+RUN npm run build:api
+
+# ─── Stage 2: Production ─────────────────────────────────────────────
 FROM node:20-bullseye-slim
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 
-# Ensure OpenSSL / libssl are available for Prisma query engine
+# OpenSSL / libssl for Prisma query engine
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends openssl ca-certificates libssl1.1 \
-	&& rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# install only production deps
-COPY package*.json ./
-# Use `npm install --omit=dev` when no lockfile is present
-RUN npm install --omit=dev
+# Re-install production deps only (needs ALL workspace package.json files)
+COPY package.json package-lock.json* ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages/database/package.json ./packages/database/
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/utils/package.json ./packages/utils/
+RUN npm ci --omit=dev || npm install --omit=dev
 
-# copy built app and production node_modules
-COPY --from=builder /usr/src/app/dist ./dist
-COPY --from=builder /usr/src/app/node_modules ./node_modules
-COPY --from=builder /usr/src/app/prisma ./prisma
+# Copy Prisma schema + generated client
+COPY --from=builder /usr/src/app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder /usr/src/app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /usr/src/app/node_modules/@prisma ./node_modules/@prisma
+
+# Copy built API
+COPY --from=builder /usr/src/app/apps/api/dist ./apps/api/dist
 
 EXPOSE 3001
-CMD ["node", "dist/src/main.js"]
+CMD ["node", "apps/api/dist/src/main.js"]

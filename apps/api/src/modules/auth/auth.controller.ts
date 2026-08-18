@@ -64,6 +64,9 @@ export class AuthController {
       req?.cookies?.qd_refresh ||
       '';
 
+    const source = dto.refreshToken ? 'body' : this.extractBearer(req) ? 'bearer' : req?.cookies?.qd_refresh ? 'cookie' : 'none';
+    console.log(`[auth/refresh] Token source: ${source}, provided: ${!!token}`);
+
     if (!token) {
       throw new Error('Refresh token não fornecido');
     }

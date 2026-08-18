@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Plus, LayoutList, KanbanSquare, CalendarIcon } from 'lucide-react';
 import { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
+import { TaskDetailModal } from '@/components/tasks/TaskDetailModal';
 import {
   DndContext,
   DragOverlay,
@@ -91,6 +92,7 @@ export default function KanbanPage() {
   const projectId = searchParams?.get('projectId') ?? null;
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<any>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -317,7 +319,7 @@ export default function KanbanPage() {
                         key={task.id}
                         task={task}
                         isDragging={task.id === activeId}
-                        onClick={() => handleEditTask(task)}
+                        onClick={() => setSelectedTask(task)}
                       />
                     ))}
                   </SortableContext>
@@ -336,7 +338,7 @@ export default function KanbanPage() {
         </DragOverlay>
       </DndContext>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Nova Tarefa">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={formData.id ? `Editar: ${formData.title}` : 'Nova Tarefa'}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">Título da Tarefa</label>
@@ -442,6 +444,14 @@ export default function KanbanPage() {
           </div>
         </form>
       </Modal>
+
+      {selectedTask && (
+        <TaskDetailModal
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          defaultEdit={true}
+        />
+      )}
     </div>
   );
 }

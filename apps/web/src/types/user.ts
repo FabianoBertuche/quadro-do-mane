@@ -97,6 +97,23 @@ export interface AuditLogEntry {
   createdAt: string;
 }
 
+/**
+ * Unified timeline entry from GET /api/audit-log/timeline.
+ */
+export interface UnifiedActivityEntry {
+  id: string;
+  type: 'audit' | 'activity' | 'login';
+  timestamp: string;
+  action: string;
+  actorName: string | null;
+  actorEmail: string | null;
+  actorAvatar: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  ipAddress: string | null;
+  metadata: string | null;
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Payloads de mutação
 // ────────────────────────────────────────────────────────────────────────

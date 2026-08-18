@@ -16,8 +16,11 @@ import {
   UserCircle,
   Mail,
   ScrollText,
+  ListChecks,
+  ClipboardCheck,
+  Activity,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -38,6 +41,27 @@ const auditNav = {
   requires: 'audit.view' as const,
 };
 
+const monitorRoutineNav = {
+  name: 'Monitorar Rotina',
+  href: '/daily-routine/admin',
+  icon: ClipboardCheck,
+  requires: 'daily_routine.manage' as const,
+};
+
+const manageRoutineNav = {
+  name: 'Gerenciar Rotinas',
+  href: '/daily-routine/manage',
+  icon: Settings,
+  requires: 'daily_routine.manage' as const,
+};
+
+const operationalNav = {
+  name: 'Atividades',
+  href: '/operational',
+  icon: Activity,
+  requires: 'audit.view' as const,
+};
+
 interface SidebarProps {
   currentPath: string;
 }
@@ -46,12 +70,15 @@ export function Sidebar({ currentPath }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const tenant = useAuthStore((s) => s.tenant);
   const user = useAuthStore((s) => s.user);
-  const clearSession = useAuthStore((s) => s.clearSession);
+  const logout = useAuthStore((s) => s.logout);
   // Só renderizamos itens condicionais (ex: Auditoria) depois que o Zustand
   // terminar de hidratar. Antes da hidratação o servidor não conhece as
   // permissions, então renderizar o item geraria mismatch no SSR.
   const hydrated = useAuthStore((s) => s.hydrated);
   const showAudit = hydrated && can(auditNav.requires);
+  const showMonitorRoutine = hydrated && can(monitorRoutineNav.requires);
+  const showManageRoutine = hydrated && can(manageRoutineNav.requires);
+  const showOperational = hydrated && can(operationalNav.requires);
 
   return (
     <aside
@@ -86,17 +113,73 @@ export function Sidebar({ currentPath }: SidebarProps) {
         {navigation.map((item) => {
           const isActive = currentPath.startsWith(item.href);
           return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${isActive
-                ? 'bg-primary text-white shadow-lg shadow-primary/30'
-                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white'
-                }`}
-            >
-              <item.icon className={`w-5 h-5 flex-shrink-0 ${isActive ? '' : 'group-hover:scale-110 transition-transform'}`} />
-              {!collapsed && <span className="truncate">{item.name}</span>}
-            </Link>
+            <Fragment key={item.name}>
+              <Link
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${isActive
+                  ? 'bg-primary text-white shadow-lg shadow-primary/30'
+                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white'
+                  }`}
+              >
+                <item.icon className={`w-5 h-5 flex-shrink-0 ${isActive ? '' : 'group-hover:scale-110 transition-transform'}`} />
+                {!collapsed && <span className="truncate">{item.name}</span>}
+              </Link>
+              {/* After Calendário, insert Routine group */}
+              {item.href === '/calendar' && (
+                <div className="mt-2">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+                    Rotina Diária
+                  </div>
+                  <div className="space-y-0.5">
+                    {[
+                      { name: 'Rotina Diária', href: '/daily-routine', icon: ListChecks },
+                    ].map((routineItem) => {
+                      const routineActive = currentPath.startsWith(routineItem.href);
+                      return (
+                        <Link
+                          key={routineItem.name}
+                          href={routineItem.href}
+                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${
+                            routineActive
+                              ? 'bg-primary text-white shadow-lg shadow-primary/30'
+                              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white'
+                          }`}
+                        >
+                          <routineItem.icon className={`w-5 h-5 flex-shrink-0 ${routineActive ? '' : 'group-hover:scale-110 transition-transform'}`} />
+                          {!collapsed && <span className="truncate">{routineItem.name}</span>}
+                        </Link>
+                      );
+                    })}
+                    {showMonitorRoutine && (
+                      <Link
+                        href={monitorRoutineNav.href}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${
+                          currentPath.startsWith(monitorRoutineNav.href)
+                            ? 'bg-primary text-white shadow-lg shadow-primary/30'
+                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white'
+                        }`}
+                      >
+                        <monitorRoutineNav.icon className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
+                        {!collapsed && <span className="truncate">{monitorRoutineNav.name}</span>}
+                      </Link>
+                    )}
+                    {showManageRoutine && (
+                      <Link
+                        href={manageRoutineNav.href}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${
+                          currentPath.startsWith(manageRoutineNav.href)
+                            ? 'bg-primary text-white shadow-lg shadow-primary/30'
+                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white'
+                        }`}
+                      >
+                        <manageRoutineNav.icon className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
+                        {!collapsed && <span className="truncate">{manageRoutineNav.name}</span>}
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              )}
+            </Fragment>
           );
         })}
         {showAudit && (
@@ -112,6 +195,19 @@ export function Sidebar({ currentPath }: SidebarProps) {
             {!collapsed && <span className="truncate">{auditNav.name}</span>}
           </Link>
         )}
+        {showOperational && (
+          <Link
+            href={operationalNav.href}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${
+              currentPath.startsWith(operationalNav.href)
+                ? 'bg-primary text-white shadow-lg shadow-primary/30'
+                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-white'
+            }`}
+          >
+            <operationalNav.icon className="w-5 h-5 flex-shrink-0 group-hover:scale-110 transition-transform" />
+            {!collapsed && <span className="truncate">{operationalNav.name}</span>}
+          </Link>
+        )}
       </nav>
 
       {/* User / Logout */}
@@ -125,7 +221,7 @@ export function Sidebar({ currentPath }: SidebarProps) {
             } catch {
               // ignora — o cookie já pode estar expirado
             }
-            clearSession();
+            logout();
             window.location.href = '/login';
           }}
           className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-sidebar-foreground/70 hover:bg-red-500/20 hover:text-red-400 transition-all w-full"

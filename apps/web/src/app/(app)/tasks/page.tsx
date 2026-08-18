@@ -3,9 +3,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Plus, LayoutList, KanbanSquare, Edit2, Trash2 } from 'lucide-react';
+import { Plus, LayoutList, KanbanSquare, Eye, Edit2 } from 'lucide-react';
 import React, { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
+import { TaskDetailModal } from '@/components/tasks/TaskDetailModal';
 
 export default function TasksPage() {
   const searchParams = useSearchParams();
@@ -13,6 +14,7 @@ export default function TasksPage() {
   const projectId = searchParams?.get('projectId') ?? null;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<any>(null);
   const [formData, setFormData] = useState({
     id: '',
     title: '',
@@ -185,7 +187,11 @@ export default function TasksPage() {
                     </td>
                   </tr>
                   {projectTasks.map((task: any) => (
-                    <tr key={task.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                    <tr
+                      key={task.id}
+                      className="border-b border-border hover:bg-muted/30 transition-colors cursor-pointer"
+                      onClick={() => setSelectedTask(task)}
+                    >
                       <td className="px-4 py-3">
                         <span className="font-medium text-sm">{task.title}</span>
                       </td>
@@ -220,11 +226,24 @@ export default function TasksPage() {
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
                           <button
-                            onClick={() => handleEditTask(task)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditTask(task);
+                            }}
                             className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-colors"
                             title="Editar Tarefa"
                           >
                             <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTask(task);
+                            }}
+                            className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-colors"
+                            title="Ver Detalhes"
+                          >
+                            <Eye className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -237,7 +256,7 @@ export default function TasksPage() {
         </table>
       </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Nova Tarefa">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={formData.id ? `Editar: ${formData.title}` : 'Nova Tarefa'}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">Título da Tarefa</label>
@@ -343,6 +362,13 @@ export default function TasksPage() {
           </div>
         </form>
       </Modal>
+
+      {selectedTask && (
+        <TaskDetailModal
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+        />
+      )}
     </div>
   );
 }

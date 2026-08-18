@@ -21,6 +21,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { UsersModule } from './modules/users/users.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { EmailsModule } from './modules/emails/emails.module';
+import { DailyRoutineModule } from './modules/daily-routine/daily-routine.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { EmailsModule } from './modules/emails/emails.module';
     UsersModule,
     RolesModule,
     EmailsModule,
+    DailyRoutineModule,
   ],
 })
 export class AppModule implements NestModule {

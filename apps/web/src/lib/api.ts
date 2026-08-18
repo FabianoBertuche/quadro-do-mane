@@ -113,6 +113,7 @@ api.interceptors.response.use(
       original?.url?.includes('/auth/select-tenant');
     const isUnauthorized = error.response?.status === 401;
 
+    // Transparent refresh: try to rotate tokens silently. NEVER force logout.
     if (isUnauthorized && !original?._retry && !isAuthEndpoint) {
       original._retry = true;
       try {
@@ -123,11 +124,7 @@ api.interceptors.response.use(
           return api(original);
         }
       } catch {
-        // fall through
-      }
-      useAuthStore.getState().clearSession();
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
+        // refresh failed — just reject, never clear session or redirect
       }
     }
 

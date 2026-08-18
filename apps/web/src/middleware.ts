@@ -1,35 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * Edge middleware para proteção de rotas server-side.
+ * Edge middleware — NUCLEAR MODE.
  *
- * Estratégia:
- * - Lê o cookie `qd_access` (HttpOnly, definido pelo backend).
- * - Decodifica o payload JWT sem verificar assinatura (já verificada pelo backend).
- * - Se ausente/expirado → redireciona para /login.
- *
- * NOTA: a verificação completa de assinatura acontece no backend (NestJS).
- * Aqui só evitamos render de UI protegida para usuários sem cookie.
- *
- * Rotas públicas: /login, /select-tenant, /api/* (proxy), arquivos estáticos.
+ * NUNCA redireciona para /login. Todas as requisições passam livremente.
+ * A autenticação é tratada 100% no client-side pelo useSession hook.
  */
-
-const PUBLIC_PATHS = ['/login', '/select-tenant', '/favicon.ico'];
-
-const PROTECTED_PREFIXES = [
-  '/dashboard',
-  '/projects',
-  '/tasks',
-  '/teams',
-  '/collaborators',
-  '/calendar',
-  '/emails',
-  '/contacts',
-  '/settings',
-  '/profile',
-];
-
-const ACCESS_COOKIE = 'qd_access';
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -43,62 +19,9 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-    return NextResponse.next();
-  }
-
-  const isProtected = PROTECTED_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`),
-  );
-  if (!isProtected) {
-    return NextResponse.next();
-  }
-
-  const access = req.cookies.get(ACCESS_COOKIE)?.value;
-  // Bypass curto: se o cliente acabou de logar, um cookie não-HttpOnly
-  // `qd_client_auth` pode ser definido para permitir navegação imediata
-  // sem exigir refresh da página. Tem validade curta e é apenas um auxílio
-  // enquanto o backend configura os cookies HttpOnly.
-  const clientBypass = req.cookies.get('qd_client_auth')?.value;
-  if (!access) {
-    if (clientBypass === '1') {
-      return NextResponse.next();
-    }
-    const loginUrl = new URL('/login', req.url);
-    loginUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // Decodifica o payload (sem verificar assinatura) para checar expiração
-  const decoded = decodeJwtPayload(access);
-  if (!decoded || (decoded.exp && decoded.exp * 1000 < Date.now())) {
-    const loginUrl = new URL('/login', req.url);
-    loginUrl.searchParams.set('next', pathname);
-    loginUrl.searchParams.set('expired', '1');
-    return NextResponse.redirect(loginUrl);
-  }
-
+  // Nuclear mode: NEVER redirect to /login. Let all pages render.
+  // Auth is handled client-side by useSession hook.
   return NextResponse.next();
-}
-
-interface JwtPayload {
-  sub?: string;
-  exp?: number;
-  tenantId?: string;
-}
-
-function decodeJwtPayload(token: string): JwtPayload | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    // base64url → base64
-    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '=');
-    const json = atob(padded);
-    return JSON.parse(json) as JwtPayload;
-  } catch {
-    return null;
-  }
 }
 
 export const config = {

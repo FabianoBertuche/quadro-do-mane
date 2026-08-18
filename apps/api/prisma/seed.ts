@@ -90,7 +90,7 @@ async function main() {
       data: {
         tenantId: tenant.id,
         planId: 'trial',
-        status: 'TRIAL',
+        status: 'TRIALING',
         startedAt: new Date(),
         trialEndsAt: trialEnds,
       },
@@ -160,6 +160,9 @@ async function main() {
     { code: 'audit.view', name: 'Ver Auditoria', module: 'audit' },
     { code: 'email.view', name: 'Usar E-mail', module: 'email' },
     { code: 'email.admin', name: 'Configurar Servidor de E-mail', module: 'email' },
+    { code: 'daily_routine.view', name: 'Ver Rotina Diária', module: 'daily_routine' },
+    { code: 'daily_routine.manage', name: 'Gerenciar Rotinas Diárias', module: 'daily_routine' },
+    { code: 'daily_routine.complete', name: 'Executar Rotina Diária', module: 'daily_routine' },
   ];
 
   for (const perm of permissionsList) {
@@ -207,6 +210,7 @@ async function main() {
     'calendar.view', 'calendar.create', 'calendar.edit',
     'contacts.view', 'contacts.create', 'contacts.edit',
     'reports.view', 'reports.export', 'notifications.view',
+    'daily_routine.view', 'daily_routine.manage', 'daily_routine.complete',
   ];
 
   const colaboradorPermCodes = [
@@ -215,6 +219,7 @@ async function main() {
     'tasks.comment', 'tasks.checklist_manage', 'tasks.attachments_manage',
     'tasks.change_status',
     'calendar.view', 'contacts.view', 'notifications.view',
+    'daily_routine.view', 'daily_routine.complete',
   ];
 
   const convidadoPermCodes = [
@@ -375,6 +380,10 @@ async function main() {
         where: { tenantId: tenant.id, name: 'Normal' },
       });
 
+      if (!defaultStatus) {
+        throw new Error('Default task status not found');
+      }
+
       const project = await prisma.project.create({
         data: {
           tenantId: tenant.id,
@@ -403,7 +412,7 @@ async function main() {
             tenantId: tenant.id,
             projectId: project.id,
             title: taskTitles[i],
-            statusId: defaultStatus?.id,
+            statusId: defaultStatus.id,
             priorityId: normalPriority?.id,
             assigneeTenantUserId: adminTenantUser.id,
             reporterTenantUserId: adminTenantUser.id,
@@ -413,8 +422,36 @@ async function main() {
         });
       }
     }
+    console.log('✅ Demo data seeded');
+
+    // Daily routine demo items
+    const existingRoutines = await prisma.dailyRoutineItem.findMany({
+      where: { tenantId: tenant.id },
+    });
+    if (existingRoutines.length === 0) {
+      const routineTemplates = [
+        { title: 'Conferir e-mails e prioridades do dia', description: 'Revisar caixa de entrada e responder solicitações urgentes.', scheduledTime: '08:30' },
+        { title: 'Alinhar tarefas da equipe na Daily', description: 'Participar da reunião diária de alinhamento de tarefas.', scheduledTime: '09:00' },
+        { title: 'Atualizar progresso dos projetos no Quadro', description: 'Garantir que os status das tarefas no Kanban estejam atualizados.', scheduledTime: '14:00' },
+        { title: 'Revisar logs de auditoria e relatórios diários', description: 'Verificar métricas de desempenho e pendências do sistema.', scheduledTime: '17:00' },
+      ];
+
+      for (const item of routineTemplates) {
+        await prisma.dailyRoutineItem.create({
+          data: {
+            tenantId: tenant.id,
+            assignedTenantUserId: adminTenantUser.id,
+            createdById: adminTenantUser.id,
+            title: item.title,
+            description: item.description,
+            scheduledTime: item.scheduledTime,
+            isActive: true,
+          },
+        });
+      }
+      console.log('✅ Daily routine items seeded');
+    }
   }
-  console.log('✅ Demo data seeded');
 
   console.log('🎉 Seed completed successfully!');
 }
