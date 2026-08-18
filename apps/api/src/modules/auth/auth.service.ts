@@ -63,20 +63,18 @@ export class AuthService {
       return this.issueTenantSession(user.id, tenantUsers[0], meta);
     }
 
-    const preAuthToken = this.jwtService.sign(
-      { sub: user.id, type: 'pre-auth' },
-      { expiresIn: '5m' },
+    // Multiple tenants: auto-select "Monte Moria" if available
+    const monteMoriaTenantId = 'bb8bd886-8aeb-40c9-a9ee-68c5a634563b';
+    const monteMoriaTenantUser = tenantUsers.find(
+      (tu) => tu.tenant.id === monteMoriaTenantId,
     );
 
-    return {
-      requiresTenantSelection: true,
-      preAuthToken,
-      tenants: tenantUsers.map((tu) => ({
-        id: tu.tenant.id,
-        name: tu.tenant.name,
-        slug: tu.tenant.slug,
-      })),
-    };
+    if (monteMoriaTenantUser) {
+      return this.issueTenantSession(user.id, monteMoriaTenantUser, meta);
+    }
+
+    // Fallback: use first tenant (edge case: Monte Moria not among user's tenants)
+    return this.issueTenantSession(user.id, tenantUsers[0], meta);
   }
 
   async selectTenant(userId: string, dto: SelectTenantDto, meta: AuthRequestMeta = {}) {

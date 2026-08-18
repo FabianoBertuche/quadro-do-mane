@@ -1,0 +1,1 @@
+& "C:\Program Files\nodejs\node.exe" "C:\FB\quadro-do-mane\apps/api/node_modules/.bin/nest" start --watch

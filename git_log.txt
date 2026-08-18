@@ -1,0 +1,37 @@
+c32ebe2 013c
+ffd070d 013b
+2a04fb1 013a
+4390b9c feat(deploy): VPS deployment setup with Docker + Nginx
+a77728f 013
+a6a63ec 012
+6e50f39 011
+0f27772 010
+0919ff8 009
+7ae04fd 008
+91b4a13 07
+45fe16c 006
+4d8fee0 005
+f073070 004
+879bbe3 003
+1c1e426 002
+25d4128 002
+ca0c14f 001
+c39396b deploy hostinger
+b95cc5c fix: move autoprefixer to deps and add webpack alias for @/ paths
+f240d73 fix: add autoprefixer/postcss to root deps and baseUrl for path resolution
+2372ad5 fix: install web deps in build command for monorepo Turbopack
+34fe0d4 fix: remove duplicate lockfile and set turbopack root for monorepo
+787554a fix: hoist next/react to root deps for Turbopack monorepo resolution
+103f916 fix: disable turbopack in web build for monorepo compatibility
+fe3c332 fix: add turbopack root config for monorepo compatibility
+307702f fix: use npx next build for monorepo workspace compatibility
+7af823e fix: correct dist path to dist/src/main.js for NestJS build output
+27490a3 fix: add ls dist/ debug and .js extension to start command for Render
+7ca71d2 fix: move prisma migrate deploy from build to start command for Render deploy
+786e8e5 fix: use explicit cd in render.yaml to avoid workspace resolution issues
+2b4bf12 fix: Render.com deployment - force npm, fix TS errors, add .npmrc
+7d80563 fix: change root start script to production API start for Render.com
+52f31eb chore: add Render.com deployment config (render.yaml, health endpoint, .dockerignore)
+52f4abd feat: add npm run dev command to start both API and Web
+fb14bab refactor: migrate Python/Shell scripts to Node.js
+663da09 feat: initial commit - Quadro do Mane

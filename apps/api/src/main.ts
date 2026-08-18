@@ -66,6 +66,13 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Configura charset UTF-8 para todas as respostas JSON
+  const expressApp = app.getHttpAdapter() as any;
+  expressApp.use((req: any, res: any, next: any) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    next();
+  });
+
   // Validação global de DTOs
   app.useGlobalPipes(
     new ValidationPipe({

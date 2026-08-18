@@ -31,15 +31,8 @@ function LoginForm() {
     try {
       const res = await api.post('/auth/login', { email, password });
 
-      if (res.data.requiresTenantSelection) {
-        sessionStorage.setItem('qd_pending_tenants', JSON.stringify(res.data.tenants));
-        router.push('/select-tenant');
-        return;
-      }
-
-      // Em DEV: cookies HttpOnly cross-port são bloqueados pelo Chrome, então
-      // usamos os tokens do body. Em produção (HTTPS + mesmo domínio), os cookies
-      // HttpOnly são preferidos.
+      // Backend agora auto-seleiona o tenant "Monte Moria" quando há múltiplos tenants,
+      // ou usa o primeiro tenant como fallback. Nunca mais retorna requiresTenantSelection.
       setSession({
         accessToken: res.data.accessToken,
         refreshToken: res.data.refreshToken,
