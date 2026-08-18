@@ -1,14 +1,49 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { join } from 'path';
 import { AppModule } from './app.module';
 import { EncryptionService } from './common/crypto/encryption.service';
 
+@Catch()
+class DebugExceptionFilter implements ExceptionFilter {
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse();
+    const request = ctx.getRequest();
+    
+    const status = exception instanceof HttpException
+      ? exception.getStatus()
+      : HttpStatus.INTERNAL_SERVER_ERROR;
+    
+    const message = exception instanceof HttpException
+      ? exception.getResponse()
+      : {
+          statusCode: status,
+          message: 'Internal server error',
+          error: exception instanceof Error ? exception.message : String(exception),
+          stack: exception instanceof Error ? exception.stack : undefined,
+          path: request.url,
+        };
+    
+    console.error(`[DEBUG-EXCEPTION] ${request.method} ${request.url}:`, 
+      exception instanceof Error ? exception.message : exception);
+    if (exception instanceof Error && exception.stack) {
+      console.error(exception.stack);
+    }
+    
+    response.status(status).json(message);
+  }
+}
+
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+  });
+
+  app.useGlobalFilters(new DebugExceptionFilter());
 
   app.enableShutdownHooks();
 
