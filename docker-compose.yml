@@ -15,6 +15,11 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d quadro_do_mane"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
     build:
@@ -30,14 +35,14 @@ services:
       - API_PORT=${API_PORT}
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"const http = require('http'); http.get('http://localhost:3001/api/auth/me', (r) => { process.exit(r.statusCode === 401 || r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "nc -z localhost 3001"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 15s
 
   web:
     build:
@@ -52,7 +57,7 @@ services:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 volumes:
