@@ -71,9 +71,7 @@ function LoginForm() {
         <div className="bg-white/10 backdrop-blur-xl rounded-2xl border border-white/20 shadow-2xl p-8">
           {/* Logo */}
           <div className="text-center mb-8">
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl mb-4 shadow-lg shadow-primary/30">
-              <img src="/logo.png" alt="Monte Moria Logo" className="w-full h-full object-contain" />
-            </div>
+            <img src="/logo.png" alt="Monte Moria Logo" className="w-full h-auto mb-4" />
             <h1 className="text-2xl font-bold text-white">Monte Moria</h1>
             <p className="text-white/60 mt-1 text-sm">Gestão de tarefas e projetos</p>
           </div>

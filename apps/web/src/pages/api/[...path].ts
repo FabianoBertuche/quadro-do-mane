@@ -35,10 +35,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     headers[key] = Array.isArray(value) ? value.join(', ') : String(value);
   }
 
+  const isUpload = req.url?.includes('/upload/');
+  const timeout = isUpload ? 300_000 : 15_000; // 5min for uploads, 15s for API calls
+
   const opts: http.RequestOptions = {
     method: req.method,
     headers,
-    timeout: 15_000,
+    timeout,
   };
 
   const chunks: Buffer[] = [];

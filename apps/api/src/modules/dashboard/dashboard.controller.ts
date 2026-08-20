@@ -1,7 +1,8 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service';
+import { UserActivityService } from './user-activity.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PermissionGuard } from '../../common/guards/permission.guard';
@@ -12,7 +13,10 @@ import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
 @UseGuards(AuthGuard('jwt'), TenantContextGuard, PermissionGuard)
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private dashboardService: DashboardService) {}
+  constructor(
+    private dashboardService: DashboardService,
+    private userActivityService: UserActivityService,
+  ) {}
 
   @Get('overview')
   @RequirePermissions('dashboard.view')
@@ -36,5 +40,26 @@ export class DashboardController {
   @RequirePermissions('dashboard.view')
   projectProgress(@CurrentUser('tenantId') tenantId: string) {
     return this.dashboardService.getProjectProgress(tenantId);
+  }
+
+  @Get('daily-routine-summary')
+  @RequirePermissions('dashboard.view')
+  dailyRoutineSummary(@CurrentUser('tenantId') tenantId: string) {
+    return this.dashboardService.getDailyRoutineSummary(tenantId);
+  }
+
+  @Get('daily-routine-items')
+  @RequirePermissions('dashboard.view')
+  dailyRoutineItems(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('userId') userId?: string,
+  ) {
+    return this.dashboardService.getDailyRoutineItems(tenantId, userId);
+  }
+
+  @Get('active-users')
+  @RequirePermissions('dashboard.view')
+  activeUsers(@CurrentUser('tenantId') tenantId: string) {
+    return this.userActivityService.getActiveUsers(tenantId);
   }
 }

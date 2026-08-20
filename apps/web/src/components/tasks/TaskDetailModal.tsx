@@ -60,6 +60,7 @@ export function TaskDetailModal({ task, onClose, defaultEdit }: TaskDetailModalP
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<{ url: string; name: string; mimeType: string } | null>(null);
   const [isEditing, setIsEditing] = useState(defaultEdit ?? false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     title: '',
     description: '',
@@ -120,10 +121,22 @@ export function TaskDetailModal({ task, onClose, defaultEdit }: TaskDetailModalP
       formData.append('file', file);
       return api.post(`/upload/tasks/${task.id}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300_000, // 5 minutes for large file uploads
       }).then((r) => r.data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['task', task.id] });
+      setUploadError(null);
+    },
+    onError: (error: any) => {
+      const msg = error?.response?.data?.message;
+      if (typeof msg === 'string') {
+        setUploadError(msg);
+      } else if (Array.isArray(msg) && msg.length > 0) {
+        setUploadError(msg[0]);
+      } else {
+        setUploadError('Erro ao enviar arquivo. Tente novamente.');
+      }
     },
   });
 
@@ -162,9 +175,20 @@ export function TaskDetailModal({ task, onClose, defaultEdit }: TaskDetailModalP
     createComment.mutate(trimmed);
   };
 
+  const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setUploadError(null);
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+        setUploadError(
+          `O arquivo "${file.name}" tem ${sizeMB} MB e excede o limite máximo de 100 MB. Reduza o tamanho do arquivo e tente novamente.`
+        );
+        e.target.value = '';
+        return;
+      }
       uploadAttachment.mutate(file);
     }
     e.target.value = '';
@@ -508,6 +532,13 @@ export function TaskDetailModal({ task, onClose, defaultEdit }: TaskDetailModalP
                   onChange={handleFileUpload}
                 />
               </div>
+
+              {uploadError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{uploadError}</span>
+                </div>
+              )}
 
               {/* Attachments List */}
               {detail?.attachments && detail.attachments.length > 0 ? (

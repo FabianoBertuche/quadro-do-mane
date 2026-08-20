@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
 import { join } from 'path';
 import { AppModule } from './app.module';
 import { EncryptionService } from './common/crypto/encryption.service';
+import { UserActivityService } from './modules/dashboard/user-activity.service';
+import { ActivityTrackingInterceptor } from './common/interceptors/activity-tracking.interceptor';
 
 @Catch()
 class DebugExceptionFilter implements ExceptionFilter {
@@ -14,6 +16,17 @@ class DebugExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse();
     const request = ctx.getRequest();
     
+    // Handle Multer file size errors specifically
+    const err = exception as any;
+    if (err?.code === 'LIMIT_FILE_SIZE' || err?.message?.includes('File too large')) {
+      response.status(400).json({
+        statusCode: 400,
+        message: 'O arquivo excede o limite máximo de 100 MB. Reduza o tamanho do arquivo e tente novamente.',
+        error: 'File too large',
+      });
+      return;
+    }
+
     const status = exception instanceof HttpException
       ? exception.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
@@ -101,6 +114,10 @@ async function bootstrap() {
 
   // Força inicialização do EncryptionService para falhar rápido se a chave estiver errada
   app.get(EncryptionService);
+
+  // Register activity tracking interceptor globally
+  const activityService = app.get(UserActivityService);
+  app.useGlobalInterceptors(new ActivityTrackingInterceptor(activityService));
 
   // Render assigns a random PORT; fallback to API_PORT for local dev
   const port = Number(process.env.PORT) || config.get<number>('API_PORT', 3001);

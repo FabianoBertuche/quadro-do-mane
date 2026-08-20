@@ -22,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { EmailsModule } from './modules/emails/emails.module';
 import { DailyRoutineModule } from './modules/daily-routine/daily-routine.module';
+import { UserActivityService } from './modules/dashboard/user-activity.service';
 
 @Module({
   imports: [
@@ -51,6 +52,8 @@ import { DailyRoutineModule } from './modules/daily-routine/daily-routine.module
     EmailsModule,
     DailyRoutineModule,
   ],
+  providers: [UserActivityService],
+  exports: [UserActivityService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

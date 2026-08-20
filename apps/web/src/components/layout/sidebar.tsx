@@ -45,14 +45,12 @@ const monitorRoutineNav = {
   name: 'Monitorar Rotina',
   href: '/daily-routine/admin',
   icon: ClipboardCheck,
-  requires: 'daily_routine.manage' as const,
 };
 
 const manageRoutineNav = {
   name: 'Gerenciar Rotinas',
   href: '/daily-routine/manage',
   icon: Settings,
-  requires: 'daily_routine.manage' as const,
 };
 
 const operationalNav = {
@@ -74,10 +72,11 @@ export function Sidebar({ currentPath }: SidebarProps) {
   // Só renderizamos itens condicionais (ex: Auditoria) depois que o Zustand
   // terminar de hidratar. Antes da hidratação o servidor não conhece as
   // permissions, então renderizar o item geraria mismatch no SSR.
+  const role = useAuthStore((s) => s.role);
   const hydrated = useAuthStore((s) => s.hydrated);
   const showAudit = hydrated && can(auditNav.requires);
-  const showMonitorRoutine = hydrated && can(monitorRoutineNav.requires);
-  const showManageRoutine = hydrated && can(manageRoutineNav.requires);
+  const showMonitorRoutine = hydrated && role === 'admin';
+  const showManageRoutine = hydrated && role === 'admin';
   const showOperational = hydrated && can(operationalNav.requires);
 
   return (

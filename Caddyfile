@@ -1,0 +1,8 @@
+{
+	email admin@montemoria.com
+}
+
+montemoria.com {
+	encode gzip
+	reverse_proxy web:3000
+}

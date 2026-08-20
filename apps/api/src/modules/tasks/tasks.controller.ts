@@ -67,38 +67,60 @@ export class TasksController {
 
   @Post()
   @RequirePermissions('tasks.create')
-  create(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateTaskDto) {
-    return this.tasksService.create(tenantId, dto);
+  create(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateTaskDto,
+  ) {
+    return this.tasksService.create(user.tenantId, dto, user.tenantUserId);
   }
 
   @Patch(':id')
   @RequirePermissions('tasks.edit')
-  update(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string, @Body() dto: UpdateTaskDto) {
-    return this.tasksService.update(tenantId, id, dto);
+  update(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateTaskDto,
+  ) {
+    return this.tasksService.update(user.tenantId, id, dto, user.tenantUserId);
   }
 
   @Delete(':id')
   @RequirePermissions('tasks.delete')
-  remove(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {
-    return this.tasksService.remove(tenantId, id);
+  remove(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+  ) {
+    return this.tasksService.remove(user.tenantId, id, user.tenantUserId);
   }
 
   @Patch(':id/move')
   @RequirePermissions('tasks.move')
-  moveTask(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string, @Body() dto: MoveTaskDto) {
-    return this.tasksService.moveTask(tenantId, id, dto);
+  moveTask(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: MoveTaskDto,
+  ) {
+    return this.tasksService.moveTask(user.tenantId, id, dto, user.tenantUserId);
   }
 
   @Patch(':id/status')
   @RequirePermissions('tasks.change_status')
-  changeStatus(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string, @Body('statusId') statusId: string) {
-    return this.tasksService.changeStatus(tenantId, id, statusId);
+  changeStatus(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body('statusId') statusId: string,
+  ) {
+    return this.tasksService.changeStatus(user.tenantId, id, statusId, user.tenantUserId);
   }
 
   @Patch(':id/priority')
   @RequirePermissions('tasks.change_priority')
-  changePriority(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string, @Body('priorityId') priorityId: string) {
-    return this.tasksService.changePriority(tenantId, id, priorityId);
+  changePriority(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body('priorityId') priorityId: string,
+  ) {
+    return this.tasksService.changePriority(user.tenantId, id, priorityId, user.tenantUserId);
   }
 
   @Post(':id/comments')
@@ -113,38 +135,41 @@ export class TasksController {
 
   @Delete('comments/:commentId')
   @RequirePermissions('tasks.comment')
-  removeComment(@CurrentUser('tenantId') tenantId: string, @Param('commentId') commentId: string) {
-    return this.tasksService.removeComment(tenantId, commentId);
+  removeComment(
+    @CurrentUser() user: RequestUser,
+    @Param('commentId') commentId: string,
+  ) {
+    return this.tasksService.removeComment(user.tenantId, commentId, user.tenantUserId);
   }
 
   @Delete(':id/attachments/:attachmentId')
   @RequirePermissions('tasks.edit')
   removeAttachment(
-    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser() user: RequestUser,
     @Param('id') taskId: string,
     @Param('attachmentId') attachmentId: string,
   ) {
-    return this.tasksService.removeAttachment(tenantId, taskId, attachmentId);
+    return this.tasksService.removeAttachment(user.tenantId, taskId, attachmentId, user.tenantUserId);
   }
 
   @Post(':id/checklists')
   @RequirePermissions('tasks.checklist_manage')
   createChecklist(
-    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser() user: RequestUser,
     @Param('id') taskId: string,
     @Body('title') title: string,
   ) {
-    return this.tasksService.createChecklist(tenantId, taskId, title);
+    return this.tasksService.createChecklist(user.tenantId, taskId, title, user.tenantUserId);
   }
 
   @Post('checklists/:checklistId/items')
   @RequirePermissions('tasks.checklist_manage')
   addChecklistItem(
-    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser() user: RequestUser,
     @Param('checklistId') checklistId: string,
     @Body('content') content: string,
   ) {
-    return this.tasksService.addChecklistItem(tenantId, checklistId, content);
+    return this.tasksService.addChecklistItem(user.tenantId, checklistId, content, user.tenantUserId);
   }
 
   @Patch('checklist-items/:itemId/toggle')

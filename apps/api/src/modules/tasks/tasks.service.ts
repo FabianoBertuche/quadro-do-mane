@@ -109,7 +109,7 @@ export class TasksService {
     return task;
   }
 
-  async create(tenantId: string, dto: CreateTaskDto) {
+  async create(tenantId: string, dto: CreateTaskDto, actorTenantUserId?: string) {
     let statusId = dto.statusId;
 
     if (!statusId) {
@@ -138,6 +138,7 @@ export class TasksService {
 
     await this.activityLog.log({
       tenantId,
+      actorTenantUserId,
       entityType: 'Task',
       entityId: task.id,
       action: 'TASK_CREATED',
@@ -153,7 +154,7 @@ export class TasksService {
     return task;
   }
 
-  async update(tenantId: string, id: string, dto: UpdateTaskDto) {
+  async update(tenantId: string, id: string, dto: UpdateTaskDto, actorTenantUserId?: string) {
     const oldTask = await this.findOne(tenantId, id);
     const updated = await this.prisma.task.update({
       where: { id },
@@ -214,6 +215,7 @@ export class TasksService {
     if (hasChanges) {
       await this.activityLog.log({
         tenantId,
+        actorTenantUserId,
         entityType: 'Task',
         entityId: id,
         action: 'TASK_UPDATED',
@@ -229,7 +231,7 @@ export class TasksService {
     return updated;
   }
 
-  async remove(tenantId: string, id: string) {
+  async remove(tenantId: string, id: string, actorTenantUserId?: string) {
     const task = await this.findOne(tenantId, id);
     await this.prisma.task.update({
       where: { id },
@@ -238,6 +240,7 @@ export class TasksService {
 
     await this.activityLog.log({
       tenantId,
+      actorTenantUserId,
       entityType: 'Task',
       entityId: id,
       action: 'TASK_ARCHIVED',
@@ -250,7 +253,7 @@ export class TasksService {
   }
 
   // Kanban move
-  async moveTask(tenantId: string, id: string, dto: MoveTaskDto) {
+  async moveTask(tenantId: string, id: string, dto: MoveTaskDto, actorTenantUserId?: string) {
     const oldTask = await this.findOne(tenantId, id);
     const updated = await this.prisma.task.update({
       where: { id },
@@ -264,6 +267,7 @@ export class TasksService {
     if (dto.statusId && dto.statusId !== oldTask.statusId) {
       await this.activityLog.log({
         tenantId,
+        actorTenantUserId,
         entityType: 'Task',
         entityId: id,
         action: 'STATUS_CHANGED',
@@ -283,7 +287,7 @@ export class TasksService {
   }
 
   // Change status
-  async changeStatus(tenantId: string, id: string, statusId: string) {
+  async changeStatus(tenantId: string, id: string, statusId: string, actorTenantUserId?: string) {
     const oldTask = await this.findOne(tenantId, id);
     const data: any = { statusId };
     // Check if status is "done" category
@@ -305,6 +309,7 @@ export class TasksService {
 
       await this.activityLog.log({
         tenantId,
+        actorTenantUserId,
         entityType: 'Task',
         entityId: id,
         action,
@@ -324,7 +329,7 @@ export class TasksService {
   }
 
   // Change priority
-  async changePriority(tenantId: string, id: string, priorityId: string) {
+  async changePriority(tenantId: string, id: string, priorityId: string, actorTenantUserId?: string) {
     const oldTask = await this.findOne(tenantId, id);
     const updated = await this.prisma.task.update({
       where: { id },
@@ -335,6 +340,7 @@ export class TasksService {
     if (priorityId !== oldTask.priorityId) {
       await this.activityLog.log({
         tenantId,
+        actorTenantUserId,
         entityType: 'Task',
         entityId: id,
         action: 'PRIORITY_CHANGED',
@@ -375,6 +381,7 @@ export class TasksService {
 
     await this.activityLog.log({
       tenantId,
+      actorTenantUserId: authorTenantUserId,
       entityType: 'Task',
       entityId: taskId,
       action: 'COMMENT_ADDED',
@@ -390,7 +397,7 @@ export class TasksService {
     return comment;
   }
 
-  async removeComment(tenantId: string, commentId: string) {
+  async removeComment(tenantId: string, commentId: string, actorTenantUserId?: string) {
     const comment = await this.prisma.taskComment.findFirst({ where: { id: commentId, tenantId } });
     if (!comment) throw new NotFoundException('Comentário não encontrado');
 
@@ -406,6 +413,7 @@ export class TasksService {
 
     await this.activityLog.log({
       tenantId,
+      actorTenantUserId,
       entityType: 'Task',
       entityId: comment.taskId,
       action: 'COMMENT_REMOVED',
@@ -421,7 +429,7 @@ export class TasksService {
   }
 
   // Checklists
-  async createChecklist(tenantId: string, taskId: string, title: string) {
+  async createChecklist(tenantId: string, taskId: string, title: string, actorTenantUserId?: string) {
     const checklist = await this.prisma.taskChecklist.create({
       data: { tenantId, taskId, title },
     });
@@ -431,11 +439,12 @@ export class TasksService {
       select: { title: true, project: { select: { name: true, code: true } } },
     });
 
-    await this.activityLog.log({
-      tenantId,
-      entityType: 'Task',
-      entityId: taskId,
-      action: 'CHECKLIST_CREATED',
+      await this.activityLog.log({
+        tenantId,
+        actorTenantUserId,
+        entityType: 'Task',
+        entityId: taskId,
+        action: 'CHECKLIST_CREATED',
       newValues: {
         taskTitle: task?.title,
         projectName: task?.project?.name,
@@ -446,7 +455,7 @@ export class TasksService {
     return checklist;
   }
 
-  async addChecklistItem(tenantId: string, checklistId: string, content: string) {
+  async addChecklistItem(tenantId: string, checklistId: string, content: string, actorTenantUserId?: string) {
     const item = await this.prisma.taskChecklistItem.create({
       data: { tenantId, checklistId, content },
     });
@@ -459,6 +468,7 @@ export class TasksService {
     if (checklist?.task) {
       await this.activityLog.log({
         tenantId,
+        actorTenantUserId,
         entityType: 'Task',
         entityId: checklist.task.id,
         action: 'CHECKLIST_ITEM_ADDED',
@@ -495,6 +505,7 @@ export class TasksService {
     if (checklist?.task) {
       await this.activityLog.log({
         tenantId,
+        actorTenantUserId: tenantUserId,
         entityType: 'Task',
         entityId: checklist.task.id,
         action: !item.isDone ? 'CHECKLIST_ITEM_COMPLETED' : 'CHECKLIST_ITEM_UNCHECKED',
@@ -527,7 +538,7 @@ export class TasksService {
   }
 
   // Attachments
-  async removeAttachment(tenantId: string, taskId: string, attachmentId: string) {
+  async removeAttachment(tenantId: string, taskId: string, attachmentId: string, actorTenantUserId?: string) {
     const attachment = await this.prisma.attachment.findFirst({
       where: { id: attachmentId, tenantId, taskId },
     });
@@ -542,6 +553,7 @@ export class TasksService {
 
     await this.activityLog.log({
       tenantId,
+      actorTenantUserId,
       entityType: 'Task',
       entityId: taskId,
       action: 'ATTACHMENT_REMOVED',
