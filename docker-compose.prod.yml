@@ -43,6 +43,7 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: "http://2.25.105.206:3001/api"
+      API_BACKEND_URL: "http://mm-api:3001"
     networks:
       - quadro_net
     ports:
