@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { useSession, useBackgroundRefresh } from '@/lib/use-session';
@@ -12,7 +12,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { hydrated } = useSession();
   const user = useAuthStore((s) => s.user);
-  // Mantém sessão ativa com refresh periódico
+  const [mobileOpen, setMobileOpen] = useState(false);
   useBackgroundRefresh();
 
   useEffect(() => {
@@ -20,6 +20,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace('/login');
     }
   }, [hydrated, user, router]);
+
+  // Close mobile sidebar on navigation
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  const toggleMobile = useCallback(() => setMobileOpen((v) => !v), []);
 
   if (hydrated && !user) {
     return (
@@ -31,10 +38,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <Sidebar currentPath={pathname} />
+      <Sidebar currentPath={pathname} mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">
+        <Header onMenuToggle={toggleMobile} mobileOpen={mobileOpen} />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">
           {!hydrated ? (
             <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
               Carregando sessão...
