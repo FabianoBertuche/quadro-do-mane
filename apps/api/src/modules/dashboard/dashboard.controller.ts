@@ -44,8 +44,11 @@ export class DashboardController {
 
   @Get('daily-routine-summary')
   @RequirePermissions('dashboard.view')
-  dailyRoutineSummary(@CurrentUser('tenantId') tenantId: string) {
-    return this.dashboardService.getDailyRoutineSummary(tenantId);
+  dailyRoutineSummary(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('userId') userId?: string,
+  ) {
+    return this.dashboardService.getDailyRoutineSummary(tenantId, userId);
   }
 
   @Get('daily-routine-items')

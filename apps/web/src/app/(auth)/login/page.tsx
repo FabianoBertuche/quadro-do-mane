@@ -36,7 +36,7 @@ function LoginForm() {
       setSession({
         accessToken: res.data.accessToken,
         refreshToken: res.data.refreshToken,
-        user: res.data.user,
+        user: { ...res.data.user, tenantUserId: res.data.tenantUserId },
         tenant: res.data.tenant,
         permissions: res.data.permissions,
         role: res.data.role,

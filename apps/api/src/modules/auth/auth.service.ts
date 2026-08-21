@@ -256,6 +256,7 @@ export class AuthService {
       refreshToken: pair.tokens.refreshToken,
       user: tuWithRole?.user,
       tenant: tuWithRole?.tenant,
+      tenantUserId: tuWithRole?.id,
       permissions,
       role: tuWithRole?.role?.name,
     };

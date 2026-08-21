@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth';
 import {
   CheckSquare,
   PlayCircle,
@@ -62,9 +63,21 @@ function statusMeta(status: string | undefined) {
 }
 
 export default function DashboardPage() {
+  const currentUser = useAuthStore((s) => s.user);
+  const currentTenantUserId = currentUser?.tenantUserId;
   const { data: overview } = useQuery({
     queryKey: ['dashboard', 'overview'],
     queryFn: () => api.get('/dashboard/overview').then((r) => r.data),
+  });
+
+  const { data: myOverdueTasks } = useQuery({
+    queryKey: ['dashboard', 'my-overdue-tasks', currentTenantUserId],
+    queryFn: () =>
+      api.get('/tasks', { params: { overdue: 'true', assigneeTenantUserId: currentTenantUserId } }).then((r) => {
+        const data = r.data;
+        return Array.isArray(data) ? data.length : (data.total ?? 0);
+      }),
+    enabled: !!currentTenantUserId,
   });
 
   const { data: productivity } = useQuery({
@@ -217,8 +230,12 @@ export default function DashboardPage() {
   });
 
   const { data: dailyRoutine } = useQuery({
-    queryKey: ['dashboard', 'daily-routine-summary'],
-    queryFn: () => api.get('/dashboard/daily-routine-summary').then((r) => r.data),
+    queryKey: ['dashboard', 'daily-routine-summary', currentTenantUserId],
+    queryFn: () =>
+      api.get('/dashboard/daily-routine-summary', {
+        params: currentTenantUserId ? { userId: currentTenantUserId } : {},
+      }).then((r) => r.data),
+    enabled: !!currentTenantUserId,
   });
 
   const { data: activeUsers = [] } = useQuery({
@@ -243,9 +260,9 @@ export default function DashboardPage() {
     { name: 'Pendentes', value: (overview?.totalTasks || 0) - (overview?.completedTasks || 0) - (overview?.inProgressTasks || 0) - (overview?.overdueTasks || 0), color: '#64748B' },
   ].filter((d) => d.value > 0);
 
-  const totalOverdueRoutines = (dailyRoutine?.usersWithOverdueTasks?.reduce((sum: number, u: any) => sum + u.overdueCount, 0) ?? 0) + (dailyRoutine?.lateItems ?? 0);
+  const totalOverdueRoutines = dailyRoutine?.usersWithOverdueTasks?.reduce((sum: number, u: any) => sum + u.overdueCount, 0) ?? 0;
   const hasOverdueRoutines = totalOverdueRoutines > 0;
-  const hasOverdueTasks = (overview?.overdueTasks ?? 0) > 0;
+  const hasOverdueTasks = (myOverdueTasks ?? 0) > 0;
   const showOverdueAlert = hasOverdueRoutines || hasOverdueTasks;
 
   return (
@@ -270,20 +287,15 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-2 text-sm">
                     <Clock className="w-4 h-4 text-red-500 flex-shrink-0" />
                     <span className="text-red-600 font-medium">
-                      {totalOverdueRoutines} rotina{totalOverdueRoutines !== 1 ? 's' : ''} diária{totalOverdueRoutines !== 1 ? 's' : ''} pendente{totalOverdueRoutines !== 1 ? 's' : ''} ou atrasada{totalOverdueRoutines !== 1 ? 's' : ''}
+                      {totalOverdueRoutines} rotina{totalOverdueRoutines !== 1 ? 's' : ''} diária{totalOverdueRoutines !== 1 ? 's' : ''} pendente{totalOverdueRoutines !== 1 ? 's' : ''} sem registro
                     </span>
-                    {dailyRoutine.usersWithOverdueTasks?.length > 0 && (
-                      <span className="text-red-400">
-                        ({dailyRoutine.usersWithOverdueTasks.map((u: any) => u.userName).join(', ')})
-                      </span>
-                    )}
                   </div>
                 )}
                 {hasOverdueTasks && (
                   <div className="flex items-center gap-2 text-sm">
                     <CheckSquare className="w-4 h-4 text-red-500 flex-shrink-0" />
                     <span className="text-red-600 font-medium">
-                      {overview.overdueTasks} tarefa{overview.overdueTasks !== 1 ? 's' : ''} de projeto atrasada{overview.overdueTasks !== 1 ? 's' : ''}
+                      {myOverdueTasks} tarefa{myOverdueTasks !== 1 ? 's' : ''} de projeto atrasada{myOverdueTasks !== 1 ? 's' : ''}
                     </span>
                   </div>
                 )}

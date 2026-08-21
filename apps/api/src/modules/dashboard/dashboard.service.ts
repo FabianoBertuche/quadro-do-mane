@@ -153,32 +153,41 @@ export class DashboardService {
     });
   }
 
-  async getDailyRoutineSummary(tenantId: string) {
+  async getDailyRoutineSummary(tenantId: string, userId?: string) {
     const now = new Date();
     const today = now.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
+    const routineItemWhere: any = { tenantId, isActive: true };
+    if (userId) routineItemWhere.assignedTenantUserId = userId;
+
+    const logWhere: any = { tenantId, date: today, isCompleted: true };
+    if (userId) logWhere.routineItem = { assignedTenantUserId: userId };
+
+    const userFilter = userId ? `AND dri.assigned_tenant_user_id = '${userId}'` : '';
+
     const [totalItems, completedItems, lateItems, overdueByUser, onTimeByUser] = await Promise.all([
       this.prisma.dailyRoutineItem.count({
-        where: { tenantId, isActive: true },
+        where: routineItemWhere,
       }),
       this.prisma.dailyRoutineLog.count({
-        where: { tenantId, date: today, isCompleted: true },
+        where: logWhere,
       }),
-      this.prisma.$queryRaw<Array<{ count: bigint }>>`
+      this.prisma.$queryRawUnsafe<Array<{ count: bigint }>>(`
         SELECT COUNT(*) AS count
         FROM daily_routine_logs drl
         JOIN daily_routine_items dri ON drl.routine_item_id = dri.id
-        WHERE drl.tenant_id = ${tenantId}
-          AND drl.date = ${today}
+        WHERE drl.tenant_id = $1
+          AND drl.date = $2
           AND drl.is_completed = true
           AND dri.scheduled_time IS NOT NULL
           AND (drl.completed_at AT TIME ZONE 'America/Sao_Paulo')::time > dri.scheduled_time::time
-      `,
-      this.prisma.$queryRaw<Array<{
+          ${userFilter}
+      `, tenantId, today),
+      this.prisma.$queryRawUnsafe<Array<{
         tenant_user_id: string;
         user_name: string;
         overdue_count: bigint;
-      }>>`
+      }>>(`
         SELECT
           dri.assigned_tenant_user_id AS tenant_user_id,
           u.name AS user_name,
@@ -188,22 +197,25 @@ export class DashboardService {
         JOIN users u ON tu.user_id = u.id
         LEFT JOIN daily_routine_logs drl
           ON drl.routine_item_id = dri.id
-          AND drl.date = ${today}
+          AND drl.date = $3
           AND drl.is_completed = true
-        WHERE dri.tenant_id = ${tenantId}
+        WHERE dri.tenant_id = $1
           AND dri.is_active = true
           AND drl.id IS NULL
+          AND dri.scheduled_time IS NOT NULL
+          AND (NOW() AT TIME ZONE 'America/Sao_Paulo')::time > dri.scheduled_time::time
+          ${userFilter}
         GROUP BY dri.assigned_tenant_user_id, u.name
         ORDER BY overdue_count DESC
-      `,
-      this.prisma.$queryRaw<Array<{
+      `, tenantId, today, today),
+      this.prisma.$queryRawUnsafe<Array<{
         tenant_user_id: string;
         user_name: string;
         total_items: bigint;
         completed_items: bigint;
         on_time_items: bigint;
         late_items: bigint;
-      }>>`
+      }>>(`
         SELECT
           dri.assigned_tenant_user_id AS tenant_user_id,
           u.name AS user_name,
@@ -224,12 +236,13 @@ export class DashboardService {
         JOIN users u ON tu.user_id = u.id
         LEFT JOIN daily_routine_logs drl
           ON drl.routine_item_id = dri.id
-          AND drl.date = ${today}
-        WHERE dri.tenant_id = ${tenantId}
+          AND drl.date = $4
+        WHERE dri.tenant_id = $1
           AND dri.is_active = true
+          ${userFilter}
         GROUP BY dri.assigned_tenant_user_id, u.name
         ORDER BY user_name ASC
-      `,
+      `, tenantId, today, today, today),
     ]);
 
     const lateCount = Number(lateItems[0]?.count ?? 0);

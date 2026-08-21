@@ -56,6 +56,7 @@ export default function DailyRoutinePage() {
     onSuccess: () => {
       setError(null);
       queryClient.invalidateQueries({ queryKey: ['daily-routine'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (err: any) => {
       if (err?.response?.status === 409) {
