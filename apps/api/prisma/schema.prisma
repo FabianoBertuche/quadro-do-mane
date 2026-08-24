@@ -86,6 +86,7 @@ model Tenant {
   refreshTokens       RefreshToken[]
   dailyRoutineItems   DailyRoutineItem[]
   dailyRoutineLogs    DailyRoutineLog[]
+  pushDevices         PushDevice[]
 
   @@map("tenants")
 }
@@ -129,6 +130,7 @@ model TenantUser {
   assignedRoutineItems       DailyRoutineItem[]   @relation("AssignedRoutineUser")
   createdRoutineItems        DailyRoutineItem[]   @relation("CreatedRoutineUser")
   dailyRoutineLogs           DailyRoutineLog[]
+  pushDevices                PushDevice[]
 
   @@unique([tenantId, userId])
   @@map("tenant_users")
@@ -822,4 +824,20 @@ model DailyRoutineLog {
   @@index([tenantUserId])
   @@index([date])
   @@map("daily_routine_logs")
+}
+
+model PushDevice {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  tenantUserId  String   @map("tenant_user_id")
+  expoPushToken String   @unique @map("expo_push_token")
+  platform      String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantUserId])
+  @@map("push_devices")
 }

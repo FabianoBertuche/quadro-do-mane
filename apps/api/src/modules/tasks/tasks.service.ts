@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
+import { PushService } from '../push/push.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -10,6 +11,7 @@ export class TasksService {
   constructor(
     private prisma: PrismaService,
     private activityLog: ActivityLogService,
+    private push: PushService,
   ) {}
 
   async findAll(tenantId: string, projectId?: string) {
@@ -151,6 +153,24 @@ export class TasksService {
       },
     });
 
+    // Push para o responsável recém-atribuído (não notificar o próprio ator)
+    if (dto.assigneeTenantUserId && dto.assigneeTenantUserId !== actorTenantUserId) {
+      await this.prisma.notification.create({
+        data: {
+          tenantId,
+          tenantUserId: dto.assigneeTenantUserId,
+          type: 'task_assigned',
+          title: 'Nova tarefa atribuída',
+          message: task.title,
+        },
+      }).catch(() => undefined);
+      await this.push.sendToUser(dto.assigneeTenantUserId, {
+        title: 'Nova tarefa atribuída',
+        body: task.title,
+        data: { taskId: task.id },
+      });
+    }
+
     return task;
   }
 
@@ -225,6 +245,29 @@ export class TasksService {
           projectName: oldTask.project?.name,
           projectCode: oldTask.project?.code,
         },
+      });
+    }
+
+    // Push quando a tarefa é reatribuída (não notificar o próprio ator)
+    const newAssignee = dto.assigneeTenantUserId;
+    if (
+      newAssignee &&
+      newAssignee !== oldTask.assigneeTenantUserId &&
+      newAssignee !== actorTenantUserId
+    ) {
+      await this.prisma.notification.create({
+        data: {
+          tenantId,
+          tenantUserId: newAssignee,
+          type: 'task_assigned',
+          title: 'Tarefa atribuída a você',
+          message: updated.title,
+        },
+      }).catch(() => undefined);
+      await this.push.sendToUser(newAssignee, {
+        title: 'Tarefa atribuída a você',
+        body: updated.title,
+        data: { taskId: updated.id },
       });
     }
 

@@ -51,7 +51,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 3001"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
