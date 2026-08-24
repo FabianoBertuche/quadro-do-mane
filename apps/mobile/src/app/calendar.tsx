@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, SectionList, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, SectionList, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api } from '@/lib/api';
 import { CalendarEvent } from '@/lib/types';
 import { dayLabel, timeLabel } from '@/lib/format';
+import { can } from '@/lib/permissions';
 import { colors } from '@/theme/colors';
 import { Loading, ErrorState } from '@/components/ui';
 
@@ -16,6 +17,7 @@ interface Section {
 }
 
 export default function CalendarScreen() {
+  const router = useRouter();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -65,12 +67,22 @@ export default function CalendarScreen() {
   if (loading) return <Loading label="Carregando eventos..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;
 
+  const canCreate = can('calendar.create');
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Calendário</Text>
         <Text style={styles.subtitle}>{events.length} evento(s) nos próximos meses</Text>
       </View>
+      {canCreate ? (
+        <Pressable
+          onPress={() => router.push('/event-create')}
+          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        >
+          <Feather name="plus" size={24} color={colors.primaryForeground} />
+        </Pressable>
+      ) : null}
       <SectionList
         sections={sections}
         keyExtractor={(e) => e.id}
@@ -152,4 +164,21 @@ const styles = StyleSheet.create({
   name: { color: colors.foreground, fontSize: 14.5, fontWeight: '600' },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
   meta: { color: colors.mutedForeground, fontSize: 12 },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  fabPressed: { opacity: 0.85 },
 });

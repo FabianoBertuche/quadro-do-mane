@@ -23,6 +23,20 @@ export interface AssigneeInfo {
   user?: { name?: string | null; avatarUrl?: string | null } | null;
 }
 
+export interface TaskChecklistItem {
+  id: string;
+  content: string;
+  isDone: boolean;
+  position: number;
+}
+
+export interface TaskChecklist {
+  id: string;
+  title: string;
+  position: number;
+  items: TaskChecklistItem[];
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -39,6 +53,9 @@ export interface Task {
   assignee?: AssigneeInfo | null;
   project?: { id: string; name: string; color?: string | null } | null;
   _count?: { comments: number; checklists: number; attachments: number; subTasks: number };
+  checklists?: TaskChecklist[];
+  subTasks?: Task[];
+  parentTaskId?: string | null;
 }
 
 export interface Project {

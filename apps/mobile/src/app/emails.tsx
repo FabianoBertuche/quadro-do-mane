@@ -53,6 +53,12 @@ export default function EmailsScreen() {
         <Text style={styles.title}>E-mail</Text>
         <Text style={styles.subtitle}>{messages.length} mensagem(ns) na caixa de entrada</Text>
       </View>
+      <Pressable
+        onPress={() => router.push('/email-compose')}
+        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+      >
+        <Feather name="edit" size={20} color={colors.primaryForeground} />
+      </Pressable>
       <FlatList
         data={messages}
         keyExtractor={(m) => String(m.uid)}
@@ -130,5 +136,22 @@ const styles = StyleSheet.create({
   subject: { color: colors.mutedForeground, fontSize: 13.5, marginTop: 3 },
   unreadText: { color: colors.foreground, fontWeight: '700' },
   date: { color: colors.sidebarMuted, fontSize: 10.5, marginTop: 4 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  fabPressed: { opacity: 0.85 },
 });

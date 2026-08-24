@@ -1,13 +1,16 @@
 import { useCallback, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import Feather from '@expo/vector-icons/Feather';
 import { api } from '@/lib/api';
 import { Team } from '@/lib/types';
+import { can } from '@/lib/permissions';
 import { colors } from '@/theme/colors';
 import { Avatar, Loading, ErrorState } from '@/components/ui';
 
 export default function TeamsScreen() {
+  const router = useRouter();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,6 +44,14 @@ export default function TeamsScreen() {
         <Text style={styles.title}>Equipes</Text>
         <Text style={styles.subtitle}>{teams.length} equipe(s)</Text>
       </View>
+      {can('teams.create') ? (
+        <Pressable
+          onPress={() => router.push('/team-create')}
+          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        >
+          <Feather name="plus" size={24} color={colors.primaryForeground} />
+        </Pressable>
+      ) : null}
       <FlatList
         data={teams}
         keyExtractor={(t) => t.id}
@@ -116,4 +127,21 @@ const styles = StyleSheet.create({
   membersRow: { flexDirection: 'row', alignItems: 'center' },
   memberAvatar: { marginRight: -7 },
   counts: { marginLeft: 16, color: colors.sidebarMuted, fontSize: 11.5 },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  fabPressed: { opacity: 0.85 },
 });

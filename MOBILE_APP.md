@@ -106,11 +106,14 @@ No app os tokens vão em headers (`Authorization: Bearer`), guardados em
 Pendências da Fase 3 (próximas iterações):
 - [x] Editar projetos (nome/descrição/prazo) — chips de prazo rápido
 - [x] Edição completa da tarefa (título/descrição/prazo/responsável)
+- [x] Subtarefas: criar a partir da tarefa pai + lista navegável
+- [x] Checklists: criar checklist, adicionar itens, marcar/desmarcar (`tasks.checklist_manage`)
+- [x] Formulários de eventos (calendário), contatos e equipes (FAB "+")
 - [ ] Gerenciar membros do projeto
-- [ ] Checklists, anexos, subtarefas
+- [ ] Anexos (upload exige `tasks.edit`; rota `POST /upload/tasks/:taskId`)
 - [ ] Drag-and-drop por gesto longo no Kanban (hoje: setas ← → nas colunas)
-- [ ] Formulários de equipes/eventos/contatos (hoje: leitura)
-- [ ] Perfil: editar dados + upload de avatar (`/upload`)
+- [x] Perfil: editar dados (PATCH `/users/me/tenant-link`)
+- [ ] Upload de avatar (`/upload`)
 - [ ] E-mails (módulo web dedicado)
 
 > Permissões respeitadas via `can()`: botões de criar só aparecem com
@@ -126,9 +129,9 @@ Pendências da Fase 3 (próximas iterações):
 | Atividades (mudanças operacionais) | `/audit-log/activity` | ✅ |
 
 Pendências da Fase 4:
-- [ ] Responder/enviar e-mails (`/emails/send`, `/emails/reply`)
-- [ ] Gerenciar rotinas (admin: atribuir itens a usuários, eficiência)
-- [ ] Filtros de auditoria (ação/período/usuário)
+- [x] Responder/enviar e-mails (`/emails/send`, `/emails/reply`) — compose + reply
+- [x] Gerenciar rotinas (admin: atribuir itens a usuários; excluir via toque longo)
+- [x] Filtros de auditoria (ação/período)
 
 > Todas as entradas no menu "Mais" respeitam permissões
 > (`audit.view`, `email.view`) — igual à sidebar web.

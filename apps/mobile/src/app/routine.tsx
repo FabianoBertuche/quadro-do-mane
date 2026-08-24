@@ -13,9 +13,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api, apiErrorMessage } from '@/lib/api';
-import { RoutineItem } from '@/lib/types';
+import { RoutineItem, Collaborator } from '@/lib/types';
+import { can } from '@/lib/permissions';
 import { colors } from '@/theme/colors';
-import { Loading, ErrorState } from '@/components/ui';
+import { Loading, ErrorState, OptionChips } from '@/components/ui';
 
 export default function RoutineScreen() {
   const [items, setItems] = useState<RoutineItem[]>([]);
@@ -25,7 +26,11 @@ export default function RoutineScreen() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [time, setTime] = useState('');
+  const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  const [people, setPeople] = useState<Collaborator[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const isAdmin = can('daily_routine.manage');
 
   const load = useCallback(async () => {
     setError(null);
@@ -43,6 +48,12 @@ export default function RoutineScreen() {
   useFocusEffect(
     useCallback(() => {
       void load();
+      if (can('daily_routine.manage')) {
+        api
+          .get<Collaborator[]>('/users')
+          .then((u) => setPeople(u.data))
+          .catch(() => undefined);
+      }
     }, [load]),
   );
 
@@ -73,9 +84,11 @@ export default function RoutineScreen() {
         title: title.trim(),
         description: undefined,
         scheduledTime: /^\d{2}:\d{2}$/.test(time.trim()) ? time.trim() : undefined,
+        assignedTenantUserId: assigneeId ?? undefined,
       });
       setTitle('');
       setTime('');
+      setAssigneeId(null);
       setShowForm(false);
       await load();
     } catch (e) {
@@ -84,6 +97,23 @@ export default function RoutineScreen() {
       setSaving(false);
     }
   };
+
+  const removeItem = (item: RoutineItem) =>
+    Alert.alert('Excluir rotina', `Remover "${item.title}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.delete(`/daily-routine/${item.id}`);
+            await load();
+          } catch (e) {
+            Alert.alert('Erro', apiErrorMessage(e, 'Não foi possível excluir o item.'));
+          }
+        },
+      },
+    ]);
 
   if (loading) return <Loading label="Carregando rotina..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;
@@ -134,6 +164,19 @@ export default function RoutineScreen() {
               <Text style={styles.addBtnText}>Adicionar</Text>
             </Pressable>
           </View>
+          {isAdmin && people.length > 0 ? (
+            <>
+              <Text style={styles.assignLabel}>Atribuir a</Text>
+              <OptionChips
+                options={[
+                  { id: '__me__', name: 'Para mim' },
+                  ...people.map((c) => ({ id: c.id, name: c.user.name })),
+                ]}
+                valueId={assigneeId}
+                onSelect={(v) => setAssigneeId(v === '__me__' ? null : v)}
+              />
+            </>
+          ) : null}
         </View>
       ) : null}
 
@@ -157,6 +200,7 @@ export default function RoutineScreen() {
           return (
             <Pressable
               onPress={() => void toggleComplete(item)}
+              onLongPress={isAdmin ? () => removeItem(item) : undefined}
               disabled={doneToday}
               style={({ pressed }) => [
                 styles.item,
@@ -237,6 +281,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: { color: colors.primaryForeground, fontWeight: '700', fontSize: 13 },
+  assignLabel: {
+    color: colors.sidebarText,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   disabled: { opacity: 0.5 },
   list: { padding: 20, paddingTop: 4, paddingBottom: 40, gap: 10 },
   empty: { color: colors.mutedForeground, textAlign: 'center', marginTop: 40 },

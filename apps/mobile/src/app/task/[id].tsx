@@ -48,6 +48,15 @@ export default function TaskDetailScreen() {
   const [formDue, setFormDue] = useState<string | null>(null);
   const [formAssignee, setFormAssignee] = useState<string | null>(null);
 
+  // subtarefas + checklists
+  const [newSubTask, setNewSubTask] = useState('');
+  const [addingSubTask, setAddingSubTask] = useState(false);
+  const [newChecklist, setNewChecklist] = useState('');
+  const [addingChecklist, setAddingChecklist] = useState(false);
+  const [newItemText, setNewItemText] = useState('');
+  const [newItemChecklistId, setNewItemChecklistId] = useState<string | null>(null);
+  const [addingItem, setAddingItem] = useState(false);
+
   const load = useCallback(async () => {
     if (!id) return;
     setError(null);
@@ -173,6 +182,76 @@ export default function TaskDetailScreen() {
     const d = new Date();
     d.setDate(d.getDate() + days);
     setFormDue(d.toISOString().slice(0, 10));
+  };
+
+  const addSubTask = async () => {
+    if (!task || !newSubTask.trim() || addingSubTask) return;
+    setAddingSubTask(true);
+    try {
+      await api.post('/tasks', {
+        projectId: task.project?.id,
+        parentTaskId: task.id,
+        title: newSubTask.trim(),
+      });
+      setNewSubTask('');
+      await load();
+    } catch (e) {
+      Alert.alert('Erro', apiErrorMessage(e, 'Não foi possível criar a subtarefa.'));
+    } finally {
+      setAddingSubTask(false);
+    }
+  };
+
+  const addChecklist = async () => {
+    if (!task || !newChecklist.trim() || addingChecklist) return;
+    setAddingChecklist(true);
+    try {
+      await api.post(`/tasks/${task.id}/checklists`, { title: newChecklist.trim() });
+      setNewChecklist('');
+      await load();
+    } catch (e) {
+      Alert.alert('Erro', apiErrorMessage(e, 'Não foi possível criar o checklist.'));
+    } finally {
+      setAddingChecklist(false);
+    }
+  };
+
+  const addItem = async (checklistId: string) => {
+    if (!newItemText.trim() || addingItem) return;
+    setAddingItem(true);
+    try {
+      await api.post(`/tasks/checklists/${checklistId}/items`, {
+        content: newItemText.trim(),
+      });
+      setNewItemText('');
+      await load();
+    } catch (e) {
+      Alert.alert('Erro', apiErrorMessage(e, 'Não foi possível adicionar o item.'));
+    } finally {
+      setAddingItem(false);
+    }
+  };
+
+  const toggleItem = async (itemId: string) => {
+    // atualização otimista
+    setTask((prev) =>
+      prev
+        ? {
+            ...prev,
+            checklists: prev.checklists?.map((cl) => ({
+              ...cl,
+              items: cl.items.map((it) =>
+                it.id === itemId ? { ...it, isDone: !it.isDone } : it,
+              ),
+            })),
+          }
+        : prev,
+    );
+    try {
+      await api.patch(`/tasks/checklist-items/${itemId}/toggle`);
+    } catch {
+      await load();
+    }
   };
 
   if (loading) return <Loading label="Carregando tarefa..." />;
@@ -310,6 +389,164 @@ export default function TaskDetailScreen() {
             value={task.assignee?.user?.name ?? 'Não atribuída'}
           />
           <MetaRow icon="calendar" label="Prazo" value={formatDateTime(task.dueDate)} />
+        </View>
+
+        {/* Subtarefas */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Subtarefas ({task.subTasks?.length ?? 0})
+          </Text>
+          {(task.subTasks ?? []).map((st) => {
+            const done = st.status?.category === 'done';
+            return (
+              <Pressable
+                key={st.id}
+                onPress={() => router.push(`/task/${st.id}`)}
+                style={({ pressed }) => [styles.subTaskCard, pressed && styles.pressedCard]}
+              >
+                <Feather
+                  name={done ? 'check-circle' : 'circle'}
+                  size={16}
+                  color={done ? colors.success : colors.mutedForeground}
+                />
+                <Text
+                  style={[styles.subTaskTitle, done && styles.subTaskDone]}
+                  numberOfLines={1}
+                >
+                  {st.title}
+                </Text>
+                {st.assignee?.user?.name ? (
+                  <Avatar name={st.assignee.user.name} size={20} />
+                ) : null}
+              </Pressable>
+            );
+          })}
+          {can('tasks.create') ? (
+            <View style={styles.subTaskForm}>
+              <TextInput
+                style={[styles.commentInput, styles.subTaskInput]}
+                placeholder="Nova subtarefa..."
+                placeholderTextColor={colors.mutedForeground}
+                value={newSubTask}
+                onChangeText={setNewSubTask}
+              />
+              <Pressable
+                onPress={() => void addSubTask()}
+                disabled={!newSubTask.trim() || addingSubTask}
+                style={[styles.sendBtn, (!newSubTask.trim() || addingSubTask) && styles.disabled]}
+              >
+                {addingSubTask ? (
+                  <ActivityIndicator size="small" color={colors.primaryForeground} />
+                ) : (
+                  <Feather name="plus" size={17} color={colors.primaryForeground} />
+                )}
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Checklists */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Checklists</Text>
+          {(task.checklists ?? []).length === 0 && !can('tasks.checklist_manage') ? (
+            <Text style={styles.hintText}>Nenhum checklist.</Text>
+          ) : null}
+          {(task.checklists ?? []).map((cl) => {
+            const total = cl.items.length;
+            const done = cl.items.filter((i) => i.isDone).length;
+            return (
+              <View key={cl.id} style={styles.checklistCard}>
+                <View style={styles.checklistHeader}>
+                  <Text style={styles.checklistTitle} numberOfLines={1}>{cl.title}</Text>
+                  <Text style={styles.checklistCount}>{done}/{total}</Text>
+                </View>
+                {total > 0 ? (
+                  <View style={styles.barBg}>
+                    <View
+                      style={[
+                        styles.barFill,
+                        { width: `${Math.round((done / total) * 100)}%` },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+                {cl.items.map((it) => (
+                  <Pressable
+                    key={it.id}
+                    onPress={() =>
+                      can('tasks.checklist_manage') ? void toggleItem(it.id) : undefined
+                    }
+                    disabled={!can('tasks.checklist_manage')}
+                    style={({ pressed }) => [
+                      styles.checklistItem,
+                      pressed && can('tasks.checklist_manage') && styles.pressedCard,
+                    ]}
+                  >
+                    <View style={[styles.itemBox, it.isDone && styles.itemBoxDone]}>
+                      {it.isDone ? (
+                        <Feather name="check" size={12} color="#fff" />
+                      ) : null}
+                    </View>
+                    <Text style={[styles.itemText, it.isDone && styles.itemTextDone]}>
+                      {it.content}
+                    </Text>
+                  </Pressable>
+                ))}
+                {can('tasks.checklist_manage') ? (
+                  <View style={styles.subTaskForm}>
+                    <TextInput
+                      style={[styles.commentInput, styles.subTaskInput]}
+                      placeholder="Novo item..."
+                      placeholderTextColor={colors.mutedForeground}
+                      value={newItemChecklistId === cl.id ? newItemText : ''}
+                      onChangeText={setNewItemText}
+                      onFocus={() => setNewItemChecklistId(cl.id)}
+                    />
+                    <Pressable
+                      onPress={() => void addItem(cl.id)}
+                      disabled={
+                        !(
+                          (newItemChecklistId === cl.id ? newItemText : '').trim()
+                        ) || addingItem
+                      }
+                      style={[
+                        styles.sendBtn,
+                        !(newItemChecklistId === cl.id ? newItemText : '').trim() &&
+                          styles.disabled,
+                      ]}
+                    >
+                      <Feather name="plus" size={17} color={colors.primaryForeground} />
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+          {can('tasks.checklist_manage') ? (
+            <View style={styles.subTaskForm}>
+              <TextInput
+                style={[styles.commentInput, styles.subTaskInput]}
+                placeholder="Novo checklist..."
+                placeholderTextColor={colors.mutedForeground}
+                value={newChecklist}
+                onChangeText={setNewChecklist}
+              />
+              <Pressable
+                onPress={() => void addChecklist()}
+                disabled={!newChecklist.trim() || addingChecklist}
+                style={[
+                  styles.sendBtn,
+                  (!newChecklist.trim() || addingChecklist) && styles.disabled,
+                ]}
+              >
+                {addingChecklist ? (
+                  <ActivityIndicator size="small" color={colors.primaryForeground} />
+                ) : (
+                  <Feather name="plus" size={17} color={colors.primaryForeground} />
+                )}
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         {/* Comentários */}
@@ -521,4 +758,70 @@ const styles = StyleSheet.create({
   commentAuthor: { color: colors.sidebarText, fontWeight: '700', fontSize: 13 },
   commentDate: { color: colors.sidebarMuted, fontSize: 11 },
   commentContent: { color: colors.mutedForeground, fontSize: 13.5, marginTop: 4, lineHeight: 19 },
+  pressedCard: { opacity: 0.7 },
+  hintText: { color: colors.sidebarMuted, fontSize: 12.5 },
+  subTaskCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.card,
+    borderColor: colors.cardBorder,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  subTaskTitle: { flex: 1, color: colors.foreground, fontSize: 13.5, fontWeight: '600' },
+  subTaskDone: { textDecorationLine: 'line-through', color: colors.mutedForeground },
+  subTaskForm: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  subTaskInput: { minHeight: 40, maxHeight: 80, paddingTop: 9, paddingBottom: 9 },
+  checklistCard: {
+    backgroundColor: colors.card,
+    borderColor: colors.cardBorder,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+  },
+  checklistHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  checklistTitle: {
+    flex: 1,
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  checklistCount: { color: colors.mutedForeground, fontSize: 12, fontWeight: '600' },
+  barBg: {
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.muted,
+    overflow: 'hidden',
+    marginVertical: 8,
+  },
+  barFill: { height: '100%', backgroundColor: colors.success, borderRadius: 3 },
+  checklistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingVertical: 6,
+  },
+  itemBox: {
+    width: 18,
+    height: 18,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemBoxDone: { backgroundColor: colors.success, borderColor: colors.success },
+  itemText: { flex: 1, color: colors.sidebarText, fontSize: 13 },
+  itemTextDone: { textDecorationLine: 'line-through', color: colors.mutedForeground },
 });

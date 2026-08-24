@@ -49,7 +49,10 @@ export default function MoreScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Perfil */}
-        <View style={styles.profileCard}>
+        <Pressable
+          onPress={() => router.push('/profile-edit')}
+          style={({ pressed }) => [styles.profileCard, pressed && { opacity: 0.8 }]}
+        >
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
               {user?.name?.charAt(0)?.toUpperCase() ?? 'U'}
@@ -63,7 +66,8 @@ export default function MoreScreen() {
               {role ? ` · ${role}` : ''}
             </Text>
           </View>
-        </View>
+          <Feather name="edit-2" size={16} color={colors.sidebarMuted} />
+        </Pressable>
 
         {/* Seções */}
         <View style={styles.sectionCard}>

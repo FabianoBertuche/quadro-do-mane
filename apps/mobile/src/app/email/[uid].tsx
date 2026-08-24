@@ -6,6 +6,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { api, apiErrorMessage, API_URL } from '@/lib/api';
 import axios from 'axios';
 import { useAuthStore } from '@/lib/auth';
+import { can } from '@/lib/permissions';
 import { formatDateTime } from '@/lib/format';
 import { colors } from '@/theme/colors';
 import { Loading, ErrorState } from '@/components/ui';
@@ -62,7 +63,27 @@ export default function EmailDetailScreen() {
           <Feather name="arrow-left" size={22} color={colors.foreground} />
         </Pressable>
         <Text style={styles.topTitle}>Mensagem</Text>
-        <View style={{ width: 22 }} />
+        {can('email.view') ? (
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/email-compose',
+                params: {
+                  replyToUid: String(uid),
+                  to: email?.fromAddress ?? email?.from ?? '',
+                  subject: email?.subject?.startsWith('Re:')
+                    ? email.subject
+                    : `Re: ${email?.subject ?? ''}`,
+                },
+              } as never)
+            }
+            hitSlop={10}
+          >
+            <Feather name="corner-up-left" size={21} color={colors.primary} />
+          </Pressable>
+        ) : (
+          <View style={{ width: 22 }} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>

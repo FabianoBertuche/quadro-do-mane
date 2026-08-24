@@ -1,14 +1,16 @@
 import { useCallback, useState } from 'react';
-import { View, Text, FlatList, TextInput, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, FlatList, TextInput, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api } from '@/lib/api';
 import { Contact } from '@/lib/types';
+import { can } from '@/lib/permissions';
 import { colors } from '@/theme/colors';
 import { Avatar, Loading, ErrorState } from '@/components/ui';
 
 export default function ContactsScreen() {
+  const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,14 @@ export default function ContactsScreen() {
         <Text style={styles.title}>Contatos</Text>
         <Text style={styles.subtitle}>{filtered.length} contato(s)</Text>
       </View>
+      {can('contacts.create') ? (
+        <Pressable
+          onPress={() => router.push('/contact-create')}
+          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        >
+          <Feather name="plus" size={24} color={colors.primaryForeground} />
+        </Pressable>
+      ) : null}
       <View style={styles.searchWrap}>
         <Feather name="search" size={16} color={colors.mutedForeground} />
         <TextInput
@@ -141,4 +151,21 @@ const styles = StyleSheet.create({
   metaCol: { gap: 3 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   meta: { color: colors.mutedForeground, fontSize: 12 },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  fabPressed: { opacity: 0.85 },
 });
