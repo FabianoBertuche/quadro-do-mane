@@ -104,8 +104,10 @@ No app os tokens vão em headers (`Authorization: Bearer`), guardados em
 | Contatos (busca local) | `/contacts` | ✅ |
 
 Pendências da Fase 3 (próximas iterações):
-- [ ] Editar/excluir projetos; gerenciar membros
-- [ ] Edição completa da tarefa (título/descrição/prazo), checklists, anexos, subtarefas
+- [x] Editar projetos (nome/descrição/prazo) — chips de prazo rápido
+- [x] Edição completa da tarefa (título/descrição/prazo/responsável)
+- [ ] Gerenciar membros do projeto
+- [ ] Checklists, anexos, subtarefas
 - [ ] Drag-and-drop por gesto longo no Kanban (hoje: setas ← → nas colunas)
 - [ ] Formulários de equipes/eventos/contatos (hoje: leitura)
 - [ ] Perfil: editar dados + upload de avatar (`/upload`)
@@ -147,8 +149,8 @@ Mobile:
 Observações de operação:
 - Em **Expo Go** o push funciona sem Firebase. Para o **APK standalone**
   será preciso `extra.eas.projectId` no app.json + conta Expo (Fase 6).
-- O container `quadro-api` precisa ser rebuildado para expor os novos
-  endpoints: `docker compose build api && docker compose up -d api`.
+- ✅ 24/08/2026: API de produção rebuildada — endpoints `/api/push-devices`
+  (POST/DELETE) ativos em https://montemoria.com/api (401 sem JWT = correto).
 
 ### Fase 6 — Build APK (EAS) — ✅ CONCLUÍDA
 - [x] Projeto vinculado: **@phalgus/quadro-do-mane**
