@@ -171,7 +171,11 @@ O link para download aparece no final do log (ou em expo.dev → Builds).
 > são ignorados pelo git e não sobem para o EAS.
 
 **APK atual (produção, apontando para https://montemoria.com/api):**
-https://expo.dev/artifacts/eas/xMmZIpV6PiwjtyOvn-pvg6g1HtmU_xPXzjfxpHqZBSI.apk
+https://expo.dev/artifacts/eas/uuqsILFgsshIYtQahJNCE8ykABZR1cR-5k9JFuFfUQw.apk
+
+> Build 24/08/2026 (`582f110d`) inclui: edição completa de tarefas
+> (título/descrição/prazo/responsável) e editar/excluir projetos.
+> Build anterior (v1): `xMmZIpV6...apk`.
 
 **Push standalone (opcional):** o APK atual funciona sem Firebase. Para push
 nativo no APK, crie projeto no Firebase Console, gere o `google-services.json`
