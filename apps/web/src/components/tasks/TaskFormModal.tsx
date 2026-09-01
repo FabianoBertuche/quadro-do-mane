@@ -124,8 +124,6 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       if (!formData.id && result?.id) {
         setCreatedTaskId(result.id);
-      } else {
-        onClose();
       }
     },
   });
