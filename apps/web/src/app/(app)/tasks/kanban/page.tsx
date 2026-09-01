@@ -272,6 +272,7 @@ export default function KanbanPage() {
         initialData={editingTask ? {
           id: editingTask.id,
           title: editingTask.title,
+          description: editingTask.description,
           projectId: editingTask.projectId,
           statusId: editingTask.statusId,
           priorityId: editingTask.priorityId,
