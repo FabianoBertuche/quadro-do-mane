@@ -5,6 +5,7 @@ import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
+import { FilterTasksDto } from './dto/filter-tasks.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PermissionGuard } from '../../common/guards/permission.guard';
@@ -21,24 +22,19 @@ export class TasksController {
   @Get()
   @RequirePermissions('tasks.view')
   findAll(
-    @CurrentUser('tenantId') tenantId: string,
-    @Query('projectId') projectId?: string,
-    @Query('statusId') statusId?: string,
-    @Query('assigneeTenantUserId') assigneeTenantUserId?: string,
-    @Query('overdue') overdue?: string,
-    @Query('completed') completed?: string,
+    @CurrentUser() user: RequestUser,
+    @Query() filters: FilterTasksDto,
   ) {
-    if (statusId || assigneeTenantUserId || overdue || completed) {
-      return this.tasksService.findByFilters(tenantId, {
-        projectId,
-        statusId,
-        assigneeTenantUserId,
-        overdue: overdue === 'true',
-        completed: completed === 'true',
-      });
+    const serviceFilters: any = { ...filters };
+
+    if (filters.overdue) serviceFilters.overdue = filters.overdue === 'true';
+    if (filters.completed) serviceFilters.completed = filters.completed === 'true';
+    if (filters.myTasks && filters.myTasks === 'true') {
+      serviceFilters.assigneeTenantUserId = user.tenantUserId;
     }
-    if (projectId) return this.tasksService.findByProject(tenantId, projectId);
-    return this.tasksService.findAll(tenantId);
+    if (filters.blocked) serviceFilters.blocked = filters.blocked === 'true';
+
+    return this.tasksService.findByFilters(user.tenantId, serviceFilters);
   }
 
   @Get('statuses')
@@ -51,6 +47,12 @@ export class TasksController {
   @RequirePermissions('tasks.view')
   getPriorities(@CurrentUser('tenantId') tenantId: string) {
     return this.tasksService.getPriorities(tenantId);
+  }
+
+  @Get('tags')
+  @RequirePermissions('tasks.view')
+  getTags(@CurrentUser('tenantId') tenantId: string) {
+    return this.tasksService.getTags(tenantId);
   }
 
   @Get(':id')

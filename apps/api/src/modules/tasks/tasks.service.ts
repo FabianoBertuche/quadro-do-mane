@@ -36,14 +36,30 @@ export class TasksService {
     projectId?: string;
     statusId?: string;
     assigneeTenantUserId?: string;
+    priorityId?: string;
+    teamId?: string;
+    tagId?: string;
     overdue?: boolean;
     completed?: boolean;
+    myTasks?: boolean;
+    blocked?: boolean;
+    search?: string;
+    startDateFrom?: string;
+    startDateTo?: string;
+    dueDateFrom?: string;
+    dueDateTo?: string;
   }) {
     const where: any = { tenantId, archivedAt: null };
 
     if (filters.projectId) where.projectId = filters.projectId;
     if (filters.statusId) where.statusId = filters.statusId;
     if (filters.assigneeTenantUserId) where.assigneeTenantUserId = filters.assigneeTenantUserId;
+    if (filters.priorityId) where.priorityId = filters.priorityId;
+    if (filters.teamId) where.teamId = filters.teamId;
+
+    if (filters.tagId) {
+      where.tagLinks = { some: { tagId: filters.tagId } };
+    }
 
     if (filters.overdue) {
       where.dueDate = { lt: new Date() };
@@ -54,6 +70,29 @@ export class TasksService {
       where.status = { category: 'done' };
     }
 
+    if (filters.blocked) {
+      where.isBlocked = true;
+    }
+
+    if (filters.search) {
+      where.OR = [
+        { title: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (filters.startDateFrom || filters.startDateTo) {
+      where.startDate = {};
+      if (filters.startDateFrom) where.startDate.gte = new Date(filters.startDateFrom);
+      if (filters.startDateTo) where.startDate.lte = new Date(filters.startDateTo);
+    }
+
+    if (filters.dueDateFrom || filters.dueDateTo) {
+      if (!where.dueDate) where.dueDate = {};
+      if (filters.dueDateFrom) where.dueDate.gte = new Date(filters.dueDateFrom);
+      if (filters.dueDateTo) where.dueDate.lte = new Date(filters.dueDateTo);
+    }
+
     return this.prisma.task.findMany({
       where,
       include: {
@@ -61,9 +100,10 @@ export class TasksService {
         priority: true,
         assignee: { include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } } },
         project: { select: { id: true, name: true, code: true } },
+        tagLinks: { include: { tag: true } },
         _count: { select: { comments: true, attachments: true, checklists: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
     });
   }
 
@@ -577,6 +617,13 @@ export class TasksService {
     return this.prisma.taskPriority.findMany({
       where: { tenantId },
       orderBy: { level: 'asc' },
+    });
+  }
+
+  async getTags(tenantId: string) {
+    return this.prisma.taskTag.findMany({
+      where: { tenantId },
+      orderBy: { name: 'asc' },
     });
   }
 
