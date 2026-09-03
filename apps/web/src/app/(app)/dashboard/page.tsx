@@ -720,7 +720,7 @@ function DrillDownModal({
 
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
   const { data: statuses = [] } = useQuery({
@@ -772,7 +772,7 @@ function DrillDownModal({
             className="px-3 py-1.5 rounded-lg text-xs bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="">Todos os usuários</option>
-            {users.map((u: any) => (
+            {(users || []).filter((u: any) => u.isActive !== false).map((u: any) => (
               <option key={u.id} value={u.id}>{u.user?.name}</option>
             ))}
           </select>
@@ -902,7 +902,7 @@ function RoutineDetailModal({
 
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
   const filteredRoutines = useMemo(() => {
@@ -975,7 +975,7 @@ function RoutineDetailModal({
             className="px-3 py-1.5 rounded-lg text-xs bg-card border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="">Todos os usuários</option>
-            {users.map((u: any) => (
+            {(users || []).filter((u: any) => u.isActive !== false).map((u: any) => (
               <option key={u.id} value={u.id}>{u.user?.name}</option>
             ))}
           </select>

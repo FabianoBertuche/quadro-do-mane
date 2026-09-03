@@ -42,10 +42,11 @@ export class UsersService {
   // Queries
   // ────────────────────────────────────────────────────────────────────────
 
-  async findAll(tenantId: string, status?: TenantUserStatusEnum) {
+  async findAll(tenantId: string, status?: TenantUserStatusEnum, activeOnly?: boolean) {
     return this.prisma.tenantUser.findMany({
       where: {
         tenantId,
+        ...(activeOnly ? { isActive: true, status: 'ACTIVE' as any } : {}),
         ...(status ? { status } : {}),
       },
       include: {

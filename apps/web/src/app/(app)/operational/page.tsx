@@ -278,7 +278,7 @@ export default function OperationalDashboardPage() {
 
   const { data: users } = useQuery<UserOption[]>({
     queryKey: ['users-list'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
   const { data, isLoading, isError, isFetching } = useQuery<ActivityEntry[]>({
@@ -377,7 +377,7 @@ export default function OperationalDashboardPage() {
               onChange={(e) => setUserId(e.target.value)}
             >
               <option value="">Todos</option>
-              {users?.map((u) => (
+              {users?.filter((u: any) => u.isActive !== false).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.user.name}{u.role ? ` — ${u.role.name}` : ''}
                 </option>

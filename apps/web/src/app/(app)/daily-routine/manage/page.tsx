@@ -67,7 +67,7 @@ export default function ManageRoutinesPage() {
   // Fetch users list
   const { data: users, isLoading: usersLoading } = useQuery<TenantUserOption[]>({
     queryKey: ['users-list'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
   // Fetch routines for selected user
@@ -240,11 +240,11 @@ export default function ManageRoutinesPage() {
             <option value="" disabled>
               {usersLoading ? 'Carregando colaboradores...' : 'Selecione um colaborador...'}
             </option>
-            {users?.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.user.name} — {u.user.email}
-              </option>
-            ))}
+  {(users || []).filter((u: any) => u.isActive !== false).map((u) => (
+    <option key={u.id} value={u.id}>
+      {u.user.name} — {u.user.email}
+    </option>
+  ))}
           </select>
         </div>
       </div>

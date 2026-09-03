@@ -36,7 +36,7 @@ export default function CreateRoutinePage() {
 
   const { data: users, isLoading: usersLoading } = useQuery<TenantUserOption[]>({
     queryKey: ['users-list'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
   const mutation = useMutation({
@@ -180,11 +180,11 @@ export default function CreateRoutinePage() {
                   <option value="">
                     {usersLoading ? 'Carregando...' : 'Selecione um colaborador'}
                   </option>
-                  {users?.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.user.name}{u.role ? ` — ${u.role.name}` : ''}
-                    </option>
-                  ))}
+  {(users || []).filter((u: any) => u.isActive !== false).map((u) => (
+    <option key={u.id} value={u.id}>
+      {u.user.name}{u.role ? ` — ${u.role.name}` : ''}
+    </option>
+  ))}
                 </select>
               </div>
             </div>

@@ -83,7 +83,7 @@ export default function ProjectsPage() {
   // users.view, a query falha silenciosamente (error=null) e `users` fica undefined.
   const usersQuery = useQuery<any[]>({
     queryKey: ['users'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
     retry: false,
   });
 
@@ -343,12 +343,12 @@ export default function ProjectsPage() {
                 className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               >
                 <option value="">Sem responsável definido</option>
-                {(users ?? []).map((u: any) => (
-                  <option key={u.id} value={u.id}>
-                    {u.user?.name}
-                    {u.role?.name ? ` (${u.role.name})` : ''}
-                  </option>
-                ))}
+    {(users ?? []).filter((u: any) => u.isActive !== false).map((u: any) => (
+      <option key={u.id} value={u.id}>
+        {u.user?.name}
+        {u.role?.name ? ` (${u.role.name})` : ''}
+      </option>
+    ))}
               </select>
             )}
           </div>

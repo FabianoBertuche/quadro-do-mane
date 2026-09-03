@@ -91,7 +91,7 @@ export function TaskDetailModal({ task, onClose, defaultEdit }: TaskDetailModalP
   // Fetch dropdown data for edit form
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
   const { data: statuses = [] } = useQuery({
@@ -343,7 +343,7 @@ export function TaskDetailModal({ task, onClose, defaultEdit }: TaskDetailModalP
                     className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   >
                     <option value="">Nenhum responsável</option>
-                    {users.map((u: any) => (
+                    {(users || []).filter((u: any) => u.isActive !== false).map((u: any) => (
                       <option key={u.id} value={u.id}>{u.user?.name} {u.role?.name ? `(${u.role.name})` : ''}</option>
                     ))}
                   </select>

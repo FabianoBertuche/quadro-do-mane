@@ -99,6 +99,31 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
     enabled: isOpen,
   });
 
+  const uploadAttachment = useMutation({
+    mutationFn: ({ taskId, file }: { taskId: string; file: File }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return api.post(`/upload/tasks/${taskId}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300_000,
+      }).then((r) => r.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      setUploadError(null);
+    },
+    onError: (error: any) => {
+      const msg = error?.response?.data?.message;
+      if (typeof msg === 'string') {
+        setUploadError(msg);
+      } else if (Array.isArray(msg) && msg.length > 0) {
+        setUploadError(msg[0]);
+      } else {
+        setUploadError('Erro ao enviar arquivo.');
+      }
+    },
+  });
+
   const createMutation = useMutation({
     mutationFn: (data: typeof formData) => {
       const payload: any = { ...data };
@@ -124,31 +149,14 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       if (!formData.id && result?.id) {
         setCreatedTaskId(result.id);
-      }
-    },
-  });
-
-  const uploadAttachment = useMutation({
-    mutationFn: ({ taskId, file }: { taskId: string; file: File }) => {
-      const fd = new FormData();
-      fd.append('file', file);
-      return api.post(`/upload/tasks/${taskId}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 300_000,
-      }).then((r) => r.data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      setUploadError(null);
-    },
-    onError: (error: any) => {
-      const msg = error?.response?.data?.message;
-      if (typeof msg === 'string') {
-        setUploadError(msg);
-      } else if (Array.isArray(msg) && msg.length > 0) {
-        setUploadError(msg[0]);
-      } else {
-        setUploadError('Erro ao enviar arquivo.');
+        if (pendingFiles.length > 0) {
+          (async () => {
+            for (const file of pendingFiles) {
+              await uploadAttachment.mutateAsync({ taskId: result.id, file });
+            }
+            setPendingFiles([]);
+          })();
+        }
       }
     },
   });
@@ -192,6 +200,7 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
 
   const isEditing = !!formData.id;
   const isCreated = !!createdTaskId;
+  const hasTaskId = isEditing || isCreated;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={isEditing ? `Editar: ${formData.title}` : isCreated ? 'Tarefa Criada' : 'Nova Tarefa'}>
@@ -298,9 +307,25 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
           </div>
         </div>
 
-        <div className="flex justify-between pt-2 items-center">
-          {formData.id && (
-            <span className="text-xs text-muted-foreground mr-auto">Deixe vazio para limpar status ou responsável.</span>
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadAttachment.isPending}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <Paperclip className="w-4 h-4" />
+            Anexar
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+          {pendingFiles.length > 0 && (
+            <span className="text-xs text-muted-foreground">{pendingFiles.length} arquivo(s) selecionado(s)</span>
           )}
           <button
             type="submit"
@@ -312,27 +337,16 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
         </div>
       </form>
 
-      {/* Attachments Section - shown after task creation */}
-      {isCreated && (
-        <div className="mt-6 pt-4 border-t border-border space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-foreground">Anexos</h3>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadAttachment.isPending}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
-            >
-              <Paperclip className="w-3.5 h-3.5" />
-              {uploadAttachment.isPending ? 'Enviando...' : 'Adicionar arquivo'}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-          </div>
+      {/* Pending files list + Upload section */}
+      {pendingFiles.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-border space-y-3">
+          <h3 className="text-sm font-semibold text-foreground">Arquivos selecionados</h3>
+
+          {!hasTaskId && (
+            <p className="text-xs text-muted-foreground">
+              Os arquivos serão enviados automaticamente ao criar a tarefa.
+            </p>
+          )}
 
           {uploadError && (
             <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs">
@@ -341,26 +355,25 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
             </div>
           )}
 
-          {/* Pending files */}
-          {pendingFiles.length > 0 && (
-            <div className="space-y-2">
-              {pendingFiles.map((file, idx) => (
-                <div key={idx} className="flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border">
-                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                    <FileText className="w-5 h-5 text-muted-foreground" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{formatFileSize(file.size)}</p>
-                  </div>
-                  <button
-                    onClick={() => removePendingFile(idx)}
-                    className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500 transition-colors shrink-0"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+          <div className="space-y-2">
+            {pendingFiles.map((file, idx) => (
+              <div key={idx} className="flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border">
+                <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                  <FileText className="w-5 h-5 text-muted-foreground" />
                 </div>
-              ))}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
+                  <p className="text-[11px] text-muted-foreground">{formatFileSize(file.size)}</p>
+                </div>
+                <button
+                  onClick={() => removePendingFile(idx)}
+                  className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-red-500 transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            {hasTaskId && (
               <button
                 onClick={handleUploadAll}
                 disabled={uploadAttachment.isPending}
@@ -369,16 +382,7 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
                 <Upload className="w-4 h-4" />
                 {uploadAttachment.isPending ? 'Enviando...' : `Enviar ${pendingFiles.length} arquivo(s)`}
               </button>
-            </div>
-          )}
-
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={onClose}
-              className="px-6 py-2.5 rounded-xl bg-muted text-foreground font-medium hover:bg-muted/80 transition-colors text-sm"
-            >
-              {pendingFiles.length > 0 ? 'Pular por agora' : 'Concluir'}
-            </button>
+            )}
           </div>
         </div>
       )}

@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -45,8 +46,12 @@ export class UsersController {
 
   @Get()
   @RequirePermissions('users.view')
-  findAll(@CurrentUser('tenantId') tenantId: string) {
-    return this.usersService.findAll(tenantId);
+  findAll(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('status') status?: string,
+    @Query('active') active?: string,
+  ) {
+    return this.usersService.findAll(tenantId, status as any, active === 'true');
   }
 
   /**

@@ -15,7 +15,7 @@ export default function TeamsPage() {
 
   const { data: users } = useQuery({
     queryKey: ['users'],
-    queryFn: () => api.get('/users').then((r) => r.data),
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
   const { data: teams, isLoading } = useQuery({
@@ -153,8 +153,9 @@ export default function TeamsPage() {
               className="flex-1 px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm"
             >
               <option value="">Selecione um colaborador para adicionar</option>
-              {(users || [])
-                .filter((u: any) => !selectedTeam?.members?.some((m: any) => m.tenantUserId === u.id))
+  {(users || [])
+    .filter((u: any) => u.isActive !== false)
+    .filter((u: any) => !selectedTeam?.members?.some((m: any) => m.tenantUserId === u.id))
                 .map((u: any) => (
                   <option key={u.id} value={u.id}>
                     {u.user?.name} {u.role?.name ? `(${u.role.name})` : ''}
