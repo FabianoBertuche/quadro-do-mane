@@ -29,9 +29,15 @@ export async function hydrateSession(): Promise<void> {
       permissions: Array.isArray(d.permissions) ? d.permissions : [],
       role: d.role ?? null,
     });
-    useAuthStore.getState().markHydrated();
   } catch {
-    // Refresh falhou (interceptor já tentou) — sessão morta, limpa tokens.
-    useAuthStore.getState().clearSession();
+    // O interceptor do api já tentou renovar silenciosamente. Mesmo que o
+    // perfil não seja recarregado (rede off, refresh indisponível), NÃO
+    // apagamos os tokens persistidos — o usuário permanece logado até um
+    // logout explícito. O guarda de rotas decide o destino com base no
+    // accessToken que temos em memória.
   }
+
+  // Sempre marca hidratado quando existem tokens, para nunca forçar
+  // re-login por uma falha transitória de rede/refresh.
+  useAuthStore.getState().markHydrated();
 }

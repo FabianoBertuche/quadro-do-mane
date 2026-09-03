@@ -36,13 +36,16 @@ export default function RootLayout() {
     }
   }, [hydrated, accessToken]);
 
-  // Guarda de rotas: sem sessão → login; com sessão → tabs.
+  // Guarda de rotas: sem sessão → login; com sessão → dashboard.
+  // O `/` (index) é uma tela vazia de placeholder — nunca deve permanecer
+  // visível; sempre redireciona conforme a sessão.
   useEffect(() => {
     if (!hydrated || !pathname) return;
     const isAuthRoute = AUTH_ROUTES.includes(pathname);
-    if (!accessToken && !isAuthRoute) {
-      router.replace('/login');
-    } else if (accessToken && isAuthRoute) {
+    const isOnRoot = pathname === '/';
+    if (!accessToken) {
+      if (!isAuthRoute) router.replace('/login');
+    } else if (isAuthRoute || isOnRoot) {
       router.replace('/dashboard');
     }
   }, [hydrated, accessToken, pathname, router]);
