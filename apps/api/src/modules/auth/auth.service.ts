@@ -112,16 +112,17 @@ export class AuthService {
     }
 
     if (existing.isRevoked) {
-      // REUSO DETECTADO — provável roubo. Revoga todos os tokens da família.
+      // Refresh token já rotacionado sendo usado de novo. Na maioria dos
+      // casos é concorrência legítima (ex.: web + mobile do mesmo usuário
+      // renovando quase ao mesmo tempo), não roubo. Então NÃO revogamos a
+      // família inteira (que derrubaria as demais sessões válidas do usuário
+      // e o forçaria a logar de novo). Apenas rejeitamos este request — o
+      // token antigo já estava revogado e é inútil.
       this.logger.warn(
-        `Reuso de refresh token detectado (user=${existing.userId}, family=${existing.family}). ` +
-          `Revogando família inteira.`,
+        `Refresh token já rotacionado reutilizado (user=${existing.userId}, family=${existing.family}). ` +
+          `Rejeitando request; famílias ativas preservadas.`,
       );
-      await this.prisma.refreshToken.updateMany({
-        where: { family: existing.family },
-        data: { isRevoked: true },
-      });
-      // Auditoria
+      // Auditoria (informativa, não revoga a família).
       await this.prisma.auditLog.create({
         data: {
           tenantId: existing.tenantId,
@@ -134,7 +135,7 @@ export class AuthService {
           metadataJson: JSON.stringify({ family: existing.family }),
         },
       });
-      throw new UnauthorizedException('Sessão comprometida. Faça login novamente.');
+      throw new UnauthorizedException('Sessão expirada. Faça login novamente.');
     }
 
     const tenantUser = await this.prisma.tenantUser.findFirst({
