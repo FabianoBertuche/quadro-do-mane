@@ -6,16 +6,52 @@ import { Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 
+interface CalendarFormData {
+  title: string;
+  description: string;
+  startAt: string;
+  endAt: string;
+  assigneeTenantUserId: string;
+  attendeeIds: string[];
+  recurrenceRule: string;
+  recurrenceInterval: string;
+  recurrenceUnit: string;
+  recurrenceEndAt: string;
+}
+
+const emptyForm: CalendarFormData = {
+  title: '',
+  description: '',
+  startAt: '',
+  endAt: '',
+  assigneeTenantUserId: '',
+  attendeeIds: [],
+  recurrenceRule: '',
+  recurrenceInterval: '1',
+  recurrenceUnit: 'month',
+  recurrenceEndAt: '',
+};
+
+const RECURRENCE_PRESETS = [
+  { value: '', label: 'Não repete', interval: '1', unit: 'month' },
+  { value: 'DAILY', label: 'Todo dia', interval: '1', unit: 'day' },
+  { value: 'MONTHLY', label: 'A cada 3 meses', interval: '3', unit: 'month' },
+  { value: 'YEARLY', label: 'A cada 1 ano', interval: '1', unit: 'year' },
+  { value: 'CUSTOM', label: 'Período personalizado', interval: '1', unit: 'day' },
+];
+
+const RECURRENCE_UNITS = [
+  { value: 'day', label: 'Dia(s)' },
+  { value: 'week', label: 'Semana(s)' },
+  { value: 'month', label: 'Mês(es)' },
+  { value: 'year', label: 'Ano(s)' },
+];
+
 export default function CalendarPage() {
   const queryClient = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    startAt: '',
-    endAt: '',
-  });
+  const [formData, setFormData] = useState<CalendarFormData>(emptyForm);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -32,26 +68,63 @@ export default function CalendarPage() {
     queryFn: () => api.get('/events', { params: { startDate, endDate } }).then((r) => r.data),
   });
 
+  const { data: users } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api.get('/users?active=true').then((r) => r.data),
+    enabled: isModalOpen,
+  });
+
   const createMutation = useMutation({
-    mutationFn: (data: typeof formData) => {
-      const payload = {
+    mutationFn: (data: CalendarFormData) => {
+      const payload: any = {
         title: data.title,
         description: data.description || undefined,
         startAt: new Date(data.startAt).toISOString(),
         endAt: new Date(data.endAt).toISOString(),
+        assigneeTenantUserId: data.assigneeTenantUserId || undefined,
+        attendeeIds: data.attendeeIds.length > 0 ? data.attendeeIds : undefined,
       };
+      if (data.recurrenceRule) {
+        payload.recurrenceRule = data.recurrenceRule;
+        payload.recurrenceInterval = parseInt(data.recurrenceInterval || '1', 10);
+        payload.recurrenceUnit = data.recurrenceUnit;
+        if (data.recurrenceEndAt) {
+          payload.recurrenceEndAt = new Date(`${data.recurrenceEndAt}T23:59:59`).toISOString();
+        }
+      }
       return api.post('/events', payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
       setIsModalOpen(false);
-      setFormData({ title: '', description: '', startAt: '', endAt: '' });
+      setFormData(emptyForm);
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     createMutation.mutate(formData);
+  };
+
+  const handlePresetChange = (value: string) => {
+    const preset = RECURRENCE_PRESETS.find((p) => p.value === value);
+    setFormData({
+      ...formData,
+      recurrenceRule: value,
+      recurrenceInterval: preset?.interval || '1',
+      recurrenceUnit: preset?.unit || 'month',
+    });
+  };
+
+  const isCustom = formData.recurrenceRule === 'CUSTOM';
+
+  const toggleAttendee = (id: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      attendeeIds: prev.attendeeIds.includes(id)
+        ? prev.attendeeIds.filter((a) => a !== id)
+        : [...prev.attendeeIds, id],
+    }));
   };
 
   const getEventsForDay = (day: number) =>
@@ -161,6 +234,96 @@ export default function CalendarPage() {
               />
             </div>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Responsável</label>
+            <select
+              value={formData.assigneeTenantUserId}
+              onChange={(e) => setFormData({ ...formData, assigneeTenantUserId: e.target.value })}
+              className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">Nenhum responsável</option>
+              {(users || []).filter((u: any) => u.isActive !== false).map((u: any) => (
+                <option key={u.id} value={u.id}>{u.user?.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Participantes</label>
+            <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto p-3 rounded-xl bg-muted border border-border">
+              {(users || []).filter((u: any) => u.isActive !== false).map((u: any) => {
+                const checked = formData.attendeeIds.includes(u.id);
+                return (
+                  <label key={u.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${checked ? 'bg-primary/10 text-primary' : 'hover:bg-card'}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleAttendee(u.id)}
+                      className="rounded border-border text-primary focus:ring-primary"
+                    />
+                    <span className="text-sm text-foreground">{u.user?.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Repete</label>
+            <select
+              value={formData.recurrenceRule}
+              onChange={(e) => handlePresetChange(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              {RECURRENCE_PRESETS.map((preset) => (
+                <option key={preset.value} value={preset.value}>{preset.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {isCustom && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">A cada</label>
+                <input
+                  type="number"
+                  min={1}
+                  required
+                  value={formData.recurrenceInterval}
+                  onChange={(e) => setFormData({ ...formData, recurrenceInterval: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">Unidade</label>
+                <select
+                  value={formData.recurrenceUnit}
+                  onChange={(e) => setFormData({ ...formData, recurrenceUnit: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  {RECURRENCE_UNITS.map((unit) => (
+                    <option key={unit.value} value={unit.value}>{unit.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {formData.recurrenceRule && (
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">
+                Data fim da recorrência (opcional)
+              </label>
+              <input
+                type="date"
+                value={formData.recurrenceEndAt}
+                onChange={(e) => setFormData({ ...formData, recurrenceEndAt: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+          )}
+
           <div className="flex justify-end pt-2">
             <button
               type="submit"
