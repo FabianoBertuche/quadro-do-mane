@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1069354782378",
+    "project_id": "quadro-do-mane",
+    "storage_bucket": "quadro-do-mane.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1069354782378:android:5ff801475923cefb9ecad3",
+        "android_client_info": {
+          "package_name": "com.quadrodomane.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAqfO-o4qO_HAbZO9V-gX7kpnmBVU81CNw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { PushService } from '../push/push.service';
@@ -8,6 +8,7 @@ import { MoveTaskDto } from './dto/move-task.dto';
 
 @Injectable()
 export class TasksService {
+  private readonly logger = new Logger(TasksService.name);
   constructor(
     private prisma: PrismaService,
     private activityLog: ActivityLogService,
@@ -203,7 +204,7 @@ export class TasksService {
           title: 'Nova tarefa atribuída',
           message: task.title,
         },
-      }).catch(() => undefined);
+      }).catch((e) => this.logger.warn(`Falha ao criar notification: ${String(e)}`));
       await this.push.sendToUser(dto.assigneeTenantUserId, {
         title: 'Nova tarefa atribuída',
         body: task.title,
@@ -303,7 +304,7 @@ export class TasksService {
           title: 'Tarefa atribuída a você',
           message: updated.title,
         },
-      }).catch(() => undefined);
+      }).catch((e) => this.logger.warn(`Falha ao criar notification: ${String(e)}`));
       await this.push.sendToUser(newAssignee, {
         title: 'Tarefa atribuída a você',
         body: updated.title,

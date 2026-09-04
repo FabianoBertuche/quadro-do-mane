@@ -10,6 +10,7 @@ import { api, apiErrorMessage } from './api';
  * apenas não há push.
  */
 let registered = false;
+let currentToken: string | null = null;
 
 export function configureNotificationHandler() {
   Notifications.setNotificationHandler({
@@ -43,15 +44,27 @@ export async function registerPushToken(): Promise<void> {
     }
 
     // Token Expo (formato ExponentPushToken[...]) — em builds standalone
-    // é preciso ter extra.eas.projectId no app.json (Fase 6).
+    // é preciso ter extra.eas.projectId no app.config.js e google-services.json
+    // configurado para Android.
     const t = await Notifications.getExpoPushTokenAsync();
     const token = typeof t === 'string' ? t : t.data;
-    if (!token || !token.startsWith('Expo')) return;
+    if (!token || !token.startsWith('Expo')) {
+      console.warn('[push] token Expo não obtido (falta integração FCM no Android?)');
+      return;
+    }
 
-    await api.post('/push-devices', {
+    const res = await api.post('/push-devices', {
       expoPushToken: token,
       platform: Platform.OS,
     });
+
+    // Se o backend rejeitou (token inválido), não marca como registrado.
+    if (res.data && res.data.success === false) {
+      console.warn('[push] token rejeitado pelo backend');
+      return;
+    }
+
+    currentToken = token;
     registered = true;
 
     // Listener: toque na notificação abre o app (deep link futuro por data.taskId)
@@ -65,5 +78,13 @@ export async function registerPushToken(): Promise<void> {
 
 /** Remove o registro do backend (logout). */
 export async function unregisterPushToken(): Promise<void> {
+  const token = currentToken;
   registered = false;
+  currentToken = null;
+  if (!token) return;
+  try {
+    await api.delete(`/push-devices/${encodeURIComponent(token)}`);
+  } catch (err) {
+    console.warn('[push] unregister falhou:', apiErrorMessage(err));
+  }
 }

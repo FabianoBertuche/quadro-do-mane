@@ -18,8 +18,9 @@ export class PushService {
   ) {
     const isValid = Expo.isExpoPushToken(expoPushToken);
     if (!isValid) {
-      // não lança 400 rígido — token inválido é apenas ignorado/logado
-      this.logger.warn(`Token push inválido recebido: ${String(expoPushToken).slice(0, 20)}…`);
+      // token inválido não deve ser persistido — evita lixo e envios falhos
+      this.logger.warn(`Token push inválido rejeitado: ${String(expoPushToken).slice(0, 20)}…`);
+      return { success: false, registered: false };
     }
     return this.prisma.pushDevice.upsert({
       where: { expoPushToken },
@@ -61,10 +62,16 @@ export class PushService {
 
       // SDK recomenda chunks de até 100
       for (const chunk of this.expo.chunkPushNotifications(messages)) {
-        await this.expo.sendPushNotificationsAsync(chunk);
+        const receipts = await this.expo.sendPushNotificationsAsync(chunk);
+        this.logger.debug(`Push enviado para ${chunk.length} dispositivo(s)`);
+        for (const receipt of receipts) {
+          if (receipt.status === 'error') {
+            this.logger.warn(`Erro de delivery push: ${receipt.message} (${receipt.details?.error})`);
+          }
+        }
       }
     } catch (err) {
-      this.logger.warn(`Falha ao enviar push: ${String(err)}`);
+      this.logger.error(`Falha ao enviar push: ${String(err)}`);
     }
   }
 }
