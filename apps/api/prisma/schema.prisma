@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["debian-openssl-1.1.x", "native"]
 }
 
@@ -110,7 +110,8 @@ model TenantUser {
   uploadedAttachments Attachment[]
   automations         Automation[]
   eventAttendances    EventAttendee[]
-  createdEvents       Event[]
+  createdEvents       Event[]             @relation("EventsCreated")
+  assignedEvents      Event[]             @relation("EventsAssigned")
   notifications       Notification[]
   projectMemberships  ProjectMember[]
   ownedProjects       Project[]           @relation("ProjectOwner")
@@ -507,16 +508,26 @@ model Event {
   endAt                 DateTime        @map("end_at")
   allDay                Boolean         @default(false) @map("all_day")
   createdByTenantUserId String          @map("created_by_tenant_user_id")
+  assigneeTenantUserId  String?         @map("assignee_tenant_user_id")
   relatedProjectId      String?         @map("related_project_id")
   relatedTaskId         String?         @map("related_task_id")
+  // Recorrência: regra (DAILY/MONTHLY/YEARLY/CUSTOM), intervalo, unidade, fim opcional
+  recurrenceRule        String?         @map("recurrence_rule")
+  recurrenceInterval    Int?            @map("recurrence_interval")
+  recurrenceUnit        String?         @map("recurrence_unit")
+  recurrenceEndAt       DateTime?       @map("recurrence_end_at")
+  // Agrupa todas as ocorrências da mesma série (para gestão futura da série)
+  seriesId              String?         @map("series_id")
   createdAt             DateTime        @default(now()) @map("created_at")
   updatedAt             DateTime        @updatedAt @map("updated_at")
   attendees             EventAttendee[]
-  createdBy             TenantUser      @relation(fields: [createdByTenantUserId], references: [id])
+  createdBy             TenantUser      @relation("EventsCreated", fields: [createdByTenantUserId], references: [id])
+  assignee              TenantUser?     @relation("EventsAssigned", fields: [assigneeTenantUserId], references: [id])
   project               Project?        @relation("ProjectEvents", fields: [relatedProjectId], references: [id])
   task                  Task?           @relation("TaskEvents", fields: [relatedTaskId], references: [id])
   tenant                Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([seriesId])
   @@map("events")
 }
 
@@ -782,21 +793,21 @@ model TokenDenylist {
 }
 
 model DailyRoutineItem {
-  id                   String            @id @default(uuid())
-  tenantId             String            @map("tenant_id")
-  assignedTenantUserId String            @map("assigned_tenant_user_id")
-  createdById          String            @map("created_by_id")
+  id                   String   @id @default(uuid())
+  tenantId             String   @map("tenant_id")
+  assignedTenantUserId String   @map("assigned_tenant_user_id")
+  createdById          String   @map("created_by_id")
   title                String
   description          String?
-  scheduledTime        String?           @map("scheduled_time")
-  isActive             Boolean           @default(true) @map("is_active")
-  createdAt            DateTime          @default(now()) @map("created_at")
-  updatedAt            DateTime          @updatedAt @map("updated_at")
+  scheduledTime        String?  @map("scheduled_time")
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
-  tenant               Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedTenantUser   TenantUser        @relation("AssignedRoutineUser", fields: [assignedTenantUserId], references: [id], onDelete: Cascade)
-  createdByTenantUser  TenantUser        @relation("CreatedRoutineUser", fields: [createdById], references: [id], onDelete: Cascade)
-  logs                 DailyRoutineLog[]
+  tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedTenantUser  TenantUser        @relation("AssignedRoutineUser", fields: [assignedTenantUserId], references: [id], onDelete: Cascade)
+  createdByTenantUser TenantUser        @relation("CreatedRoutineUser", fields: [createdById], references: [id], onDelete: Cascade)
+  logs                DailyRoutineLog[]
 
   @@index([tenantId])
   @@index([assignedTenantUserId])
@@ -805,18 +816,18 @@ model DailyRoutineItem {
 }
 
 model DailyRoutineLog {
-  id             String           @id @default(uuid())
-  tenantId       String           @map("tenant_id")
-  routineItemId  String           @map("routine_item_id")
-  tenantUserId   String           @map("tenant_user_id")
-  date           String
-  completedAt    DateTime         @default(now()) @map("completed_at")
-  isCompleted    Boolean          @default(true) @map("is_completed")
-  notes          String?
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  routineItemId String   @map("routine_item_id")
+  tenantUserId  String   @map("tenant_user_id")
+  date          String
+  completedAt   DateTime @default(now()) @map("completed_at")
+  isCompleted   Boolean  @default(true) @map("is_completed")
+  notes         String?
 
-  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  routineItem    DailyRoutineItem @relation(fields: [routineItemId], references: [id], onDelete: Cascade)
-  tenantUser     TenantUser       @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  routineItem DailyRoutineItem @relation(fields: [routineItemId], references: [id], onDelete: Cascade)
+  tenantUser  TenantUser       @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
 
   @@unique([routineItemId, tenantUserId, date])
   @@index([tenantId])

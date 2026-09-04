@@ -46,4 +46,10 @@ export class EventsController {
   remove(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {
     return this.eventsService.remove(tenantId, id);
   }
+
+  @Delete('series/:seriesId')
+  @RequirePermissions('calendar.delete')
+  removeSeries(@CurrentUser('tenantId') tenantId: string, @Param('seriesId') seriesId: string) {
+    return this.eventsService.removeSeries(tenantId, seriesId);
+  }
 }
