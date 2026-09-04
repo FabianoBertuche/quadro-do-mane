@@ -17,6 +17,7 @@ interface CalendarFormData {
   recurrenceInterval: string;
   recurrenceUnit: string;
   recurrenceEndAt: string;
+  remindDaysBefore: string;
 }
 
 const emptyForm: CalendarFormData = {
@@ -30,6 +31,7 @@ const emptyForm: CalendarFormData = {
   recurrenceInterval: '1',
   recurrenceUnit: 'month',
   recurrenceEndAt: '',
+  remindDaysBefore: '',
 };
 
 const RECURRENCE_PRESETS = [
@@ -84,6 +86,9 @@ export default function CalendarPage() {
         assigneeTenantUserId: data.assigneeTenantUserId || undefined,
         attendeeIds: data.attendeeIds.length > 0 ? data.attendeeIds : undefined,
       };
+      if (data.remindDaysBefore !== '') {
+        payload.remindDaysBefore = parseInt(data.remindDaysBefore, 10);
+      }
       if (data.recurrenceRule) {
         payload.recurrenceRule = data.recurrenceRule;
         payload.recurrenceInterval = parseInt(data.recurrenceInterval || '1', 10);
@@ -170,8 +175,13 @@ export default function CalendarPage() {
           ))}
           {days.map((day) => {
             const dayEvents = getEventsForDay(day);
+            const dayRing = dayEvents.length > 0
+              ? 'ring-2 ring-success ring-inset'
+              : isToday(day)
+                ? 'ring-2 ring-primary ring-inset'
+                : '';
             return (
-              <div key={day} className={`bg-card min-h-[80px] p-1.5 ${isToday(day) ? 'ring-2 ring-primary ring-inset' : ''}`}>
+              <div key={day} className={`bg-card min-h-[80px] p-1.5 ${dayRing}`}>
                 <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${isToday(day) ? 'bg-primary text-white' : ''}`}>
                   {day}
                 </span>
@@ -267,6 +277,24 @@ export default function CalendarPage() {
                 );
               })}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Lembrete</label>
+            <div className="grid grid-cols-2 gap-4">
+              <input
+                type="number"
+                min={0}
+                value={formData.remindDaysBefore}
+                onChange={(e) => setFormData({ ...formData, remindDaysBefore: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="Ex: 2"
+              />
+              <div className="flex items-center px-3 py-2.5 rounded-xl bg-muted border border-border text-sm text-muted-foreground">
+                dia(s) antes
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Começa a exibir o lembrete no dashboard e a notificar no celular N dias antes do evento.</p>
           </div>
 
           <div>

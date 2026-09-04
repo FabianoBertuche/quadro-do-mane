@@ -50,4 +50,11 @@ export class CreateEventDto {
   @IsDateString()
   @IsOptional()
   recurrenceEndAt?: string;
+
+  // Lembrete
+  @ApiPropertyOptional({ description: 'Quantos dias antes do evento o lembrete começa a aparecer' })
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  remindDaysBefore?: number;
 }

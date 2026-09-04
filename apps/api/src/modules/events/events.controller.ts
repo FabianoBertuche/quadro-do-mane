@@ -23,6 +23,32 @@ export class EventsController {
     return this.eventsService.findAll(tenantId, startDate, endDate);
   }
 
+  @Get('reminders')
+  @RequirePermissions('calendar.view')
+  findReminders(@CurrentUser('tenantId') tenantId: string, @CurrentUser('tenantUserId') tenantUserId: string) {
+    return this.eventsService.findReminders(tenantId, tenantUserId);
+  }
+
+  @Post(':id/reminders/dismiss-day')
+  @RequirePermissions('calendar.view')
+  dismissReminderDay(
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('tenantUserId') tenantUserId: string,
+    @Param('id') id: string,
+  ) {
+    return this.eventsService.dismissReminderDay(tenantId, tenantUserId, id);
+  }
+
+  @Post(':id/reminders/dismiss-forever')
+  @RequirePermissions('calendar.view')
+  dismissReminderForever(
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('tenantUserId') tenantUserId: string,
+    @Param('id') id: string,
+  ) {
+    return this.eventsService.dismissReminderForever(tenantId, tenantUserId, id);
+  }
+
   @Get(':id')
   @RequirePermissions('calendar.view')
   findOne(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {

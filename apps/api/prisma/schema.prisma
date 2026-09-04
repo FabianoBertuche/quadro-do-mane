@@ -61,6 +61,7 @@ model Tenant {
   customFieldValues   CustomFieldValue[]
   customFields        CustomField[]
   eventAttendees      EventAttendee[]
+  eventReminderActions EventReminderAction[]
   events              Event[]
   notifications       Notification[]
   projectMembers      ProjectMember[]
@@ -110,6 +111,7 @@ model TenantUser {
   uploadedAttachments Attachment[]
   automations         Automation[]
   eventAttendances    EventAttendee[]
+  reminderActions     EventReminderAction[]
   createdEvents       Event[]             @relation("EventsCreated")
   assignedEvents      Event[]             @relation("EventsAssigned")
   notifications       Notification[]
@@ -518,9 +520,12 @@ model Event {
   recurrenceEndAt       DateTime?       @map("recurrence_end_at")
   // Agrupa todas as ocorrências da mesma série (para gestão futura da série)
   seriesId              String?         @map("series_id")
+  // Lembrete: quantos dias antes do evento o lembrete começa a aparecer
+  remindDaysBefore      Int?            @map("remind_days_before")
   createdAt             DateTime        @default(now()) @map("created_at")
   updatedAt             DateTime        @updatedAt @map("updated_at")
   attendees             EventAttendee[]
+  reminderActions       EventReminderAction[]
   createdBy             TenantUser      @relation("EventsCreated", fields: [createdByTenantUserId], references: [id])
   assignee              TenantUser?     @relation("EventsAssigned", fields: [assigneeTenantUserId], references: [id])
   project               Project?        @relation("ProjectEvents", fields: [relatedProjectId], references: [id])
@@ -543,6 +548,26 @@ model EventAttendee {
 
   @@unique([eventId, tenantUserId])
   @@map("event_attendees")
+}
+
+model EventReminderAction {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  eventId      String   @map("event_id")
+  tenantUserId String   @map("tenant_user_id")
+  action       String
+  actionDate   DateTime? @map("action_date")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  event      Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, tenantUserId, action, actionDate])
+  @@index([tenantId])
+  @@index([eventId])
+  @@index([tenantUserId])
+  @@map("event_reminder_actions")
 }
 
 model Contact {
