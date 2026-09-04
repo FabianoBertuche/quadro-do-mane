@@ -11,6 +11,8 @@ coverage/
 tsbuildinfo
 *.tsbuildinfo
 uploads/
+*.apk
+*.aab
 
 # Playwright
 /test-results/
