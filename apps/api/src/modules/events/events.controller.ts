@@ -19,8 +19,20 @@ export class EventsController {
 
   @Get()
   @RequirePermissions('calendar.view')
-  findAll(@CurrentUser('tenantId') tenantId: string, @Query('startDate') startDate?: string, @Query('endDate') endDate?: string) {
-    return this.eventsService.findAll(tenantId, startDate, endDate);
+  findAll(
+    @CurrentUser() user: RequestUser,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('tenantUserId') tenantUserId?: string,
+  ) {
+    return this.eventsService.findAll(
+      user.tenantId,
+      user.tenantUserId,
+      user.roleName,
+      startDate,
+      endDate,
+      tenantUserId,
+    );
   }
 
   @Get('reminders')

@@ -1,15 +1,10 @@
 # Skills
 
-@source
-https://github.com/sickn33/antigravity-awesome-skills
+O projeto usa as skills Superpowers instaladas no ambiente Codex:
 
-Skills usadas
-
-project-scaffolding
-database-design
-react-ui-generator
-rest-api-builder
-kanban-system-builder
-auth-system
-dashboard-builder
-charts-builder
+- `using-superpowers`
+- `brainstorming`
+- `writing-plans`
+- `test-driven-development`
+- `systematic-debugging`
+- `verification-before-completion`

@@ -1,7 +1,5 @@
 # Interface
 
-@skill react-ui-generator
-
 Layout
 
 Sidebar

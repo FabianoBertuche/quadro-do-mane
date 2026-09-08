@@ -1,7 +1,5 @@
 # Kanban
 
-@skill kanban-system-builder
-
 Colunas
 
 Backlog

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
@@ -7,6 +7,13 @@ import { CreateEventDto, RecurrenceUnit } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 
 const MAX_OCCURRENCES = 365;
+const SAO_PAULO_TIME_ZONE = 'America/Sao_Paulo';
+const PRESET_RECURRENCE_UNITS: Record<string, RecurrenceUnit> = {
+  DAILY: 'day',
+  WEEKLY: 'week',
+  MONTHLY: 'month',
+  YEARLY: 'year',
+};
 
 @Injectable()
 export class EventsService {
@@ -16,12 +23,36 @@ export class EventsService {
     private pushService: PushService,
   ) {}
 
-  async findAll(tenantId: string, startDate?: string, endDate?: string) {
+  async findAll(
+    tenantId: string,
+    actorTenantUserId: string,
+    actorRoleName: string,
+    startDate?: string,
+    endDate?: string,
+    requestedTenantUserId?: string,
+  ) {
+    const range = this.parseRange(startDate, endDate);
+    const isAdmin = actorRoleName === 'admin';
+    if (requestedTenantUserId && requestedTenantUserId !== actorTenantUserId && !isAdmin) {
+      throw new ForbiddenException('Você não tem permissão para visualizar o calendário de outro colaborador.');
+    }
+    const targetTenantUserId = isAdmin && requestedTenantUserId ? requestedTenantUserId : actorTenantUserId;
+    const targetUser = await this.prisma.tenantUser.findFirst({
+      where: { id: targetTenantUserId, tenantId },
+      select: { id: true },
+    });
+    if (!targetUser) throw new NotFoundException('Colaborador não encontrado neste workspace.');
+
     return this.prisma.event.findMany({
       where: {
         tenantId,
-        ...(startDate && endDate
-          ? { startAt: { gte: new Date(startDate), lte: new Date(endDate) } }
+        OR: [
+          { createdByTenantUserId: targetTenantUserId },
+          { assigneeTenantUserId: targetTenantUserId },
+          { attendees: { some: { tenantUserId: targetTenantUserId } } },
+        ],
+        ...(range
+          ? { startAt: { lt: range.end }, endAt: { gt: range.start } }
           : {}),
       },
       include: this.includeForList(),
@@ -40,18 +71,31 @@ export class EventsService {
 
   async create(tenantId: string, createdByTenantUserId: string, dto: CreateEventDto) {
     const { attendeeIds, recurrenceRule, recurrenceInterval, recurrenceUnit, recurrenceEndAt, ...eventData } = dto;
+    this.validateEventDates(eventData.startAt, eventData.endAt);
+    const recurrence = this.validateRecurrence({
+      recurrenceRule,
+      recurrenceInterval,
+      recurrenceUnit,
+      recurrenceEndAt,
+      startAt: eventData.startAt,
+    });
 
     const assigneeTenantUserId = eventData.assigneeTenantUserId;
-    // O responsável também participa automaticamente do evento
+    // Criador e responsável também participam automaticamente do evento,
+    // para que ambos recebam lembretes e possam dispensá-los.
     const allAttendeeIds = Array.from(new Set([
+      createdByTenantUserId,
       ...(assigneeTenantUserId ? [assigneeTenantUserId] : []),
       ...(attendeeIds ?? []),
     ]));
+    await this.validateRelations(tenantId, {
+      assigneeTenantUserId,
+      attendeeIds: allAttendeeIds,
+      relatedProjectId: eventData.relatedProjectId,
+      relatedTaskId: eventData.relatedTaskId,
+    });
 
-    // Garante intervalos/unidade por padrão conforme a regra
-    const iv = recurrenceInterval ?? 1;
-    const unit: RecurrenceUnit = recurrenceUnit ?? this.defaultUnitFor(recurrenceRule);
-    const rule = recurrenceRule ?? (recurrenceUnit ? 'CUSTOM' : undefined);
+    const { rule, interval: iv, unit, endAtLimit } = recurrence;
 
     if (!rule) {
       // Evento único
@@ -69,11 +113,11 @@ export class EventsService {
       rule,
       interval: iv,
       unit,
-      endAtLimit: recurrenceEndAt ? new Date(recurrenceEndAt) : undefined,
+      endAtLimit,
     });
 
     if (occurrences.length === 0) {
-      throw new BadRequestException('Não foi possível gerar ocorrências para a recorrência informada. Verifique as datas.');
+      throw new BadRequestException('Não foi possível gerar ocorrências para a recorrência informada.');
     }
 
     const seriesId = randomUUID();
@@ -87,7 +131,7 @@ export class EventsService {
             recurrenceRule: rule,
             recurrenceInterval: iv,
             recurrenceUnit: unit,
-            recurrenceEndAt: recurrenceEndAt ? new Date(recurrenceEndAt) : undefined,
+            recurrenceEndAt: endAtLimit,
             title: eventData.title,
             description: eventData.description,
             type: eventData.type,
@@ -126,18 +170,28 @@ export class EventsService {
         'Não é possível alterar a recorrência de um evento já criado. Exclua e recrie a série.',
       );
     }
-    if (event.seriesId && eventData.startAt) {
+    if (event.seriesId && (eventData.startAt || eventData.endAt)) {
       throw new BadRequestException(
-        'Para editar uma ocorrência de evento recorrente, contacte o responsável. Use a exclusão para remover ocorrências.',
+        'Não é possível alterar as datas de uma ocorrência recorrente. Exclua e recrie a série.',
       );
     }
 
+    this.validateEventDates(eventData.startAt ?? event.startAt, eventData.endAt ?? event.endAt);
+    const assigneeId = eventData.assigneeTenantUserId ?? event.assigneeTenantUserId;
+    const mergedAttendeeIds = attendeeIds === undefined
+      ? undefined
+      : Array.from(new Set([event.createdByTenantUserId, ...(assigneeId ? [assigneeId] : []), ...attendeeIds]));
+    await this.validateRelations(tenantId, {
+      assigneeTenantUserId: assigneeId,
+      attendeeIds: mergedAttendeeIds,
+      relatedProjectId: eventData.relatedProjectId === undefined ? event.relatedProjectId : eventData.relatedProjectId,
+      relatedTaskId: eventData.relatedTaskId === undefined ? event.relatedTaskId : eventData.relatedTaskId,
+    });
+
     await this.prisma.event.update({ where: { id }, data: eventData });
-    if (attendeeIds) {
+    if (attendeeIds !== undefined) {
       await this.prisma.eventAttendee.deleteMany({ where: { eventId: id } });
-      const assigneeId = eventData.assigneeTenantUserId ?? event.assigneeTenantUserId;
-      const merged = Array.from(new Set([...(assigneeId ? [assigneeId] : []), ...attendeeIds]));
-      await this.createAttendees(tenantId, id, merged);
+      await this.createAttendees(tenantId, id, mergedAttendeeIds!);
     }
     return this.findOne(tenantId, id);
   }
@@ -185,13 +239,14 @@ export class EventsService {
           {
             OR: [
               { assigneeTenantUserId: tenantUserId },
+              { createdByTenantUserId: tenantUserId },
               { attendees: { some: { tenantUserId } } },
             ],
           },
-          { reminderActions: { none: { action: 'DISMISS_FOREVER' } } },
+          { reminderActions: { none: { tenantUserId, action: 'DISMISS_FOREVER' } } },
           {
             reminderActions: {
-              none: { action: 'DISMISS_DAY', actionDate: { gte: dayStart, lt: dayEnd } },
+              none: { tenantUserId, action: 'DISMISS_DAY', actionDate: { gte: dayStart, lt: dayEnd } },
             },
           },
         ],
@@ -278,17 +333,31 @@ export class EventsService {
     });
 
     const involved = new Map<string, Set<string>>();
-    const meta = new Map<string, { title: string; daysLeft: number }>();
+    const meta = new Map<string, { tenantId: string; title: string; daysLeft: number }>();
     for (const e of events) {
       const daysBefore = e.remindDaysBefore as number;
       if (new Date(e.startAt.getTime() - daysBefore * 86_400_000) > now) continue;
       const users = new Set<string>();
+      if (e.createdByTenantUserId) users.add(e.createdByTenantUserId);
       if (e.assigneeTenantUserId) users.add(e.assigneeTenantUserId);
       for (const a of e.attendees) users.add(a.tenantUserId);
       involved.set(e.id, users);
       const daysLeft = Math.max(0, Math.ceil((e.startAt.getTime() - now.getTime()) / 86_400_000));
-      meta.set(e.id, { title: e.title, daysLeft });
+      meta.set(e.id, { tenantId: e.tenantId, title: e.title, daysLeft });
     }
+
+    const eventIds = [...involved.keys()];
+    const dismissals = eventIds.length === 0 ? [] : await this.prisma.eventReminderAction.findMany({
+      where: {
+        eventId: { in: eventIds },
+        OR: [
+          { action: 'DISMISS_FOREVER' },
+          { action: 'DISMISS_DAY', actionDate: { gte: dayStart, lt: dayEnd } },
+        ],
+      },
+      select: { eventId: true, tenantUserId: true },
+    });
+    const dismissed = new Set(dismissals.map((action) => `${action.eventId}:${action.tenantUserId}`));
 
     let sent = 0;
     for (const [eventId, userIds] of involved) {
@@ -298,16 +367,15 @@ export class EventsService {
         select: { tenantUserId: true },
       });
       const alreadySent = new Set(already.map((a) => a.tenantUserId));
-      const toSend = [...userIds].filter((id) => !alreadySent.has(id));
+      const toSend = [...userIds].filter((id) => !alreadySent.has(id) && !dismissed.has(`${eventId}:${id}`));
       if (toSend.length === 0) continue;
 
-      const { title, daysLeft } = meta.get(eventId)!;
+      const { tenantId, title, daysLeft } = meta.get(eventId)!;
       const dayLabel = daysLeft === 0 ? 'hoje' : daysLeft === 1 ? 'amanhã' : `em ${daysLeft} dias`;
-      const tenantId = (await this.prisma.event.findUnique({ where: { id: eventId }, select: { tenantId: true } }))?.tenantId;
 
       for (const uid of toSend) {
         await this.prisma.eventReminderAction.createMany({
-          data: [{ tenantId: tenantId!, eventId, tenantUserId: uid, action: 'SEND', actionDate: now }],
+          data: [{ tenantId, eventId, tenantUserId: uid, action: 'SEND', actionDate: now }],
           skipDuplicates: true,
         });
         await this.pushService.sendToUser(uid, {
@@ -323,10 +391,20 @@ export class EventsService {
 
   // ─── helpers ────────────────────────────────────────────────────────────
 
-  /** Limites do dia atual no fuso local do servidor (America/Sao_Paulo). */
+  /** Limites do dia atual no fuso corporativo fixo do sistema. */
   private dayBoundary(now: Date): [Date, Date] {
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const end = new Date(start.getTime() + 86_400_000);
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: SAO_PAULO_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(now);
+    const value = (type: string) => parts.find((part) => part.type === type)?.value!;
+    const date = new Date(Date.UTC(Number(value('year')), Number(value('month')) - 1, Number(value('day'))));
+    const next = new Date(date.getTime() + 86_400_000);
+    const format = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T00:00:00-03:00`;
+    const start = new Date(format(date));
+    const end = new Date(format(next));
     return [start, end];
   }
 
@@ -338,6 +416,7 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException('Evento não encontrado');
     const isInvolved =
+      event.createdByTenantUserId === tenantUserId ||
       event.assigneeTenantUserId === tenantUserId ||
       event.attendees.some((a) => a.tenantUserId === tenantUserId);
     if (!isInvolved) {
@@ -381,13 +460,95 @@ export class EventsService {
     }
   }
 
-  private defaultUnitFor(rule?: string): RecurrenceUnit {
-    switch (rule) {
-      case 'DAILY': return 'day';
-      case 'WEEKLY': return 'week';
-      case 'MONTHLY': return 'month';
-      case 'YEARLY': return 'year';
-      default: return 'month';
+  private parseRange(startDate?: string, endDate?: string): { start: Date; end: Date } | undefined {
+    if (!startDate && !endDate) return undefined;
+    if (!startDate || !endDate) {
+      throw new BadRequestException('Informe as datas de início e fim do período.');
+    }
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      throw new BadRequestException('O período informado é inválido.');
+    }
+    return { start, end };
+  }
+
+  private validateEventDates(startAt: string | Date, endAt: string | Date) {
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      throw new BadRequestException('A data final do evento deve ser posterior à data de início.');
+    }
+  }
+
+  private validateRecurrence(params: {
+    recurrenceRule?: string;
+    recurrenceInterval?: number;
+    recurrenceUnit?: RecurrenceUnit;
+    recurrenceEndAt?: string;
+    startAt: string;
+  }): { rule?: string; interval: number; unit: RecurrenceUnit; endAtLimit?: Date } {
+    const { recurrenceRule, recurrenceInterval, recurrenceUnit, recurrenceEndAt, startAt } = params;
+    if (!recurrenceRule) {
+      if (recurrenceInterval !== undefined || recurrenceUnit !== undefined || recurrenceEndAt !== undefined) {
+        throw new BadRequestException('Informe uma regra de recorrência para configurar a repetição.');
+      }
+      return { interval: 1, unit: 'month' };
+    }
+
+    if (!recurrenceEndAt) {
+      throw new BadRequestException('A data fim da recorrência é obrigatória para eventos recorrentes.');
+    }
+    const endAtLimit = new Date(recurrenceEndAt);
+    const start = new Date(startAt);
+    if (Number.isNaN(endAtLimit.getTime()) || endAtLimit < start) {
+      throw new BadRequestException('A data fim da recorrência deve ser igual ou posterior à data de início do evento.');
+    }
+
+    const interval = recurrenceInterval ?? 1;
+    if (!Number.isInteger(interval) || interval < 1) {
+      throw new BadRequestException('O intervalo da recorrência deve ser um número inteiro maior que zero.');
+    }
+    const presetUnit = PRESET_RECURRENCE_UNITS[recurrenceRule];
+    if (presetUnit && recurrenceUnit && recurrenceUnit !== presetUnit) {
+      throw new BadRequestException('A unidade informada não corresponde à regra de recorrência selecionada.');
+    }
+    if (recurrenceRule === 'CUSTOM' && !recurrenceUnit) {
+      throw new BadRequestException('Informe a unidade da recorrência personalizada.');
+    }
+    const unit = presetUnit ?? recurrenceUnit;
+    if (!unit) {
+      throw new BadRequestException('Informe uma unidade de recorrência válida.');
+    }
+    return { rule: recurrenceRule, interval, unit, endAtLimit };
+  }
+
+  private async validateRelations(tenantId: string, params: {
+    assigneeTenantUserId?: string | null;
+    attendeeIds?: string[];
+    relatedProjectId?: string | null;
+    relatedTaskId?: string | null;
+  }) {
+    const userIds = Array.from(new Set([
+      ...(params.assigneeTenantUserId ? [params.assigneeTenantUserId] : []),
+      ...(params.attendeeIds ?? []),
+    ]));
+    if (userIds.length) {
+      const activeUsers = await this.prisma.tenantUser.findMany({
+        where: { id: { in: userIds }, tenantId, isActive: true, status: 'ACTIVE' },
+        select: { id: true },
+      });
+      if (activeUsers.length !== userIds.length) {
+        throw new BadRequestException('Responsável ou participante inválido para este workspace.');
+      }
+    }
+    if (params.relatedProjectId) {
+      const project = await this.prisma.project.findFirst({ where: { id: params.relatedProjectId, tenantId }, select: { id: true } });
+      if (!project) throw new BadRequestException('Projeto relacionado inválido para este workspace.');
+    }
+    if (params.relatedTaskId) {
+      const task = await this.prisma.task.findFirst({ where: { id: params.relatedTaskId, tenantId }, select: { id: true } });
+      if (!task) throw new BadRequestException('Tarefa relacionada inválida para este workspace.');
     }
   }
 
@@ -405,9 +566,8 @@ export class EventsService {
 
     const occurrences: Array<{ startAt: Date; endAt: Date }> = [];
     const current = new Date(startAt);
-    // Limite padrão: se o usuário não informou fim, limita a 1 ano à frente (ou 365 ocorrências)
-    const hardLimit = endAtLimit ?? new Date(startAt.getTime());
-    if (!endAtLimit) hardLimit.setFullYear(hardLimit.getFullYear() + 1);
+    // A validação exige data fim; o teto adicional evita séries excessivamente grandes.
+    const hardLimit = endAtLimit!;
 
     while (occurrences.length < MAX_OCCURRENCES && current <= hardLimit) {
       const occEnd = new Date(current.getTime() + rawDuration);

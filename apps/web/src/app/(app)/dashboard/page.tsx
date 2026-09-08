@@ -282,6 +282,57 @@ export default function DashboardPage() {
   const hasOverdueTasks = (myOverdueTasks ?? 0) > 0;
   const showOverdueAlert = hasOverdueRoutines || hasOverdueTasks;
 
+  const calendarReminderCard = reminderList.length > 0 && (
+    <div className="p-6 rounded-2xl bg-card border border-border shadow-sm">
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+          <Bell className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <h3 className="font-semibold">Lembretes do Calendário</h3>
+          <p className="text-xs text-muted-foreground">
+            {reminderList.length} lembrete{reminderList.length !== 1 ? 's' : ''} ativo{reminderList.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {reminderList.map((r: any) => {
+          const when = r.daysLeft === 0 ? 'Hoje' : r.daysLeft === 1 ? 'Amanhã' : `Em ${r.daysLeft} dias`;
+          const dateLabel = new Date(r.startAt).toLocaleDateString('pt-BR', {
+            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo',
+          });
+          return (
+            <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border border-border">
+              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <CalendarClock className="w-4 h-4 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{r.title}</div>
+                <div className="text-xs text-muted-foreground">{when} · {dateLabel}</div>
+              </div>
+              <button
+                onClick={() => dismissReminderMutation.mutate({ id: r.id, forever: false })}
+                disabled={dismissReminderMutation.isPending}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-card border border-border hover:bg-muted transition-colors disabled:opacity-50 whitespace-nowrap"
+                title="Não mostrar mais este lembrete hoje"
+              >
+                Dispensar hoje
+              </button>
+              <button
+                onClick={() => dismissReminderMutation.mutate({ id: r.id, forever: true })}
+                disabled={dismissReminderMutation.isPending}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+                title="Não mostrar mais este lembrete nunca mais"
+              >
+                Dispensar permanente
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <>
     <div className="space-y-6">
@@ -321,6 +372,8 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {calendarReminderCard}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
@@ -476,61 +529,6 @@ export default function DashboardPage() {
             </div>
           )}
         </button>
-      )}
-
-      {/* Event Reminders Card */}
-      {reminderList.length > 0 && (
-        <div className="p-6 rounded-2xl bg-card border border-border shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Bell className="w-4 h-4 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-semibold">Lembretes de Eventos</h3>
-              <p className="text-xs text-muted-foreground">
-                {reminderList.length} lembrete{reminderList.length !== 1 ? 's' : ''} ativo{reminderList.length !== 1 ? 's' : ''}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            {reminderList.map((r: any) => {
-              const when = r.daysLeft === 0 ? 'Hoje' : r.daysLeft === 1 ? 'Amanhã' : `Em ${r.daysLeft} dias`;
-              const dateLabel = new Date(r.startAt).toLocaleDateString('pt-BR', {
-                day: '2-digit',
-                month: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-              });
-              return (
-                <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border border-border">
-                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <CalendarClock className="w-4 h-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{r.title}</div>
-                    <div className="text-xs text-muted-foreground">{when} · {dateLabel}</div>
-                  </div>
-                  <button
-                    onClick={() => dismissReminderMutation.mutate({ id: r.id, forever: false })}
-                    disabled={dismissReminderMutation.isPending}
-                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-card border border-border hover:bg-muted transition-colors disabled:opacity-50 whitespace-nowrap"
-                    title="Não mostrar mais este lembrete hoje"
-                  >
-                    Dispensar hoje
-                  </button>
-                  <button
-                    onClick={() => dismissReminderMutation.mutate({ id: r.id, forever: true })}
-                    disabled={dismissReminderMutation.isPending}
-                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors disabled:opacity-50 whitespace-nowrap"
-                    title="Não mostrar mais este lembrete nunca mais"
-                  >
-                    Dispensar permanente
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
       )}
 
       {/* Project Progress */}

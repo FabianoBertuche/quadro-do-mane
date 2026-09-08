@@ -1,7 +1,5 @@
 # Dashboard
 
-@skill charts-builder
-
 Indicadores
 
 tarefas concluídas

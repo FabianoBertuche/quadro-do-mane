@@ -1,8 +1,5 @@
 # Monte Moria
 
-@agent google-antigravity
-@mode vibe-coding
-
 @context
 Sistema corporativo de gestão de tarefas e projetos inspirado em Asana, ClickUp e Monday.
 
@@ -50,12 +47,20 @@ monorepo
 
 ---
 
+@collaboration
+
+Para tarefas de implementação, usar múltiplos agentes sempre que houver duas ou mais subtarefas independentes que possam ser executadas em paralelo.
+
+Dividir o trabalho por módulos ou conjuntos de arquivos sem sobreposição, atribuir uma responsabilidade concreta a cada agente e consolidar as alterações antes da verificação final.
+
+Não paralelizar mudanças concorrentes no mesmo arquivo, nem criar agentes para tarefas curtas, sequenciais ou que dependam de uma decisão ainda não tomada.
+
+---
+
 @skill
-project-scaffolding
-database-design
-rest-api-builder
-react-ui-generator
-kanban-system-builder
-auth-system
-dashboard-builder
-charts-builder
+using-superpowers
+brainstorming
+writing-plans
+test-driven-development
+systematic-debugging
+verification-before-completion

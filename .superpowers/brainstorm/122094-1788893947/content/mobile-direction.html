@@ -1,0 +1,82 @@
+<style>
+  .mobile-direction { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color:#e8eefc; max-width:1180px; margin:0 auto; padding:24px; }
+  .mobile-direction h1 { margin:0 0 8px; font-size:28px; letter-spacing:-.04em; }
+  .mobile-direction p { color:#9cafcc; line-height:1.5; }
+  .directions { display:grid; grid-template-columns:repeat(3,minmax(250px,1fr)); gap:18px; margin-top:24px; }
+  .direction { background:#111b30; border:1px solid #263553; border-radius:22px; padding:16px; cursor:pointer; transition:.18s ease; }
+  .direction:hover { transform:translateY(-3px); border-color:#707cff; }
+  .direction.selected { border-color:#7c83ff; box-shadow:0 0 0 3px rgba(124,131,255,.18); }
+  .label { display:inline-block; padding:5px 9px; border-radius:99px; background:#202e50; color:#bfc7ff; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; }
+  .direction h2 { font-size:17px; margin:12px 0 6px; }
+  .direction > p { min-height:68px; margin:0 0 14px; font-size:13px; }
+  .phone { background:#050a15; border:5px solid #303b55; border-radius:29px; min-height:418px; overflow:hidden; padding:15px 12px 10px; box-shadow:0 18px 34px rgba(0,0,0,.28); }
+  .top { display:flex; align-items:center; justify-content:space-between; font-size:10px; color:#aebbd4; margin:3px 2px 13px; }
+  .avatar { width:25px; height:25px; display:grid; place-items:center; border-radius:50%; background:linear-gradient(135deg,#7978ff,#3dc7c9); color:white; font-weight:800; }
+  .title { font-size:18px; font-weight:760; margin:2px 2px 11px; letter-spacing:-.04em; }
+  .sub { font-size:10px; color:#93a4c1; margin:0 2px 12px; }
+  .attention { border-radius:13px; background:#322411; border:1px solid #6d4b14; color:#ffd989; padding:10px; font-size:10px; margin-bottom:9px; }
+  .panel { border-radius:14px; background:#111c31; border:1px solid #263653; padding:10px; margin-bottom:9px; }
+  .panel-head { display:flex; justify-content:space-between; font-size:11px; font-weight:700; margin-bottom:9px; }
+  .panel-head span:last-child { color:#8f99ff; font-weight:600; }
+  .row { display:flex; gap:8px; align-items:center; padding:7px 0; border-top:1px solid #22304a; font-size:10px; }
+  .row:first-of-type { border-top:0; padding-top:0; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#f9a633; flex:none; }
+  .dot.red { background:#f36b75; } .dot.green { background:#4ed69b; } .dot.violet { background:#8586ff; }
+  .row small { display:block; color:#8293b0; font-size:9px; margin-top:2px; }
+  .nav { margin-top:11px; border-top:1px solid #1d2b43; display:flex; justify-content:space-around; padding-top:9px; color:#7f91b1; font-size:8px; text-align:center; }
+  .nav b { display:block; color:#b8c4ff; font-size:14px; line-height:13px; }
+  .fab { float:right; margin:-22px 4px 0 0; width:34px; height:34px; display:grid; place-items:center; border-radius:12px; background:#666cf5; color:#fff; font-size:21px; box-shadow:0 7px 16px rgba(92,96,235,.35); }
+  .agenda { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:9px; }
+  .day { border-radius:10px; background:#111c31; padding:7px 3px; text-align:center; color:#91a1bd; font-size:8px; }
+  .day strong { display:block; color:#eef3ff; font-size:13px; margin:3px 0; }.day.active { background:#6268ef; color:#e8eaff; }.day.active strong { color:white; }
+  .microcard { border-left:3px solid #767eff; background:#111c31; border-radius:0 10px 10px 0; padding:8px; margin-bottom:6px; font-size:10px; }
+  .microcard small { color:#94a5c2; display:block; margin-top:2px; }
+  .brief { font-size:12px; color:#b3c0d8; padding-left:16px; line-height:1.65; }
+  @media(max-width:850px){ .directions{grid-template-columns:1fr;} .direction > p{min-height:auto;} }
+</style>
+<section class="mobile-direction">
+  <span class="label">Direção visual · app Android</span>
+  <h1>Um app que substitui o web precisa ser operacional, não só uma versão menor.</h1>
+  <p>Compare as três direções abaixo. A recomendada prioriza o que exige atenção agora — atrasos, tarefas diárias e compromissos do calendário — e deixa os módulos completos a um toque de distância.</p>
+  <div class="directions">
+    <article class="direction selected" data-choice="Painel operacional" onclick="toggleSelect(this)">
+      <span class="label">Recomendado</span>
+      <h2>Painel operacional</h2>
+      <p>Início reúne o trabalho de hoje; “Trabalho” organiza tarefas e projetos; “Agenda” concentra calendário e lembretes.</p>
+      <div class="phone">
+        <div class="top"><span>09:41</span><span class="avatar">AM</span></div>
+        <div class="title">Bom dia, Ana</div><div class="sub">segunda-feira, 8 de setembro</div>
+        <div class="attention">⚠ Atenção: 3 itens atrasados <span style="float:right">Ver</span></div>
+        <div class="panel"><div class="panel-head">Seu dia <span>Ver agenda</span></div><div class="row"><i class="dot violet"></i><div>Reunião de planejamento<small>09:30 · Calendário</small></div></div><div class="row"><i class="dot"></i><div>Revisar proposta comercial<small>Hoje · tarefa diária</small></div></div></div>
+        <div class="panel"><div class="panel-head">Próximas tarefas <span>12 abertas</span></div><div class="row"><i class="dot red"></i><div>Publicar relatório mensal<small>Vencida há 2 dias</small></div></div><div class="row"><i class="dot green"></i><div>Aprovar peças da campanha<small>Hoje · Marketing</small></div></div></div>
+        <div class="fab">+</div><div class="nav"><div><b>⌂</b>Início</div><div><b>✓</b>Trabalho</div><div><b>◫</b>Agenda</div><div><b>☷</b>Mais</div></div>
+      </div>
+      <ul class="brief"><li>Prioridade clara e lembretes visíveis</li><li>Ação rápida para tarefa, evento e projeto</li><li>Escala bem quando há muitos eventos</li></ul>
+    </article>
+    <article class="direction" data-choice="Módulos clássicos" onclick="toggleSelect(this)">
+      <span class="label">Conservadora</span>
+      <h2>Módulos clássicos</h2>
+      <p>Mantém a navegação atual por Dashboard, Tarefas, Projetos e Mais, com mais cartões e atalhos no início.</p>
+      <div class="phone">
+        <div class="top"><span>09:41</span><span class="avatar">AM</span></div><div class="title">Visão geral</div><div class="sub">Acompanhe seu trabalho</div>
+        <div class="panel"><div class="panel-head">Resumo <span>Este mês</span></div><div style="display:flex;gap:6px"><div style="background:#1b2a49;border-radius:9px;padding:9px;flex:1;font-size:9px">12<br><small style="color:#9aabd0">Abertas</small></div><div style="background:#1b2a49;border-radius:9px;padding:9px;flex:1;font-size:9px">4<br><small style="color:#9aabd0">Hoje</small></div><div style="background:#1b2a49;border-radius:9px;padding:9px;flex:1;font-size:9px">3<br><small style="color:#9aabd0">Atraso</small></div></div></div>
+        <div class="panel"><div class="panel-head">Atalhos</div><div class="row"><i class="dot violet"></i><div>Minhas tarefas</div></div><div class="row"><i class="dot green"></i><div>Calendário</div></div><div class="row"><i class="dot"></i><div>Rotina diária</div></div></div>
+        <div class="nav"><div><b>⌂</b>Início</div><div><b>✓</b>Tarefas</div><div><b>□</b>Projetos</div><div><b>☷</b>Mais</div></div>
+      </div>
+      <ul class="brief"><li>Menor mudança para usuários atuais</li><li>Calendário fica mais escondido</li><li>Menos eficiente para rotina diária</li></ul>
+    </article>
+    <article class="direction" data-choice="Agenda no centro" onclick="toggleSelect(this)">
+      <span class="label">Foco em tempo</span>
+      <h2>Agenda no centro</h2>
+      <p>O calendário vira a porta de entrada. Bom para equipes muito orientadas a compromissos e reuniões.</p>
+      <div class="phone">
+        <div class="top"><span>09:41</span><span class="avatar">AM</span></div><div class="title">Agenda</div><div class="sub">Setembro 2026</div>
+        <div class="agenda"><div class="day">SEG<strong>7</strong></div><div class="day active">TER<strong>8</strong></div><div class="day">QUA<strong>9</strong></div></div>
+        <div class="microcard">09:30 · Planejamento semanal<small>45 min · Equipe Produto</small></div><div class="microcard" style="border-color:#4ed69b">14:00 · Aprovar campanha<small>Tarefa · vence hoje</small></div><div class="microcard" style="border-color:#f9a633">16:30 · Retorno ao cliente<small>Lembrete do calendário</small></div>
+        <div class="panel"><div class="panel-head">Pendências do dia <span>3</span></div><div class="row"><i class="dot red"></i><div>Relatório mensal<small>Vencida</small></div></div></div>
+        <div class="fab">+</div><div class="nav"><div><b>⌂</b>Início</div><div><b>✓</b>Trabalho</div><div><b>◫</b>Agenda</div><div><b>☷</b>Mais</div></div>
+      </div>
+      <ul class="brief"><li>Excelente leitura do dia</li><li>Projetos e gestão perdem destaque</li><li>Melhor se reuniões forem a atividade central</li></ul>
+    </article>
+  </div>
+</section>
