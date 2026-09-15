@@ -1,5 +1,5 @@
 # ─── Stage 1: Build ──────────────────────────────────────────────────
-FROM node:20-bullseye-slim AS builder
+FROM node:20-bookworm-slim AS builder
 WORKDIR /usr/src/app
 
 # Copy root + workspace package.json files for npm workspaces resolution
@@ -23,7 +23,7 @@ RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
 RUN npm run build:api
 
 # ─── Stage 2: Production ─────────────────────────────────────────────
-FROM node:20-bullseye-slim
+FROM node:20-bookworm-slim
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 

@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import axios from 'axios';
 import { useAuthStore } from './auth';
-import { api, API_URL } from './api';
+import { api, API_URL, isDeadSession, clearDeadSession } from './api';
 
 /**
  * Hook de hidratação da sessão: garante que o Zustand tenha um accessToken
@@ -16,9 +16,11 @@ import { api, API_URL } from './api';
  *     (rotaciona tokens) e depois /auth/me.
  *  3. Se não tem nenhum, tenta /auth/refresh com payload vazio (vai usar
  *     o cookie HttpOnly) — se sucesso, /auth/me. Se falhar, marca
- *     hydrated=true de qualquer forma para o app renderizar.
+ *     hydrated=true de qualquer forma para o app renderizar (e o guard
+ *     envia quem não tem sessão para /login).
  *
- * NUCLEAR MODE: nunca limpa sessão nem redireciona. O app sempre renderiza.
+ * Quando o backend rejeita o refresh (401/403 — sessão expirada/revogada),
+ * a sessão está morta: limpamos o estado e redirecionamos para /login.
  */
 export function useSession() {
   const setSession = useAuthStore((s) => s.setSession);
@@ -41,7 +43,11 @@ export function useSession() {
             });
             return res.data.accessToken as string;
           }
-        } catch {
+        } catch (err) {
+          if (isDeadSession(err)) {
+            clearDeadSession();
+            return null;
+          }
           // tenta o caminho do cookie abaixo
         }
       }
@@ -61,7 +67,12 @@ export function useSession() {
           });
           return res.data.accessToken as string;
         }
-      } catch {
+      } catch (err) {
+        if (isDeadSession(err)) {
+          // Sem refresh token utilizável: sessão ausente ou morta.
+          // Limpa qualquer estado persistido e deixa o guard encaminhar p/ /login.
+          useAuthStore.getState().clearSession();
+        }
         return null;
       }
       return null;
@@ -142,8 +153,13 @@ export function useBackgroundRefresh(intervalMs = 1000 * 60 * 60 * 12) {
             refreshToken: res.data.refreshToken ?? refreshToken,
           });
         }
-      } catch {
-        // Refresh failed — just log it, NEVER clear session
+      } catch (err) {
+        if (isDeadSession(err)) {
+          // Sessão expirou entre os refreshes: limpa e vai para /login.
+          clearDeadSession();
+          return;
+        }
+        // Refresh falhou (ex.: rede) — tenta no próximo intervalo
         console.warn('[background-refresh] Token refresh failed, will retry in next interval');
       } finally {
         isRefreshing = false;

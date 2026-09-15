@@ -113,6 +113,7 @@ export class AuthController {
     return {
       ipAddress: req?.ip ?? req?.headers?.['x-forwarded-for'],
       userAgent: req?.headers?.['user-agent'],
+      clientType: req?.headers?.['x-client-type'],
     };
   }
 

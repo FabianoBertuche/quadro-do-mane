@@ -12,6 +12,7 @@ import { SelectTenantDto } from './dto/select-tenant.dto';
 export interface AuthRequestMeta {
   ipAddress?: string;
   userAgent?: string;
+  clientType?: string;
 }
 
 @Injectable()
@@ -107,7 +108,7 @@ export class AuthService {
       include: { user: true },
     });
 
-    if (!existing || existing.expiresAt < new Date()) {
+    if (!existing || (existing.expiresAt !== null && existing.expiresAt < new Date())) {
       throw new UnauthorizedException('Refresh token inválido ou expirado');
     }
 
@@ -285,16 +286,23 @@ export class AuthService {
       expiresIn: this.config.get<string>('JWT_EXPIRES_IN', '15m'),
     });
 
+    // App mobile: refresh token SEM expiração (o usuário fica logado
+    // indefinidamente até logout/revogação). Web e demais clientes mantêm
+    // a validade de JWT_REFRESH_EXPIRES_IN.
+    const isMobile = meta.clientType === 'mobile';
+
     const refreshToken = this.jwtService.sign(
       { sub: tenantUser.userId, tenantId: tenantUser.tenantId, family },
-      {
-        secret: this.config.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
-      },
+      isMobile
+        ? { secret: this.config.get<string>('JWT_REFRESH_SECRET') }
+        : {
+            secret: this.config.get<string>('JWT_REFRESH_SECRET'),
+            expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
+          },
     );
 
     const ttl = this.parseTtl(this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'));
-    const expiresAt = new Date(Date.now() + ttl * 1000);
+    const expiresAt = isMobile ? null : new Date(Date.now() + ttl * 1000);
 
     const record = await this.prisma.refreshToken.create({
       data: {

@@ -2,6 +2,26 @@ import axios from 'axios';
 import { useAuthStore } from './auth';
 
 /**
+ * Detecta sessão definitivamente inválida: o refresh token foi rejeitado
+ * (401/403) pelo backend, então não há como renovar — os dados param de
+ * carregar. Limpa o estado e devolve o usuário ao /login.
+ */
+export function isDeadSession(error: unknown): boolean {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    return status === 401 || status === 403;
+  }
+  return false;
+}
+
+export function clearDeadSession() {
+  useAuthStore.getState().clearSession();
+  if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+    window.location.href = '/login';
+  }
+}
+
+/**
  * API_URL — usa caminho RELATIVO para que a chamada passe pelo catch-all
  * Next.js em /pages/api/[...path].ts. Isso é essencial porque:
  *  1. O proxy repassa Set-Cookie do backend (3001) para o browser (3000).
@@ -94,7 +114,11 @@ async function refreshSession(): Promise<{ accessToken: string; refreshToken?: s
         };
       }
       return null;
-    } catch {
+    } catch (err) {
+      // Sessão morta (refresh expirado/revogado): limpa e redireciona.
+      if (isDeadSession(err)) {
+        clearDeadSession();
+      }
       return null;
     } finally {
       refreshPromise = null;
@@ -113,7 +137,9 @@ api.interceptors.response.use(
       original?.url?.includes('/auth/select-tenant');
     const isUnauthorized = error.response?.status === 401;
 
-    // Transparent refresh: try to rotate tokens silently. NEVER force logout.
+    // Transparent refresh: tenta rotacionar os tokens silenciosamente.
+    // Se o refresh falhar com 401/403 (sessão morta), o refreshSession
+    // limpa a sessão e redireciona para /login.
     if (isUnauthorized && !original?._retry && !isAuthEndpoint) {
       original._retry = true;
       try {
@@ -124,7 +150,7 @@ api.interceptors.response.use(
           return api(original);
         }
       } catch {
-        // refresh failed — just reject, never clear session or redirect
+        // refresh falhou — rejeita; a sessão morta já foi tratada acima
       }
     }
 

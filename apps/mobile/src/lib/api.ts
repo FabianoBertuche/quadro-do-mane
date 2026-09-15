@@ -19,9 +19,11 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  config.headers = config.headers ?? {};
+  // Identifica o app ao backend: refresh token é emitido SEM expiração.
+  (config.headers as any)['X-Client-Type'] = 'mobile';
   const token = useAuthStore.getState().accessToken;
   if (token) {
-    config.headers = config.headers ?? {};
     (config.headers as any).Authorization = `Bearer ${token}`;
   }
   return config;
@@ -38,7 +40,10 @@ async function refreshSession(): Promise<string | null> {
       const res = await axios.post(
         `${API_URL}/auth/refresh`,
         { refreshToken },
-        { timeout: 15_000, headers: { 'Content-Type': 'application/json' } },
+        {
+          timeout: 15_000,
+          headers: { 'Content-Type': 'application/json', 'X-Client-Type': 'mobile' },
+        },
       );
       const accessToken = res.data?.accessToken;
       if (accessToken) {
