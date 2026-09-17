@@ -121,6 +121,54 @@ export interface CalendarEvent {
   createdBy?: { user?: { name?: string | null } | null } | null;
 }
 
+export interface EventReminder {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  remindDaysBefore: number;
+  daysLeft: number;
+  assignee?: { name?: string | null } | null;
+}
+
+export interface EventRemindersResponse {
+  count: number;
+  reminders: EventReminder[];
+}
+
+export interface DashboardRoutineItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  scheduledTime?: string | null;
+  assignedTo: string;
+  assignedUserId?: string | null;
+  completedToday: boolean;
+  completedAt?: string | null;
+}
+
+export interface DailyRoutineOverdueUser {
+  tenantUserId: string;
+  userName: string;
+  overdueCount: number;
+}
+
+export interface DailyRoutineSummary {
+  totalItems: number;
+  completedItems: number;
+  lateItems: number;
+  completionPercentage: number;
+  usersWithOverdueTasks: DailyRoutineOverdueUser[];
+  usersOnTime: {
+    tenantUserId: string;
+    userName: string;
+    totalItems: number;
+    completedItems: number;
+    onTimeItems: number;
+    lateItems: number;
+  }[];
+}
+
 export interface Contact {
   id: string;
   name: string;

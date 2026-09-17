@@ -9,7 +9,7 @@ import {
   Alert,
   StyleSheet,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api, apiErrorMessage } from '@/lib/api';
 import { Project, TaskStatus, TaskPriority, Collaborator } from '@/lib/types';
@@ -18,6 +18,7 @@ import { OptionChips } from '@/components/ui';
 
 export default function TaskCreateScreen() {
   const router = useRouter();
+  const { projectId: paramProjectId } = useLocalSearchParams<{ projectId?: string }>();
   const [projects, setProjects] = useState<Project[]>([]);
   const [statuses, setStatuses] = useState<TaskStatus[]>([]);
   const [priorities, setPriorities] = useState<TaskPriority[]>([]);
@@ -47,12 +48,15 @@ export default function TaskCreateScreen() {
       setPriorities(pr.data);
       setPeople(u.data);
       setStatusId(s.data.find((x) => x.isDefault)?.id ?? s.data[0]?.id ?? null);
+      if (paramProjectId && p.data.some((x) => x.id === paramProjectId)) {
+        setProjectId(paramProjectId);
+      }
     } catch {
       Alert.alert('Erro', 'Não foi possível carregar os dados do formulário.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [paramProjectId]);
 
   useEffect(() => {
     void loadRefs();

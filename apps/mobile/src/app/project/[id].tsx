@@ -133,6 +133,18 @@ export default function ProjectDetailScreen() {
         </Pressable>
         <Text style={styles.topTitle}>Detalhe do projeto</Text>
         <View style={styles.topActions}>
+          {can('tasks.create') ? (
+            <Pressable
+              onPress={() =>
+                router.push({ pathname: '/task-create', params: { projectId: id } })
+              }
+              hitSlop={6}
+              style={({ pressed }) => [styles.newTaskBtn, pressed && { opacity: 0.8 }]}
+            >
+              <Feather name="plus" size={14} color={colors.primaryForeground} />
+              <Text style={styles.newTaskText}>Nova</Text>
+            </Pressable>
+          ) : null}
           {can('projects.edit') && !editing ? (
             <Pressable onPress={startEdit} hitSlop={10}>
               <Feather name="edit-2" size={19} color={colors.foreground} />
@@ -293,6 +305,16 @@ const styles = StyleSheet.create({
   },
   topTitle: { color: colors.foreground, fontSize: 15, fontWeight: '700' },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 16, minWidth: 24 },
+  newTaskBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  newTaskText: { color: colors.primaryForeground, fontWeight: '700', fontSize: 12.5 },
   editCard: {
     backgroundColor: colors.card,
     borderColor: colors.cardBorder,
