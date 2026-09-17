@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { DashboardOverview } from '@/lib/types';
 import { colors } from '@/theme/colors';
 import { StatCard, Loading, ErrorState } from '@/components/ui';
@@ -17,18 +17,14 @@ export default function DashboardScreen() {
     try {
       const res = await api.get<DashboardOverview>('/dashboard/overview');
       setData(res.data);
-    } catch {
-      setError('Não foi possível carregar o painel.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar o painel.'));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

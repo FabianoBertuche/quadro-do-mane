@@ -8,9 +8,10 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { Project } from '@/lib/types';
 import { can } from '@/lib/permissions';
 import { formatDate } from '@/lib/format';
@@ -29,19 +30,15 @@ export default function ProjectsScreen() {
     try {
       const res = await api.get<Project[]>('/projects');
       setProjects(res.data);
-    } catch {
-      setError('Não foi possível carregar os projetos.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar os projetos.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   if (loading) return <Loading label="Carregando projetos..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;

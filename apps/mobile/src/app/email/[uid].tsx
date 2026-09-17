@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api, apiErrorMessage, API_URL } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import axios from 'axios';
 import { useAuthStore } from '@/lib/auth';
 import { can } from '@/lib/permissions';
@@ -46,11 +47,7 @@ export default function EmailDetailScreen() {
     }
   }, [uid]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   if (loading) return <Loading label="Carregando mensagem..." />;
   if (error || !email)

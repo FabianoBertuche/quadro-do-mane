@@ -26,6 +26,7 @@ export async function hydrateSession(): Promise<void> {
     useAuthStore.getState().setSession({
       user: d.user ?? null,
       tenant: d.tenant ?? null,
+      tenantUserId: d.tenantUserId ?? null,
       permissions: Array.isArray(d.permissions) ? d.permissions : [],
       role: d.role ?? null,
     });

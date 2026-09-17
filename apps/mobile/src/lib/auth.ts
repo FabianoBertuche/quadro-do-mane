@@ -19,6 +19,7 @@ export interface SessionPayload {
   refreshToken?: string | null;
   user?: AuthUser | null;
   tenant?: AuthTenant | null;
+  tenantUserId?: string | null;
   permissions?: string[];
   role?: string | null;
 }
@@ -28,6 +29,7 @@ interface AuthState {
   refreshToken: string | null;
   user: AuthUser | null;
   tenant: AuthTenant | null;
+  tenantUserId: string | null;
   permissions: string[];
   role: string | null;
   hydrated: boolean;
@@ -52,6 +54,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   refreshToken: null,
   user: null,
   tenant: null,
+  tenantUserId: null,
   permissions: [],
   role: null,
   hydrated: false,
@@ -69,6 +72,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       ...(data.refreshToken !== undefined ? { refreshToken: data.refreshToken } : {}),
       ...(data.user !== undefined ? { user: data.user } : {}),
       ...(data.tenant !== undefined ? { tenant: data.tenant } : {}),
+      ...(data.tenantUserId !== undefined ? { tenantUserId: data.tenantUserId } : {}),
       ...(data.permissions !== undefined ? { permissions: data.permissions } : {}),
       ...(data.role !== undefined ? { role: data.role } : {}),
     }));
@@ -84,6 +88,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       refreshToken: null,
       user: null,
       tenant: null,
+      tenantUserId: null,
       permissions: [],
       role: null,
       hydrated: true,

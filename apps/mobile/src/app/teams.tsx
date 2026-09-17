@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { Team } from '@/lib/types';
 import { can } from '@/lib/permissions';
 import { colors } from '@/theme/colors';
@@ -21,19 +22,15 @@ export default function TeamsScreen() {
     try {
       const res = await api.get<Team[]>('/teams');
       setTeams(res.data);
-    } catch {
-      setError('Não foi possível carregar as equipes.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar as equipes.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   if (loading) return <Loading label="Carregando equipes..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;

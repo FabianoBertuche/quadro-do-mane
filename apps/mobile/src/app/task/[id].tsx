@@ -7,14 +7,28 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Image,
+  Linking,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api, apiErrorMessage } from '@/lib/api';
-import { Task, TaskStatus, TaskPriority, TaskComment, Collaborator } from '@/lib/types';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { api, apiErrorMessage, API_URL } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
+import { Task, TaskStatus, TaskPriority, TaskComment, TaskAttachment, Collaborator } from '@/lib/types';
 import { can } from '@/lib/permissions';
+import { useAuthStore } from '@/lib/auth';
+import {
+  attachmentFileUrl,
+  buildUploadableFile,
+  canDeleteAttachment,
+  formatFileSize,
+  validateAttachmentSize,
+  type PickedAttachment,
+} from '@/lib/attachments';
 import { formatDateTime, formatDate } from '@/lib/format';
 import { colors } from '@/theme/colors';
 import { Avatar, Chip, Loading, ErrorState, OptionChips } from '@/components/ui';
@@ -38,6 +52,10 @@ export default function TaskDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
+
+  // anexos
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // edição
   const [editing, setEditing] = useState(false);
@@ -71,18 +89,14 @@ export default function TaskDetailScreen() {
       setStatuses(s.data);
       setPriorities(p.data);
       setComments(c.data);
-    } catch {
-      setError('Não foi possível carregar a tarefa.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar a tarefa.'));
     } finally {
       setLoading(false);
     }
   }, [id]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   const changeStatus = async (statusId: string) => {
     if (!task) return;
@@ -121,6 +135,121 @@ export default function TaskDetailScreen() {
     } finally {
       setSendingComment(false);
     }
+  };
+
+  const uploadFile = async (file: PickedAttachment) => {
+    if (!task || uploading) return;
+    const sizeError = validateAttachmentSize(file.size);
+    if (sizeError) {
+      Alert.alert('Arquivo muito grande', sizeError);
+      return;
+    }
+    const uploadable = buildUploadableFile(file);
+    if (!uploadable) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', uploadable as unknown as Blob);
+      await api.post(`/upload/tasks/${task.id}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300_000,
+      });
+      await load();
+    } catch (e) {
+      setUploadError(apiErrorMessage(e, 'Erro ao enviar arquivo. Tente novamente.'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      await uploadFile({
+        uri: asset.uri,
+        name: asset.name,
+        type: asset.mimeType ?? null,
+        size: asset.size ?? null,
+      });
+    } catch {
+      // usuário cancelou ou picker indisponível — ignora
+    }
+  };
+
+  const pickPhoto = () => {
+    Alert.alert('Adicionar foto', '', [
+      { text: 'Tirar foto', onPress: () => void takePhoto() },
+      { text: 'Escolher da galeria', onPress: () => void pickFromGallery() },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
+  };
+
+  const takePhoto = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permissão', 'Permita o acesso à câmera nas configurações para tirar fotos.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+    if (result.canceled) return;
+    await uploadPickedImage(result.assets[0]);
+  };
+
+  const pickFromGallery = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permissão', 'Permita o acesso à galeria nas configurações para enviar fotos.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+    });
+    if (result.canceled) return;
+    await uploadPickedImage(result.assets[0]);
+  };
+
+  const uploadPickedImage = async (asset: ImagePicker.ImagePickerAsset) => {
+    await uploadFile({
+      uri: asset.uri,
+      name: asset.fileName ?? `foto-${Date.now()}.jpg`,
+      type: asset.mimeType ?? 'image/jpeg',
+      size: asset.fileSize ?? null,
+    });
+  };
+
+  const openAttachment = (att: TaskAttachment) => {
+    const url = attachmentFileUrl(API_URL, att.filePath);
+    if (!url) return;
+    Linking.openURL(url).catch(() =>
+      Alert.alert('Erro', 'Não foi possível abrir o arquivo.'),
+    );
+  };
+
+  const deleteAttachment = (att: TaskAttachment) => {
+    if (!canDeleteAttachment(useAuthStore.getState(), att)) return;
+    Alert.alert('Excluir anexo', `${att.fileName}\n\nEssa ação não pode ser desfeita.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.delete(`/tasks/${task!.id}/attachments/${att.id}`);
+            await load();
+          } catch (e) {
+            Alert.alert('Erro', apiErrorMessage(e, 'Não foi possível excluir o anexo.'));
+          }
+        },
+      },
+    ]);
   };
 
   const remove = () =>
@@ -549,15 +678,15 @@ export default function TaskDetailScreen() {
           ) : null}
         </View>
 
-        {/* Comentários */}
+        {/* Notas */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Comentários ({comments.length})</Text>
+          <Text style={styles.sectionTitle}>Notas ({comments.length})</Text>
 
           {can('tasks.comment') ? (
             <View style={styles.commentBox}>
               <TextInput
                 style={styles.commentInput}
-                placeholder="Escreva um comentário..."
+                placeholder="Adicione uma nota..."
                 placeholderTextColor={colors.mutedForeground}
                 value={comment}
                 onChangeText={setComment}
@@ -590,6 +719,86 @@ export default function TaskDetailScreen() {
               </View>
             </View>
           ))}
+        </View>
+
+        {/* Anexos */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Anexos ({task.attachments?.length ?? 0})</Text>
+
+          {can('tasks.edit') && !editing ? (
+            <View style={styles.attachRow}>
+              <Pressable
+                onPress={() => void pickDocument()}
+                disabled={uploading}
+                style={[styles.attachBtn, uploading && styles.disabled]}
+              >
+                <Feather name="paperclip" size={14} color={colors.primary} />
+                <Text style={styles.attachBtnText}>
+                  {uploading ? 'Enviando...' : 'Anexar arquivo'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={pickPhoto}
+                disabled={uploading}
+                style={[styles.attachBtn, uploading && styles.disabled]}
+              >
+                <Feather name="camera" size={14} color={colors.primary} />
+                <Text style={styles.attachBtnText}>Foto</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {uploading ? (
+            <View style={styles.attachUploading}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={styles.attachUploadingText}>Enviando arquivo...</Text>
+            </View>
+          ) : null}
+          {uploadError ? <Text style={styles.uploadError}>{uploadError}</Text> : null}
+
+          {(task.attachments ?? []).length === 0 && !uploading ? (
+            <Text style={styles.hintText}>Nenhum arquivo anexado.</Text>
+          ) : null}
+
+          {(task.attachments ?? []).map((att) => {
+            const isImage = att.mimeType?.toLowerCase().startsWith('image/');
+            const canDelete = canDeleteAttachment(useAuthStore.getState(), att);
+            return (
+              <Pressable
+                key={att.id}
+                onPress={() => openAttachment(att)}
+                style={({ pressed }) => [styles.attCard, pressed && styles.pressedCard]}
+              >
+                {isImage ? (
+                  <Image
+                    source={{ uri: attachmentFileUrl(API_URL, att.filePath) }}
+                    style={styles.attThumb}
+                  />
+                ) : (
+                  <View style={styles.attIconBox}>
+                    <Feather name="file-text" size={17} color={colors.mutedForeground} />
+                  </View>
+                )}
+                <View style={styles.attInfo}>
+                  <Text style={styles.attName} numberOfLines={1}>{att.fileName}</Text>
+                  <Text style={styles.attMeta} numberOfLines={1}>
+                    {formatFileSize(att.fileSize)}
+                    {att.uploadedBy?.user?.name ? ` · ${att.uploadedBy.user.name}` : ''}
+                    {' · '}
+                    {formatDateTime(att.createdAt)}
+                  </Text>
+                </View>
+                {canDelete ? (
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => void deleteAttachment(att)}
+                    style={styles.attDelete}
+                  >
+                    <Feather name="trash-2" size={16} color={colors.error} />
+                  </Pressable>
+                ) : null}
+              </Pressable>
+            );
+          })}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -759,6 +968,51 @@ const styles = StyleSheet.create({
   commentDate: { color: colors.sidebarMuted, fontSize: 11 },
   commentContent: { color: colors.mutedForeground, fontSize: 13.5, marginTop: 4, lineHeight: 19 },
   pressedCard: { opacity: 0.7 },
+  attachRow: { flexDirection: 'row', gap: 10, marginBottom: 12, flexWrap: 'wrap' },
+  attachBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.inputBg,
+    borderColor: colors.cardBorder,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  attachBtnText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+  attachUploading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  attachUploadingText: { color: colors.mutedForeground, fontSize: 12.5 },
+  uploadError: { color: colors.error, fontSize: 12.5, marginBottom: 8 },
+  attCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.card,
+    borderColor: colors.cardBorder,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 8,
+  },
+  attThumb: { width: 40, height: 40, borderRadius: 8 },
+  attIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attInfo: { flex: 1, minWidth: 0 },
+  attName: { color: colors.foreground, fontSize: 13, fontWeight: '600' },
+  attMeta: { color: colors.sidebarMuted, fontSize: 11, marginTop: 2 },
+  attDelete: { padding: 6 },
   hintText: { color: colors.sidebarMuted, fontSize: 12.5 },
   subTaskCard: {
     flexDirection: 'row',

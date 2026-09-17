@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
 import { View, Text, FlatList, TextInput, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { Contact } from '@/lib/types';
 import { can } from '@/lib/permissions';
 import { colors } from '@/theme/colors';
@@ -22,19 +23,15 @@ export default function ContactsScreen() {
     try {
       const res = await api.get<Contact[]>('/contacts');
       setContacts(res.data);
-    } catch {
-      setError('Não foi possível carregar os contatos.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar os contatos.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   const filtered = contacts.filter((c) => {
     const q = search.trim().toLowerCase();

@@ -8,9 +8,10 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { EmailMessage } from '@/lib/types';
 import { formatDateTime } from '@/lib/format';
 import { colors } from '@/theme/colors';
@@ -30,19 +31,15 @@ export default function EmailsScreen() {
         params: { folder: 'INBOX' },
       });
       setMessages(res.data);
-    } catch {
-      setError('Não foi possível carregar a caixa de entrada. Verifique as configurações de e-mail.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar a caixa de entrada. Verifique as configurações de e-mail.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   if (loading) return <Loading label="Carregando caixa de entrada..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;

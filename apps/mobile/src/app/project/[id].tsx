@@ -11,9 +11,10 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { Project, Task } from '@/lib/types';
 import { formatDate, isOverdue } from '@/lib/format';
 import { can } from '@/lib/permissions';
@@ -54,19 +55,15 @@ export default function ProjectDetailScreen() {
       ]);
       setProject(p.data);
       setTasks(t.data);
-    } catch {
-      setError('Não foi possível carregar o projeto.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar o projeto.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [id]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   const startEdit = () => {
     if (!project) return;

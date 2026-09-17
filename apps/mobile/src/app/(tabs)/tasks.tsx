@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,12 +9,15 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api } from '@/lib/api';
+import { DndProvider, Droppable, Draggable } from '@mgcrea/react-native-dnd';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { Task, TaskStatus, TaskPriority } from '@/lib/types';
 import { can } from '@/lib/permissions';
 import { formatDate, isOverdue } from '@/lib/format';
+import { resolveKanbanDrop } from '@/lib/kanban-dnd';
 import { colors } from '@/theme/colors';
 import { Avatar, Chip, Loading, ErrorState, Segmented } from '@/components/ui';
 
@@ -41,19 +44,15 @@ export default function TasksScreen() {
       setTasks(t.data);
       setStatuses(s.data);
       setPriorities(p.data);
-    } catch {
-      setError('Não foi possível carregar as tarefas.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar as tarefas.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   const byStatus = useMemo(() => {
     const map = new Map<string, Task[]>();
@@ -65,12 +64,11 @@ export default function TasksScreen() {
     return map;
   }, [tasks, statuses]);
 
-  /** Move tarefa para a coluna adjacente (kanban). */
-  const moveTask = useCallback(
-    async (task: Task, direction: -1 | 1) => {
-      const idx = statuses.findIndex((s) => s.id === task.statusId);
-      const target = statuses[idx + direction];
-      if (!target) return;
+  /** Move tarefa para a coluna alvo (kanban). */
+  const moveTaskToStatus = useCallback(
+    async (task: Task, targetStatusId: string) => {
+      const target = statuses.find((s) => s.id === targetStatusId);
+      if (!target || task.statusId === targetStatusId) return;
       // otimista
       setTasks((prev) =>
         prev.map((t) => (t.id === task.id ? { ...t, statusId: target.id, status: target } : t)),
@@ -149,7 +147,7 @@ export default function TasksScreen() {
           statuses={statuses}
           byStatus={byStatus}
           onTaskPress={(id) => router.push(`/task/${id}`)}
-          onMove={moveTask}
+          onTaskDrop={moveTaskToStatus}
         />
       )}
     </SafeAreaView>
@@ -186,86 +184,102 @@ function KanbanBoard({
   statuses,
   byStatus,
   onTaskPress,
-  onMove,
+  onTaskDrop,
 }: {
   statuses: TaskStatus[];
   byStatus: Map<string, Task[]>;
   onTaskPress: (id: string) => void;
-  onMove: (task: Task, dir: -1 | 1) => Promise<void>;
+  onTaskDrop: (task: Task, toStatusId: string) => Promise<void>;
 }) {
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.board}
-    >
-      {statuses.map((status, colIdx) => {
-        const items = byStatus.get(status.id) ?? [];
-        const accent = status.color || colors.mutedForeground;
-        return (
-          <View key={status.id} style={styles.column}>
-            <View style={styles.colHeader}>
-              <View style={[styles.colDot, { backgroundColor: accent }]} />
-              <Text style={styles.colTitle}>{status.name}</Text>
-              <View style={styles.colCount}>
-                <Text style={styles.colCountText}>{items.length}</Text>
-              </View>
-            </View>
+  const dragJustHappened = useRef(false);
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.colBody}>
-              {items.length === 0 ? (
-                <Text style={styles.colEmpty}>—</Text>
-              ) : (
-                items.map((task) => (
-                  <View key={task.id} style={styles.kanbanCard}>
-                    <Pressable onPress={() => onTaskPress(task.id)}>
-                      <Text style={styles.kanbanTitle} numberOfLines={3}>{task.title}</Text>
-                    </Pressable>
-                    <View style={styles.kanbanMeta}>
-                      {task.priority ? (
-                        <Chip label={task.priority.name} color={task.priority.color} />
-                      ) : null}
-                      {isOverdue(task.dueDate) && status.category !== 'done' ? (
-                        <Chip label="Atrasada" color={colors.error} filled />
-                      ) : null}
-                    </View>
-                    {/* mover entre colunas */}
-                    <View style={styles.moveRow}>
+  const handleDragEnd = ({
+    active,
+    over,
+  }: {
+    active: { id: string | number };
+    over: { id: string | number } | null;
+  }) => {
+    const allTasks = Array.from(byStatus.values()).flat();
+    const drop = resolveKanbanDrop(active.id, over?.id ?? null, allTasks);
+    if (!drop) return;
+    const task = allTasks.find((t) => t.id === drop.taskId);
+    if (task) void onTaskDrop(task, drop.targetStatusId);
+  };
+
+  return (
+    <DndProvider
+      activationDelay={200}
+      onDragEnd={handleDragEnd}
+      onActivation={(next) => {
+        dragJustHappened.current = next !== null;
+      }}
+    >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.board}>
+        {statuses.map((status) => {
+          const items = byStatus.get(status.id) ?? [];
+          const accent = status.color || colors.mutedForeground;
+          return (
+            <Droppable
+              key={status.id}
+              id={status.id}
+              style={[styles.column, { borderColor: accent }]}
+              animatedStyleWorklet={(s, { isActive }) => {
+                'worklet';
+                return {
+                  ...s,
+                  borderColor: isActive ? colors.primary : accent,
+                  backgroundColor: isActive ? `${colors.primary}15` : colors.card,
+                };
+              }}
+            >
+              <View style={styles.colHeader}>
+                <View style={[styles.colDot, { backgroundColor: accent }]} />
+                <Text style={styles.colTitle}>{status.name}</Text>
+                <View style={styles.colCount}>
+                  <Text style={styles.colCountText}>{items.length}</Text>
+                </View>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.colBody}>
+                {items.length === 0 ? (
+                  <Text style={styles.colEmpty}>—</Text>
+                ) : (
+                  items.map((task) => (
+                    <Draggable
+                      key={task.id}
+                      id={task.id}
+                      activeOpacity={0.92}
+                      style={styles.kanbanCard}
+                    >
                       <Pressable
-                        disabled={colIdx === 0}
-                        onPress={() => void onMove(task, -1)}
-                        hitSlop={8}
-                      >
-                        <Feather
-                          name="arrow-left-circle"
-                          size={17}
-                          color={colIdx === 0 ? colors.sidebarMuted : colors.mutedForeground}
-                        />
-                      </Pressable>
-                      <Pressable
-                        disabled={colIdx === statuses.length - 1}
-                        onPress={() => void onMove(task, 1)}
-                        hitSlop={8}
-                      >
-                        <Feather
-                          name="arrow-right-circle"
-                          size={17}
-                          color={
-                            colIdx === statuses.length - 1
-                              ? colors.sidebarMuted
-                              : colors.mutedForeground
+                        onPress={() => {
+                          if (dragJustHappened.current) {
+                            dragJustHappened.current = false;
+                            return;
                           }
-                        />
+                          onTaskPress(task.id);
+                        }}
+                      >
+                        <Text style={styles.kanbanTitle} numberOfLines={3}>{task.title}</Text>
                       </Pressable>
-                    </View>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-          </View>
-        );
-      })}
-    </ScrollView>
+                      <View style={styles.kanbanMeta}>
+                        {task.priority ? (
+                          <Chip label={task.priority.name} color={task.priority.color} />
+                        ) : null}
+                        {isOverdue(task.dueDate) && status.category !== 'done' ? (
+                          <Chip label="Atrasada" color={colors.error} filled />
+                        ) : null}
+                      </View>
+                    </Draggable>
+                  ))
+                )}
+              </ScrollView>
+            </Droppable>
+          );
+        })}
+      </ScrollView>
+    </DndProvider>
   );
 }
 
@@ -353,11 +367,4 @@ const styles = StyleSheet.create({
   },
   kanbanTitle: { color: colors.foreground, fontSize: 13.5, fontWeight: '600' },
   kanbanMeta: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  moveRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderTopColor: colors.cardBorder,
-    borderTopWidth: 1,
-    paddingTop: 8,
-  },
 });

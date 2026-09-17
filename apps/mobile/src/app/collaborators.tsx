@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { Collaborator } from '@/lib/types';
 import { colors } from '@/theme/colors';
 import { Avatar, Chip, Loading, ErrorState } from '@/components/ui';
@@ -18,19 +18,15 @@ export default function CollaboratorsScreen() {
     try {
       const res = await api.get<Collaborator[]>('/users');
       setPeople(res.data);
-    } catch {
-      setError('Não foi possível carregar os colaboradores.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar os colaboradores.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   if (loading) return <Loading label="Carregando colaboradores..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;

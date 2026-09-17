@@ -37,6 +37,17 @@ export interface TaskChecklist {
   items: TaskChecklistItem[];
 }
 
+export interface TaskAttachment {
+  id: string;
+  fileName: string;
+  filePath: string;
+  mimeType?: string | null;
+  fileSize?: number | null;
+  createdAt: string;
+  uploadedByTenantUserId?: string | null;
+  uploadedBy?: { user?: { name?: string | null; avatarUrl?: string | null } | null } | null;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -55,6 +66,7 @@ export interface Task {
   _count?: { comments: number; checklists: number; attachments: number; subTasks: number };
   checklists?: TaskChecklist[];
   subTasks?: Task[];
+  attachments?: TaskAttachment[];
   parentTaskId?: string | null;
 }
 

@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, SectionList, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { CalendarEvent } from '@/lib/types';
 import { dayLabel, timeLabel } from '@/lib/format';
 import { can } from '@/lib/permissions';
@@ -38,19 +39,15 @@ export default function CalendarScreen() {
         },
       });
       setEvents(res.data);
-    } catch {
-      setError('Não foi possível carregar o calendário.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar o calendário.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   const sections = useMemo<Section[]>(() => {
     const map = new Map<string, CalendarEvent[]>();

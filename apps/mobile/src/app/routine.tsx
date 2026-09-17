@@ -10,9 +10,9 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { RoutineItem, Collaborator } from '@/lib/types';
 import { can } from '@/lib/permissions';
 import { colors } from '@/theme/colors';
@@ -37,15 +37,15 @@ export default function RoutineScreen() {
     try {
       const res = await api.get<RoutineItem[]>('/daily-routine');
       setItems(res.data.filter((i) => i.isActive));
-    } catch {
-      setError('Não foi possível carregar sua rotina.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar sua rotina.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
+  useLoadOnMountAndFocus(
     useCallback(() => {
       void load();
       if (can('daily_routine.manage')) {

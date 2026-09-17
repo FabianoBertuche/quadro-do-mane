@@ -50,6 +50,8 @@ module.exports = () => {
         'expo-secure-store',
         'expo-font',
         'expo-notifications',
+        'expo-document-picker',
+        'expo-image-picker',
         './plugins/withGradleRetry',
       ],
       experiments: {

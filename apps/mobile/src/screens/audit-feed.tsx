@@ -9,9 +9,9 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
-import { api } from '@/lib/api';
+import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { AuditEntry } from '@/lib/types';
 import { formatDateTime } from '@/lib/format';
 import { colors } from '@/theme/colors';
@@ -56,8 +56,8 @@ export function AuditFeedScreen({
         }
         const res = await api.get<AuditEntry[]>(endpoint, { params });
         setItems(res.data);
-      } catch {
-        setError('Não foi possível carregar o histórico.');
+      } catch (e) {
+        setError(apiErrorMessage(e, 'Não foi possível carregar o histórico.'));
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -66,11 +66,10 @@ export function AuditFeedScreen({
     [endpoint],
   );
 
-  useFocusEffect(
+  useLoadOnMountAndFocus(
     useCallback(() => {
       void load(actionFilter, periodDays);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [load]),
+    }, [load, actionFilter, periodDays]),
   );
 
   if (loading) return <Loading label="Carregando histórico..." />;

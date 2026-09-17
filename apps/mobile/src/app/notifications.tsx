@@ -9,9 +9,9 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api, apiErrorMessage } from '@/lib/api';
+import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
 import { AppNotification } from '@/lib/types';
 import { formatDateTime } from '@/lib/format';
 import { colors } from '@/theme/colors';
@@ -36,19 +36,15 @@ export default function NotificationsScreen() {
     try {
       const res = await api.get<AppNotification[]>('/notifications');
       setItems(res.data);
-    } catch {
-      setError('Não foi possível carregar as notificações.');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar as notificações.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  useLoadOnMountAndFocus(load);
 
   const markRead = async (n: AppNotification) => {
     if (n.isRead) return;
