@@ -8,5 +8,6 @@ import { NotificationsModule } from '../notifications/notifications.module';
   imports: [PrismaModule, NotificationsModule],
   controllers: [DailyRoutineController],
   providers: [DailyRoutineService],
+  exports: [DailyRoutineService],
 })
 export class DailyRoutineModule {}

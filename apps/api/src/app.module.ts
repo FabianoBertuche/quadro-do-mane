@@ -1,5 +1,6 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { RedisModule } from './common/redis/redis.module';
@@ -25,6 +26,7 @@ import { DailyRoutineModule } from './modules/daily-routine/daily-routine.module
 import { PushModule } from './modules/push/push.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { UserActivityService } from './modules/dashboard/user-activity.service';
+import { NotificationSchedulerService } from './modules/notifications/notification-scheduler.service';
 
 @Module({
   imports: [
@@ -33,6 +35,7 @@ import { UserActivityService } from './modules/dashboard/user-activity.service';
       cache: true,
       validate: validateEnv,
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     CryptoModule,
     RedisModule,
@@ -55,7 +58,11 @@ import { UserActivityService } from './modules/dashboard/user-activity.service';
     DailyRoutineModule,
     PushModule,
     AdminModule,
-  ],  providers: [UserActivityService],
+  ],
+  // O scheduler vive no AppModule de propósito: Events, Tasks, DailyRoutine e
+  // Push já importam NotificationsModule, então colocá-lo em NotificationsModule
+  // criaria um ciclo de imports.
+  providers: [UserActivityService, NotificationSchedulerService],
   exports: [UserActivityService],
 })
 export class AppModule implements NestModule {

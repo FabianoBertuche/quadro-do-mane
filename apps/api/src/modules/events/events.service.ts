@@ -1,8 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
-import { PushService } from '../push/push.service';
+import { DispatchInput, NotificationDispatcherService } from '../notifications/notification-dispatcher.service';
 import { CreateEventDto, RecurrenceUnit } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 
@@ -15,12 +15,17 @@ const PRESET_RECURRENCE_UNITS: Record<string, RecurrenceUnit> = {
   YEARLY: 'year',
 };
 
+/** O SDK do Expo ecoa o payload em mensagens de erro, então só o nome do erro é seguro. */
+const safeError = (err: unknown) => (err instanceof Error ? err.name : 'erro desconhecido');
+
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
   constructor(
     private prisma: PrismaService,
     private activityLog: ActivityLogService,
-    private pushService: PushService,
+    private dispatcher: NotificationDispatcherService,
   ) {}
 
   async findAll(
@@ -318,8 +323,13 @@ export class EventsService {
   }
 
   /**
-   * Envia o push diário dos lembretes ativos (chamado pelo cron externo).
-   * Dedup: grava action SEND por evento+usuário+dia; se já enviado hoje, ignora.
+   * Envia o lembrete diário dos eventos elegíveis (chamado pelo scheduler a cada
+   * 5 minutos e pelo fallback manual `POST /admin/send-event-reminders`).
+   *
+   * `EventReminderAction` continua sendo a guarda de seleção diária por
+   * evento+usuário: quem já tem SEND hoje ou dispensou não recebe nada. O que
+   * muda é o transporte — a entrega passa pelo dispatcher, que grava ledger e
+   * Central idempotentes e só então tenta o push.
    */
   async sendDailyReminderPushes(now = new Date()) {
     const [dayStart, dayEnd] = this.dayBoundary(now);
@@ -358,6 +368,7 @@ export class EventsService {
       select: { eventId: true, tenantUserId: true },
     });
     const dismissed = new Set(dismissals.map((action) => `${action.eventId}:${action.tenantUserId}`));
+    const occurrenceKey = this.localDayKey(now);
 
     let sent = 0;
     for (const [eventId, userIds] of involved) {
@@ -378,15 +389,36 @@ export class EventsService {
           data: [{ tenantId, eventId, tenantUserId: uid, action: 'SEND', actionDate: now }],
           skipDuplicates: true,
         });
-        await this.pushService.sendToUser(uid, {
+        await this.deliverReminder({
+          tenantId,
+          tenantUserId: uid,
+          category: 'CALENDAR',
+          type: 'event_reminder',
           title: 'Lembrete de evento',
-          body: `"${title}" é ${dayLabel}`,
-          data: { type: 'event-reminder', eventId },
+          message: `"${title}" é ${dayLabel}`,
+          payload: { eventId, route: '/calendar' },
+          entityType: 'event',
+          entityId: eventId,
+          occurrenceKey,
         });
       }
       sent += toSend.length;
     }
     return { sent, checkedAt: now.toISOString() };
+  }
+
+  /**
+   * Uma entrega que falha não pode interromper os demais destinatários do mesmo
+   * tique: o erro fica no log e a próxima rodada tenta de novo.
+   */
+  private async deliverReminder(input: DispatchInput): Promise<void> {
+    try {
+      await this.dispatcher.dispatch(input);
+    } catch (err) {
+      this.logger.error(
+        `Falha ao entregar lembrete de evento (event=${input.entityId}, user=${input.tenantUserId}): ${safeError(err)}`,
+      );
+    }
   }
 
   // ─── helpers ────────────────────────────────────────────────────────────
@@ -406,6 +438,14 @@ export class EventsService {
     const start = new Date(format(date));
     const end = new Date(format(next));
     return [start, end];
+  }
+
+  /** `YYYY-MM-DD` do dia corrente no fuso corporativo — a chave de ocorrência diária. */
+  private localDayKey(now: Date): string {
+    const [dayStart] = this.dayBoundary(now);
+    const month = String(dayStart.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(dayStart.getUTCDate()).padStart(2, '0');
+    return `${dayStart.getUTCFullYear()}-${month}-${day}`;
   }
 
   /** Garante que o evento existe no tenant e que o usuário está envolvido. */
