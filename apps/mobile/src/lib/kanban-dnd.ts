@@ -3,7 +3,7 @@
  *
  * Lógica pura — sem imports de React Native.
  */
-import type { UniqueIdentifier } from '@mgcrea/react-native-dnd';
+type UniqueIdentifier = string | number;
 
 export interface KanbanTask {
   id: string;

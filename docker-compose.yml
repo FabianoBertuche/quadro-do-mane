@@ -7,7 +7,9 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
+      # Keep public HTTPS on the Internet-facing address and leave the
+      # Tailscale address available for authenticated Tailscale Serve.
+      - "2.25.105.206:443:443"
     dns:
       - 8.8.8.8
       - 1.1.1.1
