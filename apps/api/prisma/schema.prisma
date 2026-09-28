@@ -43,90 +43,96 @@ model Plan {
 }
 
 model Tenant {
-  id                  String               @id @default(uuid())
-  name                String
-  slug                String               @unique
-  legalName           String?              @map("legal_name")
-  documentNumber      String?              @map("document_number")
-  email               String?
-  phone               String?
-  status              TenantStatus         @default(ACTIVE)
-  createdAt           DateTime             @default(now()) @map("created_at")
-  updatedAt           DateTime             @updatedAt @map("updated_at")
-  activityLogs        ActivityLog[]
-  attachments         Attachment[]
-  auditLogs           AuditLog[]
-  automations         Automation[]
-  contacts            Contact[]
-  customFieldValues   CustomFieldValue[]
-  customFields        CustomField[]
-  eventAttendees      EventAttendee[]
-  eventReminderActions EventReminderAction[]
-  events              Event[]
-  notifications       Notification[]
-  projectMembers      ProjectMember[]
-  projectViews        ProjectView[]
-  projects            Project[]
-  roles               Role[]
-  subscriptions       Subscription[]
-  taskAssignees       TaskAssignee[]
-  taskChecklistItems  TaskChecklistItem[]
-  taskChecklists      TaskChecklist[]
-  taskComments        TaskComment[]
-  taskPriorities      TaskPriority[]
-  taskStatuses        TaskStatus[]
-  taskTagLinks        TaskTagLink[]
-  taskTags            TaskTag[]
-  tasks               Task[]
-  teamMembers         TeamMember[]
-  teams               Team[]
-  tenantUsers         TenantUser[]
-  usageCounters       UsageCounter[]
-  emailSettings       EmailSetting[]
-  emailTenantSettings EmailTenantSetting[]
-  refreshTokens       RefreshToken[]
-  dailyRoutineItems   DailyRoutineItem[]
-  dailyRoutineLogs    DailyRoutineLog[]
-  pushDevices         PushDevice[]
+  id                      String                   @id @default(uuid())
+  name                    String
+  slug                    String                   @unique
+  legalName               String?                  @map("legal_name")
+  documentNumber          String?                  @map("document_number")
+  email                   String?
+  phone                   String?
+  status                  TenantStatus             @default(ACTIVE)
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  activityLogs            ActivityLog[]
+  attachments             Attachment[]
+  auditLogs               AuditLog[]
+  automations             Automation[]
+  contacts                Contact[]
+  customFieldValues       CustomFieldValue[]
+  customFields            CustomField[]
+  eventAttendees          EventAttendee[]
+  eventReminderActions    EventReminderAction[]
+  events                  Event[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  notificationDispatches  NotificationDispatch[]
+  projectMembers          ProjectMember[]
+  projectViews            ProjectView[]
+  projects                Project[]
+  roles                   Role[]
+  subscriptions           Subscription[]
+  taskAssignees           TaskAssignee[]
+  taskChecklistItems      TaskChecklistItem[]
+  taskChecklists          TaskChecklist[]
+  taskComments            TaskComment[]
+  taskPriorities          TaskPriority[]
+  taskStatuses            TaskStatus[]
+  taskTagLinks            TaskTagLink[]
+  taskTags                TaskTag[]
+  tasks                   Task[]
+  teamMembers             TeamMember[]
+  teams                   Team[]
+  tenantUsers             TenantUser[]
+  usageCounters           UsageCounter[]
+  emailSettings           EmailSetting[]
+  emailTenantSettings     EmailTenantSetting[]
+  refreshTokens           RefreshToken[]
+  dailyRoutineItems       DailyRoutineItem[]
+  dailyRoutineLogs        DailyRoutineLog[]
+  pushDevices             PushDevice[]
 
   @@map("tenants")
 }
 
 model TenantUser {
-  id                  String              @id @default(uuid())
-  tenantId            String              @map("tenant_id")
-  userId              String              @map("user_id")
-  roleId              String?             @map("role_id")
-  jobTitle            String?             @map("job_title")
-  department          String?
-  isActive            Boolean             @default(true) @map("is_active")
-  status              TenantUserStatus    @default(ACTIVE)
-  mustChangePassword  Boolean             @default(false) @map("must_change_password")
-  lastInviteAt        DateTime?           @map("last_invite_at")
-  disabledAt          DateTime?           @map("disabled_at")
-  disabledReason      String?             @map("disabled_reason")
-  createdAt           DateTime            @default(now()) @map("created_at")
-  updatedAt           DateTime            @updatedAt @map("updated_at")
-  activityLogs        ActivityLog[]
-  uploadedAttachments Attachment[]
-  automations         Automation[]
-  eventAttendances    EventAttendee[]
-  reminderActions     EventReminderAction[]
-  createdEvents       Event[]             @relation("EventsCreated")
-  assignedEvents      Event[]             @relation("EventsAssigned")
-  notifications       Notification[]
-  projectMemberships  ProjectMember[]
-  ownedProjects       Project[]           @relation("ProjectOwner")
-  taskAssignees       TaskAssignee[]
-  checklistItemsDone  TaskChecklistItem[] @relation("ChecklistDoneBy")
-  taskComments        TaskComment[]
-  assignedTasks       Task[]              @relation("TaskAssignee")
-  reportedTasks       Task[]              @relation("TaskReporter")
-  teamMemberships     TeamMember[]
-  managedTeams        Team[]              @relation("TeamManager")
-  role                Role?               @relation(fields: [roleId], references: [id])
-  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                             String                        @id @default(uuid())
+  tenantId                       String                        @map("tenant_id")
+  userId                         String                        @map("user_id")
+  roleId                         String?                       @map("role_id")
+  jobTitle                       String?                       @map("job_title")
+  department                     String?
+  isActive                       Boolean                       @default(true) @map("is_active")
+  status                         TenantUserStatus              @default(ACTIVE)
+  mustChangePassword             Boolean                       @default(false) @map("must_change_password")
+  lastInviteAt                   DateTime?                     @map("last_invite_at")
+  disabledAt                     DateTime?                     @map("disabled_at")
+  disabledReason                 String?                       @map("disabled_reason")
+  createdAt                      DateTime                      @default(now()) @map("created_at")
+  updatedAt                      DateTime                      @updatedAt @map("updated_at")
+  activityLogs                   ActivityLog[]
+  uploadedAttachments            Attachment[]
+  automations                    Automation[]
+  eventAttendances               EventAttendee[]
+  reminderActions                EventReminderAction[]
+  createdEvents                  Event[]                       @relation("EventsCreated")
+  assignedEvents                 Event[]                       @relation("EventsAssigned")
+  notifications                  Notification[]
+  notificationPreferences        NotificationPreference[]      @relation("NotificationPreferenceTenantUser")
+  notificationPreferencesUpdated NotificationPreference[]      @relation("NotificationPreferenceUpdatedBy")
+  notificationPreferenceAudits   NotificationPreferenceAudit[] @relation("NotificationPreferenceAuditActor")
+  notificationDispatches         NotificationDispatch[]
+  projectMemberships             ProjectMember[]
+  ownedProjects                  Project[]                     @relation("ProjectOwner")
+  taskAssignees                  TaskAssignee[]
+  checklistItemsDone             TaskChecklistItem[]           @relation("ChecklistDoneBy")
+  taskComments                   TaskComment[]
+  assignedTasks                  Task[]                        @relation("TaskAssignee")
+  reportedTasks                  Task[]                        @relation("TaskReporter")
+  teamMemberships                TeamMember[]
+  managedTeams                   Team[]                        @relation("TeamManager")
+  role                           Role?                         @relation(fields: [roleId], references: [id])
+  tenant                         Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user                           User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   emailSettings              EmailSetting[]
   emailTenantSettingsUpdated EmailTenantSetting[] @relation("EmailTenantSettingUpdater")
@@ -590,21 +596,96 @@ model Contact {
 }
 
 model Notification {
-  id           String     @id @default(uuid())
-  tenantId     String     @map("tenant_id")
-  tenantUserId String     @map("tenant_user_id")
+  id           String                @id @default(uuid())
+  tenantId     String                @map("tenant_id")
+  tenantUserId String                @map("tenant_user_id")
   type         String
   title        String
   message      String
-  payloadJson  String?    @map("payload_json")
-  isRead       Boolean    @default(false) @map("is_read")
-  readAt       DateTime?  @map("read_at")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenantUser   TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  payloadJson  String?               @map("payload_json")
+  isRead       Boolean               @default(false) @map("is_read")
+  readAt       DateTime?             @map("read_at")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser   TenantUser            @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  dispatch     NotificationDispatch?
 
   @@index([tenantId, tenantUserId, isRead])
   @@map("notifications")
+}
+
+model NotificationPreference {
+  id                    String                        @id @default(uuid())
+  tenantId              String                        @map("tenant_id")
+  tenantUserId          String                        @map("tenant_user_id")
+  category              NotificationCategory
+  pushEnabled           Boolean                       @default(true) @map("push_enabled")
+  lockedByAdmin         Boolean                       @default(false) @map("locked_by_admin")
+  updatedByTenantUserId String?                       @map("updated_by_tenant_user_id")
+  createdAt             DateTime                      @default(now()) @map("created_at")
+  updatedAt             DateTime                      @updatedAt @map("updated_at")
+  audits                NotificationPreferenceAudit[]
+  tenant                Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser            TenantUser                    @relation("NotificationPreferenceTenantUser", fields: [tenantUserId], references: [id], onDelete: Cascade)
+  updatedBy             TenantUser?                   @relation("NotificationPreferenceUpdatedBy", fields: [updatedByTenantUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantUserId, category])
+  @@map("notification_preferences")
+}
+
+model NotificationPreferenceAudit {
+  id                       String                       @id @default(uuid())
+  notificationPreferenceId String                       @map("notification_preference_id")
+  actorTenantUserId        String?                      @map("actor_tenant_user_id")
+  source                   NotificationPreferenceSource
+  previousValueJson        String?                      @map("previous_value_json")
+  nextValueJson            String                       @map("next_value_json")
+  createdAt                DateTime                     @default(now()) @map("created_at")
+  actor                    TenantUser?                  @relation("NotificationPreferenceAuditActor", fields: [actorTenantUserId], references: [id], onDelete: SetNull)
+  preference               NotificationPreference       @relation(fields: [notificationPreferenceId], references: [id], onDelete: Cascade)
+
+  @@index([notificationPreferenceId])
+  @@map("notification_preference_audits")
+}
+
+model NotificationDispatch {
+  id             String                    @id @default(uuid())
+  tenantId       String                    @map("tenant_id")
+  tenantUserId   String                    @map("tenant_user_id")
+  category       NotificationCategory
+  type           String
+  entityType     String                    @map("entity_type")
+  entityId       String                    @map("entity_id")
+  occurrenceKey  String                    @map("occurrence_key")
+  notificationId String?                   @unique @map("notification_id")
+  pushStatus     NotificationPushStatus    @default(PENDING) @map("push_status")
+  failureReason  String?                   @map("failure_reason")
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  sentAt         DateTime?                 @map("sent_at")
+  notification   Notification?             @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  pushReceipts   NotificationPushReceipt[]
+  tenant         Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser     TenantUser                @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantUserId, type, entityId, occurrenceKey])
+  @@index([tenantId, pushStatus])
+  @@map("notification_dispatches")
+}
+
+model NotificationPushReceipt {
+  id           String               @id @default(uuid())
+  dispatchId   String               @map("dispatch_id")
+  pushDeviceId String               @map("push_device_id")
+  expoTicketId String               @map("expo_ticket_id")
+  status       String               @default("PENDING")
+  errorCode    String?              @map("error_code")
+  checkedAt    DateTime?            @map("checked_at")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  dispatch     NotificationDispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  pushDevice   PushDevice           @relation(fields: [pushDeviceId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("notification_push_receipts")
 }
 
 model ActivityLog {
@@ -751,6 +832,27 @@ enum ProjectViewType {
   DASHBOARD
 }
 
+enum NotificationCategory {
+  TASKS
+  CALENDAR
+  ROUTINE
+  COLLABORATION
+  PROJECTS_TEAMS
+  SECURITY
+}
+
+enum NotificationPreferenceSource {
+  USER
+  ADMIN
+}
+
+enum NotificationPushStatus {
+  PENDING
+  SENT
+  SKIPPED
+  FAILED
+}
+
 enum SubscriptionStatus {
   ACTIVE
   TRIAL
@@ -871,8 +973,9 @@ model PushDevice {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenantUser TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  tenant                   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser               TenantUser                @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  notificationPushReceipts NotificationPushReceipt[]
 
   @@index([tenantUserId])
   @@map("push_devices")
