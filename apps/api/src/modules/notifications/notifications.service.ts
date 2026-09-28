@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 @Injectable()
@@ -13,7 +13,14 @@ export class NotificationsService {
     });
   }
 
-  async markAsRead(tenantId: string, id: string) {
+  /** Só o dono da notificação, dentro do seu tenant, pode marcá-la como lida. */
+  async markAsRead(tenantId: string, tenantUserId: string, id: string) {
+    const owned = await this.prisma.notification.findFirst({
+      where: { id, tenantId, tenantUserId },
+      select: { id: true },
+    });
+    if (!owned) throw new NotFoundException('Notificação não encontrada');
+
     return this.prisma.notification.update({
       where: { id },
       data: { isRead: true, readAt: new Date() },

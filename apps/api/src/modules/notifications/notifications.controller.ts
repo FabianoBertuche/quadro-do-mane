@@ -29,8 +29,8 @@ export class NotificationsController {
 
   @Patch(':id/read')
   @RequirePermissions('notifications.view')
-  markAsRead(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string) {
-    return this.notificationsService.markAsRead(tenantId, id);
+  markAsRead(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.notificationsService.markAsRead(user.tenantId, user.tenantUserId, id);
   }
 
   @Patch('read-all')

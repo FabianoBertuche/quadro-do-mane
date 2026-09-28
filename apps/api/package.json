@@ -6,7 +6,7 @@
     "build": "nest build",
     "test:events": "node -r ts-node/register --test src/modules/events/events.service.spec.ts",
     "test:auth": "node -r ts-node/register --test src/modules/auth/auth.service.spec.ts",
-    "test:notifications": "node -r ts-node/register --test src/modules/notifications/notification-*.spec.ts",
+    "test:notifications": "node -r ts-node/register --test src/modules/notifications/*.spec.ts",
     "test:push": "node -r ts-node/register --test src/modules/push/*.spec.ts",
     "dev": "nest start --watch",
     "start": "nest start",
