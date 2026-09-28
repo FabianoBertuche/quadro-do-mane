@@ -88,7 +88,17 @@ export class NotificationDispatcherService {
       return existing;
     }
 
-    return this.deliverPush(dispatch, input);
+    // Ledger e Central já estão commitados: a partir daqui nada pode rejeitar,
+    // porque a falha de bookkeeping viraria 500 numa operação de negócio que
+    // teve sucesso. O dispatch volta persistido e continua consultável pela chave.
+    try {
+      return await this.deliverPush(dispatch, input);
+    } catch (err) {
+      this.logger.error(
+        `Falha no bookkeeping pós-commit do dispatch (dispatch=${dispatch.id}): ${safeError(err)}`,
+      );
+      return dispatch;
+    }
   }
 
   /** Pós-transação: resolve a preferência da categoria e tenta o push. */

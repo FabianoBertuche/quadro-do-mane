@@ -57,7 +57,7 @@ const doubles = () => {
     }),
     update: mock(async (args: any) => {
       note(source, 'dispatch.update', args);
-      return { id: 'dispatch-1', ...args.data };
+      return { id: 'dispatch-1', notificationId: null, pushStatus: 'PENDING', ...args.data };
     }),
     findUnique: mock(async () => null),
   });
@@ -264,6 +264,56 @@ test('marca o dispatch como FAILED quando os receipts não podem ser gravados', 
   assert.equal(update.data.pushStatus, 'FAILED');
   assert.equal(update.data.failureReason, 'PUSH_RECEIPT_PERSIST_FAILED');
   assert.equal(dispatch.pushStatus, 'FAILED');
+});
+
+test('bookkeeping pós-commit que falha não rejeita uma entrega já persistida', async () => {
+  const { service, prisma, tx, lines } = doubles();
+  prisma.notificationDispatch.update.mockRejectedValue(
+    Object.assign(new Error('conexão perdida com a senha do banco'), {
+      name: 'PrismaClientKnownRequestError',
+    }),
+  );
+
+  const dispatch = await service.dispatch(input());
+
+  assert.equal(dispatch.id, 'dispatch-1');
+  assert.equal(dispatch.notificationId, 'notification-1');
+  assert.equal(dispatch.pushStatus, 'PENDING', 'o status continua PENDING para o reaper');
+  assert.equal(tx.notification.create.mock.calls.length, 1, 'a Central já commitada permanece');
+  const logged = lines.join(' | ');
+  assert.ok(
+    logged.includes('dispatch=dispatch-1') && logged.includes('PrismaClientKnownRequestError'),
+    `o erro de bookkeeping deve ser logado com o dispatch: ${logged}`,
+  );
+  assert.equal(
+    logged.includes('senha do banco'),
+    false,
+    'o log do bookkeeping não pode ecoar a mensagem original do erro',
+  );
+});
+
+test('falha ao rebaixar o dispatch não mascara a falha original do push nem rejeita', async () => {
+  const { service, prisma, tx, push, lines } = doubles();
+  push.sendToUser.mockRejectedValue(
+    Object.assign(new Error('expo fora do ar'), { name: 'ExpoPushError' }),
+  );
+  prisma.notificationDispatch.update.mockRejectedValue(
+    Object.assign(new Error('deadlock detectado'), { name: 'PrismaClientKnownRequestError' }),
+  );
+
+  const dispatch = await service.dispatch(input());
+
+  assert.equal(dispatch.id, 'dispatch-1');
+  assert.equal(tx.notification.create.mock.calls.length, 1);
+  const logged = lines.join(' | ');
+  assert.ok(
+    logged.includes('Falha ao enviar push') && logged.includes('ExpoPushError'),
+    `a falha original do push precisa continuar no log: ${logged}`,
+  );
+  assert.ok(
+    logged.includes('dispatch=dispatch-1') && logged.includes('PrismaClientKnownRequestError'),
+    `a falha do bookkeeping também precisa ser logada: ${logged}`,
+  );
 });
 
 test('marca o dispatch como SENT sem receipts quando o usuário não tem dispositivos', async () => {
