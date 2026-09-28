@@ -41,11 +41,14 @@ entidade relacionada e `occurrenceKey`.
 
 Para cada chamada, o dispatcher:
 
-1. Cria de forma idempotente o ledger `NotificationDispatch`.
-2. Cria a `Notification` existente para a Central.
-3. Consulta a preferência da categoria.
-4. Envia push se habilitado pela preferência ou regra administrativa.
-5. Persiste ticket/estado da entrega sem interromper a operação de negócio.
+1. Tenta criar o ledger `NotificationDispatch` em transação.
+2. Quando a chave já existe, retorna a entrega existente sem criar Central ou
+   push novamente.
+3. Quando a criação é nova, cria a `Notification` existente para a Central e
+   vincula as duas linhas na mesma transação.
+4. Consulta a preferência da categoria.
+5. Envia push se habilitado pela preferência ou regra administrativa.
+6. Persiste ticket/estado da entrega sem interromper a operação de negócio.
 
 Uma falha no push nunca desfaz a criação da Central ou a operação original.
 
@@ -118,8 +121,8 @@ O ator é excluído de todos os destinatários.
 
 | Tipo | Destinatário |
 |---|---|
-| Comentário em tarefa | Responsável, criador e participantes da tarefa |
-| Status, conclusão, reabertura ou prazo alterado | Responsável e criador |
+| Comentário em tarefa | Responsável único, múltiplos responsáveis e criador |
+| Status, conclusão, reabertura ou prazo alterado | Responsável único, múltiplos responsáveis e criador |
 | Convite de evento | Novo participante e novo responsável |
 | Evento alterado ou cancelado | Participantes existentes e responsável |
 
@@ -129,7 +132,7 @@ O ator é excluído de todos os destinatários.
 |---|---|
 | Entrada em projeto ou equipe | Membro incluído |
 | Owner de projeto ou gestor de equipe alterado | Pessoa afetada |
-| Alteração relevante de projeto | Owner e membros afetados |
+| Alteração relevante de projeto | Owner e membros: nome, descrição, datas, status, owner ou equipe |
 
 ### Administrativo e segurança
 
@@ -137,7 +140,7 @@ O ator é excluído de todos os destinatários.
 |---|---|
 | Convite, ativação, suspensão ou papel alterado | Usuário afetado |
 | Senha alterada | Próprio usuário |
-| Novo login | Próprio usuário |
+| Login interativo com credencial | Próprio usuário; nunca em refresh de sessão |
 
 ## Scheduler
 
