@@ -25,13 +25,18 @@ const serviceWith = (options: {
   expoReceipts?: Record<string, any>;
   chunk?: (ids: string[]) => string[][];
   failOnExpo?: boolean;
+  failUpdateFor?: string;
 }) => {
   const pending = options.pending ?? [];
   const remaining = options.remaining ?? [];
   const prisma = {
     notificationPushReceipt: {
-      findMany: spy((args: any) => (args.where.status === 'PENDING' ? pending : remaining)),
-      update: spy(() => ({ count: 1 })),
+      // a reconsulta por dispatch é o único lugar que usa `where.dispatchId`
+      findMany: spy((args: any) => ('dispatchId' in args.where ? remaining : pending)),
+      update: spy((args: any) => {
+        if (args.where.id === options.failUpdateFor) throw new Error('deadlock detectado');
+        return { count: 1 };
+      }),
     },
     pushDevice: { delete: spy(() => ({ id: 'device-1' })) },
     notificationDispatch: { update: spy(() => ({ count: 1 })) },
@@ -103,6 +108,32 @@ test('marca o dispatch como FAILED quando todos os receipts falham', async () =>
   assert.equal(updates['row-1'].status, 'ERROR');
   assert.equal(updates['row-1'].errorCode, 'DeviceNotRegistered');
   assert.equal(updates['row-2'].errorCode, 'MessageTooBig');
+  const dispatchCalls = prisma.notificationDispatch.update.mock.calls;
+  assert.equal(dispatchCalls.length, 1);
+  assert.deepEqual(dispatchCalls[0][0].where, { id: 'dispatch-1' });
+  assert.equal(dispatchCalls[0][0].data.pushStatus, 'FAILED');
+  // a decisão depende de reler exatamente os receipts deste dispatch
+  const reread = prisma.notificationPushReceipt.findMany.mock.calls[1][0];
+  assert.deepEqual(reread.where, { dispatchId: { in: ['dispatch-1'] } });
+  assert.deepEqual(reread.select, { dispatchId: true, status: true });
+});
+
+test('marca o dispatch como FAILED quando os receipts falham sem device desregistrado', async () => {
+  const { service, prisma } = serviceWith({
+    pending: twoDevices(),
+    remaining: [
+      { dispatchId: 'dispatch-1', status: 'ERROR' },
+      { dispatchId: 'dispatch-1', status: 'ERROR' },
+    ],
+    expoReceipts: {
+      [TICKET_A]: { status: 'error', message: 'too big', details: { error: 'MessageTooBig' } },
+      [TICKET_B]: { status: 'error', message: 'rate', details: { error: 'MessageRateExceeded' } },
+    },
+  });
+
+  const summary = await service.processPending();
+
+  assert.deepEqual(summary, { checked: 2, devicesRemoved: 0, failed: 2 });
   const dispatchCalls = prisma.notificationDispatch.update.mock.calls;
   assert.equal(dispatchCalls.length, 1);
   assert.deepEqual(dispatchCalls[0][0].where, { id: 'dispatch-1' });
@@ -197,6 +228,30 @@ test('não consulta o Expo quando não há receipts pendentes', async () => {
   assert.deepEqual(summary, { checked: 0, devicesRemoved: 0, failed: 0 });
   assert.equal(expoCalls.length, 0);
   assert.equal(prisma.notificationPushReceipt.update.mock.calls.length, 0);
+});
+
+test('um erro de persistência em um receipt não interrompe os demais do mesmo lote', async () => {
+  const { service, prisma, lines } = serviceWith({
+    pending: twoDevices(),
+    remaining: [
+      { dispatchId: 'dispatch-1', status: 'OK' },
+      { dispatchId: 'dispatch-1', status: 'OK' },
+    ],
+    expoReceipts: {
+      [TICKET_A]: { status: 'ok' },
+      [TICKET_B]: { status: 'ok' },
+    },
+    failUpdateFor: 'row-1',
+  });
+
+  const summary = await service.processPending();
+
+  const attempted = prisma.notificationPushReceipt.update.mock.calls.map((c) => c[0].where.id);
+  assert.deepEqual(attempted, ['row-1', 'row-2'], 'a linha seguinte do lote deve ser processada');
+  assert.deepEqual(summary, { checked: 1, devicesRemoved: 0, failed: 0 });
+  const log = lines.join('\n');
+  assert.ok(log.includes('row-1') || log.includes('device-1'), 'o log deve identificar a linha que falhou');
+  assert.ok(!log.includes(SECRET_TOKEN), 'o token Expo não pode aparecer no log');
 });
 
 test('consulta o Expo em lotes e processa cada receipt do lote correspondente', async () => {

@@ -5,8 +5,11 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 /** Recebidos da última consulta são os mais antigos; 300 é o limite do SDK. */
 const RECEIPT_BATCH_SIZE = 300;
 
-/** Resumo por dispatch, só para os que tiveram ao menos uma falha. */
-type DispatchTally = { failed: number; unregistered: number };
+/**
+ * Dispatch que teve ao menos um receipt falho → nº de receipts que sumiram em
+ * cascade junto do device desregistrado.
+ */
+type DispatchFailures = { unregistered: number };
 
 /**
  * O SDK eco o payload da requisição em mensagens de erro de rede, então só o
@@ -39,7 +42,7 @@ export class ExpoReceiptsService {
     if (pending.length === 0) return result;
 
     const byTicketId = new Map(pending.map((row) => [row.expoTicketId, row]));
-    const tallies = new Map<string, DispatchTally>();
+    const failedDispatches = new Map<string, DispatchFailures>();
 
     for (const chunk of this.expo.chunkPushNotificationReceiptIds(
       pending.map((row) => row.expoTicketId),
@@ -66,36 +69,42 @@ export class ExpoReceiptsService {
           continue;
         }
 
-        const checkedAt = new Date();
-        result.checked += 1;
-        if (receipt.status === 'ok') {
+        try {
+          const checkedAt = new Date();
+          if (receipt.status === 'ok') {
+            await this.prisma.notificationPushReceipt.update({
+              where: { id: row.id },
+              data: { status: 'OK', errorCode: null, checkedAt },
+            });
+            result.checked += 1;
+            continue;
+          }
+
+          const errorCode = receipt.details?.error ?? 'Unknown';
           await this.prisma.notificationPushReceipt.update({
             where: { id: row.id },
-            data: { status: 'OK', errorCode: null, checkedAt },
+            data: { status: 'ERROR', errorCode, checkedAt },
           });
-          continue;
-        }
+          result.checked += 1;
+          result.failed += 1;
 
-        const errorCode = receipt.details?.error ?? 'Unknown';
-        result.failed += 1;
-        await this.prisma.notificationPushReceipt.update({
-          where: { id: row.id },
-          data: { status: 'ERROR', errorCode, checkedAt },
-        });
-
-        const tally = tallies.get(row.dispatchId) ?? { failed: 0, unregistered: 0 };
-        tally.failed += 1;
-        if (errorCode === 'DeviceNotRegistered') {
-          // o receipt é removido em cascade junto com o device, por isso o tally
-          await this.prisma.pushDevice.delete({ where: { id: row.pushDeviceId } });
-          result.devicesRemoved += 1;
-          tally.unregistered += 1;
+          const failures = failedDispatches.get(row.dispatchId) ?? { unregistered: 0 };
+          if (errorCode === 'DeviceNotRegistered') {
+            await this.prisma.pushDevice.delete({ where: { id: row.pushDeviceId } });
+            result.devicesRemoved += 1;
+            failures.unregistered += 1;
+          }
+          failedDispatches.set(row.dispatchId, failures);
+        } catch (err) {
+          // a linha fica PENDING e é reprocessada na próxima rodada
+          this.logger.error(
+            `Falha ao registrar o receipt (dispatch=${row.dispatchId}, device=${row.pushDeviceId}): ${safeError(err)}`,
+          );
         }
-        tallies.set(row.dispatchId, tally);
       }
     }
 
-    await this.failFullyFailedDispatches(tallies);
+    await this.failFullyFailedDispatches(failedDispatches);
     return result;
   }
 
@@ -104,11 +113,11 @@ export class ExpoReceiptsService {
    * como falha. O receipt que sumiu em cascade com o device conta como falha;
    * qualquer receipt OK ou ainda PENDING mantém o dispatch como está.
    */
-  private async failFullyFailedDispatches(tallies: Map<string, DispatchTally>): Promise<void> {
-    if (tallies.size === 0) return;
+  private async failFullyFailedDispatches(failed: Map<string, DispatchFailures>): Promise<void> {
+    if (failed.size === 0) return;
 
     const remaining = await this.prisma.notificationPushReceipt.findMany({
-      where: { dispatchId: { in: [...tallies.keys()] } },
+      where: { dispatchId: { in: [...failed.keys()] } },
       select: { dispatchId: true, status: true },
     });
     const overview = new Map<string, { total: number; ok: number; pending: number }>();
@@ -120,9 +129,9 @@ export class ExpoReceiptsService {
       overview.set(row.dispatchId, stats);
     }
 
-    for (const [dispatchId, tally] of tallies) {
+    for (const [dispatchId, failures] of failed) {
       const stats = overview.get(dispatchId) ?? { total: 0, ok: 0, pending: 0 };
-      if (stats.total + tally.unregistered === 0) continue;
+      if (stats.total + failures.unregistered === 0) continue;
       if (stats.ok > 0 || stats.pending > 0) continue;
       await this.prisma.notificationDispatch.update({
         where: { id: dispatchId },
