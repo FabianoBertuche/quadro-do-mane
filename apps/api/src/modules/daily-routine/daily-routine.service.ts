@@ -1,16 +1,52 @@
-import { Injectable, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
+import { DispatchInput, NotificationDispatcherService } from '../notifications/notification-dispatcher.service';
 import { CreateRoutineDto, CompleteRoutineDto, AdminFilterDto, UpdateRoutineDto } from './dto/daily-routine.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequestUser } from '../../common/interfaces/request-context.interface';
 import { Prisma } from '@prisma/client';
 
+const SAO_PAULO_TIME_ZONE = 'America/Sao_Paulo';
+/** O lembrete de pendência dispara 30 minutos depois do horário da rotina. */
+const PENDING_DELAY_MINUTES = 30;
+
+/**
+ * Relógio de parede de São Paulo. O dia do calendário e o `HH:mm` saem do fuso,
+ * não de `toISOString()`, que entregaria o dia de UTC.
+ */
+const localClock = (moment: Date) => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: SAO_PAULO_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(moment);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? '00';
+  return {
+    day: `${value('year')}-${value('month')}-${value('day')}`,
+    minutes: Number(value('hour')) * 60 + Number(value('minute')),
+    label: `${value('hour')}:${value('minute')}`,
+  };
+};
+
+const hhmm = (minutes: number) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+/** O SDK do Expo ecoa o payload em mensagens de erro, então só o nome do erro é seguro. */
+const safeError = (err: unknown) => (err instanceof Error ? err.name : 'erro desconhecido');
+
 @Injectable()
 export class DailyRoutineService {
+  private readonly logger = new Logger(DailyRoutineService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
+    private readonly dispatcher: NotificationDispatcherService,
   ) {}
 
   async create(dto: CreateRoutineDto, currentUser: RequestUser) {
@@ -329,5 +365,87 @@ export class DailyRoutineService {
     return this.prisma.dailyRoutineItem.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Alertas operacionais de rotina. Duas consultas candidatas no dia local de São
+   * Paulo: a que ainda está dentro dos 30 minutos do horário configurado e a que
+   * já passou deles. O piso da janela pendente é a meia-noite do próprio dia, então
+   * uma rotina de ontem não vira pendência hoje — a `occurrenceKey` carrega o dia
+   * e o ledger descarta o que já saiu no mesmo horário.
+   */
+  async sendScheduledNotifications(now: Date = new Date()): Promise<void> {
+    const { day, minutes, label } = localClock(now);
+    const elapsed = minutes - PENDING_DELAY_MINUTES;
+
+    const select = {
+      id: true,
+      tenantId: true,
+      assignedTenantUserId: true,
+      title: true,
+      scheduledTime: true,
+    } as const;
+    const onTime = await this.prisma.dailyRoutineItem.findMany({
+      where: {
+        isActive: true,
+        scheduledTime: { not: null, ...(elapsed > 0 ? { gt: hhmm(elapsed) } : { gte: '00:00' }), lte: label },
+        logs: { none: { date: day } },
+      },
+      select,
+    });
+    const pending = elapsed > 0
+      ? await this.prisma.dailyRoutineItem.findMany({
+        where: {
+          isActive: true,
+          // Sem piso explícito: todo `HH:mm` é >= '00:00', ou seja, do próprio dia.
+          scheduledTime: { not: null, lte: hhmm(elapsed) },
+          logs: { none: { date: day } },
+        },
+        select,
+      })
+      : [];
+
+    for (const item of onTime) {
+      if (!item.scheduledTime) continue;
+      await this.deliverAlert({
+        tenantId: item.tenantId,
+        tenantUserId: item.assignedTenantUserId,
+        category: 'ROUTINE',
+        type: 'routine_scheduled',
+        title: 'Rotina agora',
+        message: `"${item.title}" está marcada para ${item.scheduledTime}`,
+        payload: { routineId: item.id, route: '/daily-routine' },
+        entityType: 'routine',
+        entityId: item.id,
+        occurrenceKey: `scheduled:${item.scheduledTime}:${day}`,
+      });
+    }
+
+    for (const item of pending) {
+      if (!item.scheduledTime) continue;
+      await this.deliverAlert({
+        tenantId: item.tenantId,
+        tenantUserId: item.assignedTenantUserId,
+        category: 'ROUTINE',
+        type: 'routine_pending',
+        title: 'Rotina pendente',
+        message: `"${item.title}" (${item.scheduledTime}) ainda não foi concluída hoje`,
+        payload: { routineId: item.id, route: '/daily-routine' },
+        entityType: 'routine',
+        entityId: item.id,
+        occurrenceKey: `pending:${item.scheduledTime}:${day}`,
+      });
+    }
+  }
+
+  /** Uma entrega que falha não pode interromper as demais rotinas. */
+  private async deliverAlert(input: DispatchInput): Promise<void> {
+    try {
+      await this.dispatcher.dispatch(input);
+    } catch (err) {
+      this.logger.error(
+        `Falha ao entregar alerta de rotina (routine=${input.entityId}, user=${input.tenantUserId}): ${safeError(err)}`,
+      );
+    }
   }
 }

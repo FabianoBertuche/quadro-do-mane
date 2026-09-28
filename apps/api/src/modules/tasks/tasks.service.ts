@@ -1,10 +1,59 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
-import { PushService } from '../push/push.service';
+import { DispatchInput, NotificationDispatcherService } from '../notifications/notification-dispatcher.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
+
+const SAO_PAULO_TIME_ZONE = 'America/Sao_Paulo';
+/** Os alertas de prazo do dia abrem às 08:00 no fuso corporativo. */
+const DAILY_ALERT_MINUTE = 8 * 60;
+
+/** Relógio de parede de São Paulo: dia `YYYY-MM-DD`, minutos desde a meia-noite e o mesmo relógio como UTC. */
+const localClock = (moment: Date) => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: SAO_PAULO_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(moment);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? '00';
+  const year = Number(value('year'));
+  const month = Number(value('month'));
+  const day = Number(value('day'));
+  const hour = Number(value('hour'));
+  const minute = Number(value('minute'));
+  return {
+    day: `${value('year')}-${value('month')}-${value('day')}`,
+    minutes: hour * 60 + minute,
+    wallClockUtc: Date.UTC(year, month - 1, day, hour, minute),
+  };
+};
+
+/** `YYYY-MM-DD` somado em dias de calendário, sem passar por fuso. */
+const shiftDay = (day: string, days: number) => {
+  const [year, month, date] = day.split('-').map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, date + days));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
+};
+
+/** Meia-noite do dia em São Paulo como instante UTC, com o offset lido do próprio fuso. */
+const localDayStart = (day: string) => {
+  const guess = new Date(`${day}T00:00:00.000Z`);
+  return new Date(guess.getTime() - (localClock(guess).wallClockUtc - guess.getTime()));
+};
+
+const brDate = (day: string) => {
+  const [year, month, date] = day.split('-');
+  return `${date}/${month}/${year}`;
+};
+
+/** O SDK do Expo ecoa o payload em mensagens de erro, então só o nome do erro é seguro. */
+const safeError = (err: unknown) => (err instanceof Error ? err.name : 'erro desconhecido');
 
 @Injectable()
 export class TasksService {
@@ -12,7 +61,7 @@ export class TasksService {
   constructor(
     private prisma: PrismaService,
     private activityLog: ActivityLogService,
-    private push: PushService,
+    private dispatcher: NotificationDispatcherService,
   ) {}
 
   async findAll(tenantId: string, projectId?: string) {
@@ -194,21 +243,19 @@ export class TasksService {
       },
     });
 
-    // Push para o responsável recém-atribuído (não notificar o próprio ator)
+    // Alerta para o responsável recém-atribuído (não notificar o próprio ator)
     if (dto.assigneeTenantUserId && dto.assigneeTenantUserId !== actorTenantUserId) {
-      await this.prisma.notification.create({
-        data: {
-          tenantId,
-          tenantUserId: dto.assigneeTenantUserId,
-          type: 'task_assigned',
-          title: 'Nova tarefa atribuída',
-          message: task.title,
-        },
-      }).catch((e) => this.logger.warn(`Falha ao criar notification: ${String(e)}`));
-      await this.push.sendToUser(dto.assigneeTenantUserId, {
+      await this.deliverAlert({
+        tenantId,
+        tenantUserId: dto.assigneeTenantUserId,
+        category: 'TASKS',
+        type: 'task_assigned',
         title: 'Nova tarefa atribuída',
-        body: task.title,
-        data: { taskId: task.id },
+        message: task.title,
+        payload: { taskId: task.id, projectId: task.projectId, route: `/task/${task.id}` },
+        entityType: 'task',
+        entityId: task.id,
+        occurrenceKey: `assignment:${task.updatedAt.toISOString()}`,
       });
     }
 
@@ -289,26 +336,24 @@ export class TasksService {
       });
     }
 
-    // Push quando a tarefa é reatribuída (não notificar o próprio ator)
+    // Alerta quando a tarefa é reatribuída (não notificar o próprio ator)
     const newAssignee = dto.assigneeTenantUserId;
     if (
       newAssignee &&
       newAssignee !== oldTask.assigneeTenantUserId &&
       newAssignee !== actorTenantUserId
     ) {
-      await this.prisma.notification.create({
-        data: {
-          tenantId,
-          tenantUserId: newAssignee,
-          type: 'task_assigned',
-          title: 'Tarefa atribuída a você',
-          message: updated.title,
-        },
-      }).catch((e) => this.logger.warn(`Falha ao criar notification: ${String(e)}`));
-      await this.push.sendToUser(newAssignee, {
+      await this.deliverAlert({
+        tenantId,
+        tenantUserId: newAssignee,
+        category: 'TASKS',
+        type: 'task_assigned',
         title: 'Tarefa atribuída a você',
-        body: updated.title,
-        data: { taskId: updated.id },
+        message: updated.title,
+        payload: { taskId: updated.id, projectId: updated.projectId, route: `/task/${updated.id}` },
+        entityType: 'task',
+        entityId: updated.id,
+        occurrenceKey: `assignment:${updated.updatedAt.toISOString()}`,
       });
     }
 
@@ -441,6 +486,84 @@ export class TasksService {
     }
 
     return updated;
+  }
+
+  /**
+   * Alertas operacionais de prazo. Duas janelas, ambas ancoradas no dia local de
+   * São Paulo: a que vence amanhã e a que já venceu antes da meia-noite de hoje.
+   * A janela só abre às 08:00 — a `occurrenceKey` com o dia local faz o ledger
+   * descartar o resto do dia, então o alerta atrasado sai uma única vez por dia.
+   */
+  async sendScheduledNotifications(now: Date = new Date()): Promise<void> {
+    const { day, minutes } = localClock(now);
+    if (minutes < DAILY_ALERT_MINUTE) return;
+
+    const tomorrow = shiftDay(day, 1);
+    const open = {
+      archivedAt: null,
+      completedAt: null,
+      status: { category: { not: 'done' as const } },
+      assigneeTenantUserId: { not: null },
+    };
+    const select = {
+      id: true,
+      tenantId: true,
+      title: true,
+      dueDate: true,
+      assigneeTenantUserId: true,
+    } as const;
+
+    const dueTomorrow = await this.prisma.task.findMany({
+      where: { ...open, dueDate: { gte: localDayStart(tomorrow), lt: localDayStart(shiftDay(tomorrow, 1)) } },
+      select,
+    });
+    const overdue = await this.prisma.task.findMany({
+      where: { ...open, dueDate: { lt: localDayStart(day) } },
+      select,
+    });
+
+    for (const task of dueTomorrow) {
+      if (!task.assigneeTenantUserId || !task.dueDate) continue;
+      await this.deliverAlert({
+        tenantId: task.tenantId,
+        tenantUserId: task.assigneeTenantUserId,
+        category: 'TASKS',
+        type: 'task_due_soon',
+        title: 'Prazo próximo',
+        message: `"${task.title}" vence amanhã`,
+        payload: { taskId: task.id, route: `/task/${task.id}` },
+        entityType: 'task',
+        entityId: task.id,
+        occurrenceKey: localClock(task.dueDate).day,
+      });
+    }
+
+    for (const task of overdue) {
+      if (!task.assigneeTenantUserId || !task.dueDate) continue;
+      await this.deliverAlert({
+        tenantId: task.tenantId,
+        tenantUserId: task.assigneeTenantUserId,
+        category: 'TASKS',
+        type: 'task_overdue',
+        title: 'Tarefa atrasada',
+        message: `"${task.title}" venceu em ${brDate(localClock(task.dueDate).day)}`,
+        payload: { taskId: task.id, route: `/task/${task.id}` },
+        entityType: 'task',
+        entityId: task.id,
+        occurrenceKey: day,
+      });
+    }
+  }
+
+  /** Uma entrega que falha não pode roubar o alerta dos demais candidatos. */
+  private async deliverAlert(input: DispatchInput): Promise<void> {
+    try {
+      await this.dispatcher.dispatch(input);
+    } catch (err) {
+      this.logger.error(
+        `Falha ao entregar alerta de tarefa (task=${input.entityId}, user=${input.tenantUserId}): ${safeError(err)}`,
+      );
+    }
   }
 
   // Comments
