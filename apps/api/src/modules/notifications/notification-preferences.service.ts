@@ -31,6 +31,19 @@ const stateOf = (row?: { pushEnabled?: boolean; lockedByAdmin?: boolean } | null
 });
 
 /**
+ * Estado efetivo a partir das linhas gravadas: sempre as seis categorias, na
+ * ordem do contrato, com a linha gravada sobrepondo o default. Compartilhado com
+ * a leitura administrativa para que as duas portas mostrem exatamente o mesmo
+ * estado para o mesmo conjunto de linhas.
+ */
+export const effectivePreferences = (
+  rows: readonly { category: NotificationCategoryName; pushEnabled: boolean; lockedByAdmin: boolean }[],
+): PreferenceView[] => {
+  const byCategory = new Map(rows.map((row) => [row.category, row]));
+  return NOTIFICATION_CATEGORIES.map((category) => ({ category, ...stateOf(byCategory.get(category)) }));
+};
+
+/**
  * Política única de preferências de notificação: defaults, lock administrativo e
  * auditoria imutável de cada mudança. O lock governs apenas push — a Central
  * recebe todos os alertas.
@@ -49,11 +62,7 @@ export class NotificationPreferencesService {
       where: { tenantId, tenantUserId },
       select: { category: true, pushEnabled: true, lockedByAdmin: true },
     });
-    const byCategory = new Map(stored.map((row) => [row.category, row]));
-    return NOTIFICATION_CATEGORIES.map((category) => {
-      const state = stateOf(byCategory.get(category));
-      return { category, ...state };
-    });
+    return effectivePreferences(stored);
   }
 
   /** Push habilitado para a categoria; ausência de linha significa habilitado. */
