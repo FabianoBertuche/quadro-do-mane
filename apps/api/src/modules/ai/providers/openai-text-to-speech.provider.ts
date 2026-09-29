@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { ConfigService } from '@nestjs/config';
 import { TextToSpeechProvider } from '../ports/text-to-speech.port';
-import { OpenAiClientFactory } from './openai.provider';
+import { getAiRequestTimeout, OpenAiClientFactory } from './openai.provider';
 
 export class OpenAiTextToSpeechProvider implements TextToSpeechProvider {
   private readonly client: Pick<OpenAI, 'audio'>;
@@ -10,7 +10,7 @@ export class OpenAiTextToSpeechProvider implements TextToSpeechProvider {
   constructor(config: ConfigService, clientFactory: OpenAiClientFactory) {
     const apiKey = config.get<string>('OPENAI_API_KEY');
     if (!apiKey) throw new Error('OpenAI provider is not configured');
-    this.client = clientFactory(apiKey, 20_000);
+    this.client = clientFactory(apiKey, getAiRequestTimeout(config));
     this.model = config.get<string>('OPENAI_TTS_MODEL', 'gpt-4o-mini-tts');
   }
 

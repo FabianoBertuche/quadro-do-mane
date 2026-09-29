@@ -9,8 +9,18 @@ import { TemporaryAudioService } from './media/temporary-audio.service';
 
 export const SPEECH_TO_TEXT_PROVIDER = 'SPEECH_TO_TEXT_PROVIDER';
 export const TEXT_TO_SPEECH_PROVIDER = 'TEXT_TO_SPEECH_PROVIDER';
-export const MAX_AI_AUDIO_BYTES = 10 * 1024 * 1024;
+const positiveEnv = (key: string, fallback: number) => {
+  const value = Number(process.env[key]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+};
+export const MAX_AI_AUDIO_BYTES = positiveEnv('AI_AUDIO_MAX_BYTES', 10 * 1024 * 1024);
+export const MAX_AI_AUDIO_DURATION_SECONDS = positiveEnv('AI_AUDIO_MAX_DURATION_SECONDS', 5 * 60);
 export const AI_AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4', 'audio/m4a'] as const;
+
+export interface AiAudioLimits {
+  maxBytes: number;
+  maxDurationSeconds: number;
+}
 
 export interface AiMessageResponse {
   message: any;
@@ -28,16 +38,22 @@ export class AiAudioService {
     @Inject(SPEECH_TO_TEXT_PROVIDER) private readonly speechToText: SpeechToTextProvider,
     @Inject(TEXT_TO_SPEECH_PROVIDER) private readonly textToSpeech: TextToSpeechProvider,
     private readonly temporaryAudio: TemporaryAudioService,
-  ) {}
+    limits: Partial<AiAudioLimits> = {},
+  ) {
+    this.limits = { maxBytes: MAX_AI_AUDIO_BYTES, maxDurationSeconds: MAX_AI_AUDIO_DURATION_SECONDS, ...limits };
+  }
+
+  private readonly limits: AiAudioLimits;
 
   async handleMessage(input: {
     conversationId: string;
     actor: RequestUser | AiActor;
     buffer: Buffer;
     mimeType: string;
+    durationSeconds?: number;
     responseMode: AiResponseMode;
   }): Promise<AiMessageResponse> {
-    this.validateAudio(input.buffer, input.mimeType);
+    this.validateAudio(input.buffer, input.mimeType, input.durationSeconds);
     await this.requireConversation(input.actor, input.conversationId);
 
     let transcription: { text: string };
@@ -94,12 +110,15 @@ export class AiAudioService {
     return conversation;
   }
 
-  private validateAudio(buffer: Buffer, mimeType: string) {
+  private validateAudio(buffer: Buffer, mimeType: string, durationSeconds?: number) {
     if (!AI_AUDIO_MIME_TYPES.includes(mimeType as (typeof AI_AUDIO_MIME_TYPES)[number])) {
       throw new BadRequestException('Tipo de áudio não permitido');
     }
-    if (!buffer?.length || buffer.length > MAX_AI_AUDIO_BYTES) {
+    if (!buffer?.length || buffer.length > this.limits.maxBytes) {
       throw new BadRequestException('O áudio excede o limite permitido');
+    }
+    if (durationSeconds !== undefined && (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > this.limits.maxDurationSeconds)) {
+      throw new BadRequestException('A duração do áudio excede o limite permitido');
     }
   }
 }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, NotFoundException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiCompletionInput, AiProvider } from './ports/ai-provider.port';
 import { AiContextService } from './ai-context.service';
@@ -10,6 +10,29 @@ import { SendAiMessageDto } from './dto/send-ai-message.dto';
 export const AI_PROVIDER = 'AI_PROVIDER';
 export interface AiActor { tenantId: string; tenantUserId: string; userId?: string }
 
+export interface AiSecurityLimits {
+  maxMessageLength: number;
+  maxHistoryMessages: number;
+  userRequestsPerMinute: number;
+  tenantRequestsPerMinute: number;
+  costUnitsPerMinute: number;
+}
+
+const positiveInt = (key: string, fallback: number) => {
+  const value = Number(process.env[key]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+};
+
+export const DEFAULT_AI_SECURITY_LIMITS: AiSecurityLimits = {
+  maxMessageLength: positiveInt('AI_MESSAGE_MAX_LENGTH', 4000),
+  maxHistoryMessages: positiveInt('AI_HISTORY_MAX_MESSAGES', 20),
+  userRequestsPerMinute: positiveInt('AI_USER_REQUESTS_PER_MINUTE', 60),
+  tenantRequestsPerMinute: positiveInt('AI_TENANT_REQUESTS_PER_MINUTE', 300),
+  costUnitsPerMinute: positiveInt('AI_COST_UNITS_PER_MINUTE', 120),
+};
+
+interface RateBucket { startedAt: number; requests: number; cost: number }
+
 @Injectable()
 export class AiService {
   constructor(
@@ -18,7 +41,13 @@ export class AiService {
     private readonly context: AiContextService,
     public registry: AiToolRegistryService,
     private readonly audit: AiAuditService,
-  ) {}
+    limits: Partial<AiSecurityLimits> = {},
+  ) {
+    this.limits = { ...DEFAULT_AI_SECURITY_LIMITS, ...limits };
+  }
+
+  private readonly limits: AiSecurityLimits;
+  private readonly rateBuckets = new Map<string, RateBucket>();
 
   async createConversation(actor: AiActor, input: { contextProjectId?: string } = {}) {
     if (input.contextProjectId) {
@@ -54,9 +83,11 @@ export class AiService {
     const conversation = await this.requireConversation(actor, actor.conversationId);
     const text = dto.text?.trim();
     if (!text) throw new BadRequestException('A mensagem de texto é obrigatória');
+    if (text.length > this.limits.maxMessageLength) throw new BadRequestException('A mensagem excede o limite permitido');
+    this.consumeRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
     const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: dto.responseMode, content: text } });
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
-    const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: 20 });
+    const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: this.limits.maxHistoryMessages });
     const completionInput: AiCompletionInput = {
       messages: [
         { role: 'system', content: `Use somente este contexto acessível: ${context.summary}` },
@@ -144,5 +175,27 @@ export class AiService {
   private validateToolArgs(tool: AiTool, args: unknown) {
     if (tool.validate) tool.validate(args);
     else if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
+  }
+
+  private consumeRateLimit(actor: AiActor, cost: number) {
+    const now = Date.now();
+    const keys = [
+      [`user:${actor.tenantId}:${actor.tenantUserId}`, this.limits.userRequestsPerMinute],
+      [`tenant:${actor.tenantId}`, this.limits.tenantRequestsPerMinute],
+    ] as const;
+    const buckets = keys.map(([key, requestLimit]) => {
+      const current = this.rateBuckets.get(key);
+      return [key, requestLimit, !current || now - current.startedAt >= 60_000
+        ? { startedAt: now, requests: 0, cost: 0 }
+        : current] as const;
+    });
+    if (buckets.some(([, requestLimit, bucket]) => bucket.requests + 1 > requestLimit || bucket.cost + cost > this.limits.costUnitsPerMinute)) {
+      throw new HttpException('Limite de uso da IA excedido', 429);
+    }
+    for (const [key, , bucket] of buckets) {
+      bucket.requests += 1;
+      bucket.cost += cost;
+      this.rateBuckets.set(key, bucket);
+    }
   }
 }

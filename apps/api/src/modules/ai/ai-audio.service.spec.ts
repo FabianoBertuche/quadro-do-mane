@@ -11,6 +11,7 @@ function setup(overrides: {
   conversation?: unknown;
   transcribe?: (input: { buffer: Buffer; mimeType: string }) => Promise<{ text: string }>;
   synthesize?: (input: { text: string; voice: string }) => Promise<{ audio: Buffer; mimeType: string }>;
+  limits?: { maxBytes?: number; maxDurationSeconds?: number };
 } = {}) {
   const transcriptions: unknown[] = [];
   const synthesized: unknown[] = [];
@@ -58,7 +59,7 @@ function setup(overrides: {
     },
   };
   const media = new TemporaryAudioService({ retentionMs: 60_000 } as any);
-  const service = new AiAudioService(prisma as any, ai as any, stt as any, tts as any, media);
+  const service = new AiAudioService(prisma as any, ai as any, stt as any, tts as any, media, overrides.limits);
   return { service, media, transcriptions, synthesized, sent, updates };
 }
 
@@ -71,6 +72,16 @@ test('rejects unsupported MIME types and oversized audio before calling STT', as
   );
   await assert.rejects(
     () => service.handleMessage({ conversationId: 'conversation-1', actor, buffer: Buffer.alloc(10 * 1024 * 1024 + 1), mimeType: 'audio/mpeg', responseMode: AiResponseMode.TEXT }),
+    BadRequestException,
+  );
+  assert.equal(transcriptions.length, 0);
+});
+
+test('rejects audio over the configured duration before calling STT', async () => {
+  const { service, transcriptions } = setup({ limits: { maxDurationSeconds: 30 } });
+
+  await assert.rejects(
+    () => service.handleMessage({ conversationId: 'conversation-1', actor, buffer: Buffer.from('audio'), mimeType: 'audio/mpeg', durationSeconds: 31, responseMode: AiResponseMode.TEXT }),
     BadRequestException,
   );
   assert.equal(transcriptions.length, 0);

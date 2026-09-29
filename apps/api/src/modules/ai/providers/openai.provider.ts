@@ -10,7 +10,10 @@ import {
 type OpenAiClient = Pick<OpenAI, 'chat'>;
 export type OpenAiClientFactory = (apiKey: string, timeout: number) => OpenAI;
 
-const REQUEST_TIMEOUT_MS = 20_000;
+export const getAiRequestTimeout = (config: ConfigService) => {
+  const configured = Number(config.get<string>('AI_REQUEST_TIMEOUT_MS'));
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 20_000;
+};
 
 const defaultClientFactory: OpenAiClientFactory = (apiKey, timeout) =>
   new OpenAI({ apiKey, timeout });
@@ -25,7 +28,7 @@ export class OpenAiProvider implements AiProvider {
   ) {
     const apiKey = config.get<string>('OPENAI_API_KEY');
     if (!apiKey) throw new Error('OpenAI provider is not configured');
-    this.client = clientFactory(apiKey, REQUEST_TIMEOUT_MS);
+    this.client = clientFactory(apiKey, getAiRequestTimeout(config));
     this.model = config.get<string>('OPENAI_MODEL', 'gpt-4o-mini');
   }
 

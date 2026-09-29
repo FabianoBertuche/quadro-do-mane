@@ -35,7 +35,7 @@ export class AiAudioController {
   async handleMessage(@CurrentUser() user: RequestUser, @Param('id') conversationId: string, @Body() dto: SendAiAudioDto, @UploadedFile() file?: UploadedAudio) {
     if (!file) throw new BadRequestException('Nenhum áudio enviado');
     try {
-      return await this.audio.handleMessage({ conversationId, actor: user, buffer: file.buffer, mimeType: file.mimetype, responseMode: dto.responseMode });
+      return await this.audio.handleMessage({ conversationId, actor: user, buffer: file.buffer, mimeType: file.mimetype, durationSeconds: dto.durationSeconds, responseMode: dto.responseMode });
     } catch (error) {
       throw this.safeError(error, 'Não foi possível processar o áudio');
     }
