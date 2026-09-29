@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NotificationPreferencesService, NOTIFICATION_CATEGORIES } from './notification-preferences.service';
+import { NotificationAdminService } from './notification-admin.service';
 
 type Mock = ((...args: any[]) => any) & {
   mock: { calls: any[][] };
@@ -41,6 +42,16 @@ const doubles = (stored: any[] = []) => {
   };
   const preferences = new NotificationPreferencesService(prisma as any);
   return { preferences, prisma };
+};
+
+const dispatchDoubles = () => {
+  const prisma: any = {
+    notificationDispatch: {
+      findMany: mock(async () => []),
+    },
+  };
+  const service = new NotificationAdminService(prisma as any);
+  return { service, prisma };
 };
 
 test('returns enabled defaults for every category when no row exists', async () => {
@@ -233,4 +244,21 @@ test('resolve push como desabilitado quando a categoria está desligada', async 
   });
 
   assert.equal(await preferences.isPushEnabled('tenant-1', 'user-1', 'SECURITY'), false);
+});
+
+test('passes category, failed status, and user filters to dispatch diagnostics', async () => {
+  const { service, prisma } = dispatchDoubles();
+
+  await service.listDispatches('tenant-1', {
+    category: 'SECURITY',
+    pushStatus: 'FAILED',
+    tenantUserId: 'user-1',
+  });
+
+  assert.deepEqual(prisma.notificationDispatch.findMany.mock.calls[0][0].where, {
+    tenantId: 'tenant-1',
+    category: 'SECURITY',
+    pushStatus: 'FAILED',
+    tenantUserId: 'user-1',
+  });
 });
