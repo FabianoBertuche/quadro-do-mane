@@ -164,9 +164,10 @@ export class EventsService {
     };
   }
 
-  async update(tenantId: string, id: string, dto: UpdateEventDto) {
+  async update(tenantId: string, id: string, dto: UpdateEventDto, actorTenantUserId?: string) {
     const event = await this.findOne(tenantId, id);
     const { attendeeIds, ...eventData } = dto;
+    const previousRecipients = this.eventRecipientIds(event);
 
     // Se há recorrência nova/alterada no update, rejeitamos para eventos já criados
     const recurrenceFields = ['recurrenceRule', 'recurrenceInterval', 'recurrenceUnit', 'recurrenceEndAt'];
@@ -186,6 +187,7 @@ export class EventsService {
     const mergedAttendeeIds = attendeeIds === undefined
       ? undefined
       : Array.from(new Set([event.createdByTenantUserId, ...(assigneeId ? [assigneeId] : []), ...attendeeIds]));
+
     await this.validateRelations(tenantId, {
       assigneeTenantUserId: assigneeId,
       attendeeIds: mergedAttendeeIds,
@@ -198,13 +200,44 @@ export class EventsService {
       await this.prisma.eventAttendee.deleteMany({ where: { eventId: id } });
       await this.createAttendees(tenantId, id, mergedAttendeeIds!);
     }
-    return this.findOne(tenantId, id);
+    const updatedEvent = await this.findOne(tenantId, id);
+    const recipientsToInvite = [...this.eventRecipientIds(updatedEvent)]
+      .filter((tenantUserId) => !previousRecipients.has(tenantUserId));
+    await this.dispatchEventCollaboration({
+      tenantId,
+      eventId: id,
+      type: 'event_invited',
+      recipients: recipientsToInvite,
+      actorTenantUserId,
+      occurrenceKey: `update:${updatedEvent.updatedAt.toISOString()}`,
+    });
+    if (Object.keys(eventData).length > 0) {
+      await this.dispatchEventCollaboration({
+        tenantId,
+        eventId: id,
+        type: 'event_updated',
+        recipients: [...previousRecipients],
+        actorTenantUserId,
+        occurrenceKey: `update:${updatedEvent.updatedAt.toISOString()}`,
+      });
+    }
+    return updatedEvent;
   }
 
-  async remove(tenantId: string, id: string) {
-    await this.findOne(tenantId, id);
+  async remove(tenantId: string, id: string, actorTenantUserId?: string) {
+    const event = await this.findOne(tenantId, id);
+    const recipients = this.eventRecipientIds(event);
     await this.prisma.eventAttendee.deleteMany({ where: { eventId: id } });
-    return this.prisma.event.delete({ where: { id } });
+    const deleted = await this.prisma.event.delete({ where: { id } });
+    await this.dispatchEventCollaboration({
+      tenantId,
+      eventId: id,
+      type: 'event_cancelled',
+      recipients: [...recipients],
+      actorTenantUserId,
+      occurrenceKey: `update:${event.updatedAt.toISOString()}`,
+    });
+    return deleted;
   }
 
   /**
@@ -496,6 +529,40 @@ export class EventsService {
     if (toCreate.length) {
       await this.prisma.eventAttendee.createMany({
         data: toCreate.map((tenantUserId) => ({ tenantId, eventId, tenantUserId })),
+      });
+    }
+  }
+
+  private eventRecipientIds(event: { createdByTenantUserId: string; assigneeTenantUserId?: string | null; attendees: Array<{ tenantUserId: string }> }) {
+    return new Set([
+      event.createdByTenantUserId,
+      ...(event.assigneeTenantUserId ? [event.assigneeTenantUserId] : []),
+      ...event.attendees.map((attendee) => attendee.tenantUserId),
+    ]);
+  }
+
+  private async dispatchEventCollaboration(params: {
+    tenantId: string;
+    eventId: string;
+    type: 'event_invited' | 'event_updated' | 'event_cancelled';
+    recipients: string[];
+    actorTenantUserId?: string;
+    occurrenceKey: string;
+  }) {
+    const recipients = new Set(params.recipients);
+    if (params.actorTenantUserId) recipients.delete(params.actorTenantUserId);
+    for (const tenantUserId of recipients) {
+      await this.dispatcher.dispatch({
+        tenantId: params.tenantId,
+        tenantUserId,
+        category: 'COLLABORATION',
+        type: params.type,
+        title: params.type === 'event_cancelled' ? 'Evento cancelado' : 'Atualização de evento',
+        message: params.type === 'event_invited' ? 'Você foi convidado para um evento' : 'Um evento do calendário foi atualizado',
+        payload: { eventId: params.eventId, route: '/calendar' },
+        entityType: 'event',
+        entityId: params.eventId,
+        occurrenceKey: params.occurrenceKey,
       });
     }
   }

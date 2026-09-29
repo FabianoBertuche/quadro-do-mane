@@ -181,3 +181,75 @@ test('bloqueia colaboradores ausentes, inativos ou de outro tenant', async () =>
     /participante inválido/,
   );
 });
+
+test('notifica somente participantes novos ao atualizar um evento', async () => {
+  const dispatched: any[] = [];
+  const existingEvent = {
+    id: 'event-1',
+    tenantId: 'tenant-1',
+    createdByTenantUserId: 'creator-1',
+    assigneeTenantUserId: 'responsible-1',
+    updatedAt: new Date('2026-09-28T10:00:00.000Z'),
+    startAt: new Date('2026-09-29T10:00:00.000Z'),
+    endAt: new Date('2026-09-29T11:00:00.000Z'),
+    relatedProjectId: null,
+    relatedTaskId: null,
+    seriesId: null,
+    attendees: [{ tenantUserId: 'old-1' }],
+  };
+  let currentEvent = existingEvent;
+  const events = new EventsService({
+    event: {
+      findFirst: async () => currentEvent,
+      update: async () => {
+        currentEvent = {
+          ...currentEvent,
+          updatedAt: new Date('2026-09-28T11:00:00.000Z'),
+          attendees: [{ tenantUserId: 'old-1' }, { tenantUserId: 'new-1' }],
+        };
+        return currentEvent;
+      },
+    },
+    tenantUser: { findMany: async (args: any) => args.where.id.in.map((id: string) => ({ id })) },
+    eventAttendee: {
+      deleteMany: async () => ({ count: 1 }),
+      findMany: async () => currentEvent.attendees,
+      createMany: async () => ({ count: 1 }),
+    },
+  } as any, {} as any, { dispatch: async (input: any) => dispatched.push(input) } as any);
+
+  await events.update('tenant-1', 'event-1', { attendeeIds: ['old-1', 'new-1'] });
+
+  assert.deepEqual(dispatched.map((input) => input.tenantUserId), ['new-1']);
+  assert.equal(dispatched[0].category, 'COLLABORATION');
+  assert.equal(dispatched[0].type, 'event_invited');
+  assert.deepEqual(dispatched[0].payload, { eventId: 'event-1', route: '/calendar' });
+});
+
+test('notifica destinatários existentes antes de cancelar um evento', async () => {
+  const dispatched: any[] = [];
+  const updatedAt = new Date('2026-09-28T10:00:00.000Z');
+  const existingEvent = {
+    id: 'event-1',
+    tenantId: 'tenant-1',
+    createdByTenantUserId: 'creator-1',
+    assigneeTenantUserId: 'responsible-1',
+    updatedAt,
+    attendees: [{ tenantUserId: 'participant-1' }],
+  };
+  const events = new EventsService({
+    event: {
+      findFirst: async () => existingEvent,
+      delete: async () => existingEvent,
+    },
+    eventAttendee: { deleteMany: async () => ({ count: 1 }) },
+  } as any, {} as any, { dispatch: async (input: any) => dispatched.push(input) } as any);
+
+  await events.remove('tenant-1', 'event-1');
+
+  assert.deepEqual(dispatched.map((input) => input.tenantUserId), ['creator-1', 'responsible-1', 'participant-1']);
+  assert.equal(dispatched[0].category, 'COLLABORATION');
+  assert.equal(dispatched[0].type, 'event_cancelled');
+  assert.equal(dispatched[0].occurrenceKey, `update:${updatedAt.toISOString()}`);
+  assert.deepEqual(dispatched[0].payload, { eventId: 'event-1', route: '/calendar' });
+});
