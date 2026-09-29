@@ -73,6 +73,10 @@ export default function RootLayout() {
             options={{ presentation: 'card', animation: 'slide_from_right' }}
           />
           <Stack.Screen
+            name="project/[id]/chat"
+            options={{ presentation: 'card', animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
             name="task/[id]"
             options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
           />

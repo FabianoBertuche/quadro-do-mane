@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,11 +15,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { api, apiErrorMessage } from '@/lib/api';
 import { useLoadOnMountAndFocus } from '@/lib/use-load-on-mount-and-focus';
-import { Project, Task } from '@/lib/types';
+import { Project, Task, TaskStatus } from '@/lib/types';
 import { formatDate, isOverdue } from '@/lib/format';
 import { can } from '@/lib/permissions';
+import { groupTasksByStatus } from '@/lib/kanban';
+import { DEFAULT_PROJECT_VIEW, projectChatRoute, ProjectView } from '@/lib/project-view';
 import { colors } from '@/theme/colors';
-import { Avatar, Chip, Loading, ErrorState } from '@/components/ui';
+import { Avatar, Chip, Loading, ErrorState, Segmented } from '@/components/ui';
+import { KanbanBoard } from '@/components/KanbanBoard';
 
 const DUE_PRESETS: { label: string; days: number | null }[] = [
   { label: 'Hoje', days: 0 },
@@ -34,6 +37,8 @@ export default function ProjectDetailScreen() {
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [statuses, setStatuses] = useState<TaskStatus[]>([]);
+  const [mode, setMode] = useState<ProjectView>(DEFAULT_PROJECT_VIEW);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,12 +54,14 @@ export default function ProjectDetailScreen() {
     if (!id) return;
     setError(null);
     try {
-      const [p, t] = await Promise.all([
+      const [p, t, s] = await Promise.all([
         api.get<Project>(`/projects/${id}`),
         api.get<Task[]>(`/tasks?projectId=${id}`),
+        api.get<TaskStatus[]>('/tasks/statuses'),
       ]);
       setProject(p.data);
       setTasks(t.data);
+      setStatuses(s.data);
     } catch (e) {
       setError(apiErrorMessage(e, 'Não foi possível carregar o projeto.'));
     } finally {
@@ -64,6 +71,26 @@ export default function ProjectDetailScreen() {
   }, [id]);
 
   useLoadOnMountAndFocus(load);
+
+  const byStatus = useMemo(() => groupTasksByStatus(tasks, statuses), [tasks, statuses]);
+
+  const moveTaskToStatus = useCallback(
+    async (task: Task, targetStatusId: string) => {
+      const target = statuses.find((status) => status.id === targetStatusId);
+      if (!target || task.statusId === targetStatusId) return;
+      setTasks((prev) => prev.map((item) => (
+        item.id === task.id ? { ...item, statusId: target.id, status: target } : item
+      )));
+      try {
+        await api.patch(`/tasks/${task.id}/status`, { statusId: target.id });
+      } catch {
+        setTasks((prev) => prev.map((item) => (
+          item.id === task.id ? { ...item, statusId: task.statusId, status: task.status } : item
+        )));
+      }
+    },
+    [statuses],
+  );
 
   const startEdit = () => {
     if (!project) return;
@@ -133,6 +160,13 @@ export default function ProjectDetailScreen() {
         </Pressable>
         <Text style={styles.topTitle}>Detalhe do projeto</Text>
         <View style={styles.topActions}>
+          <Pressable
+            onPress={() => router.push(projectChatRoute(id))}
+            hitSlop={10}
+            accessibilityLabel="Abrir chat com IA"
+          >
+            <Feather name="message-circle" size={20} color={colors.foreground} />
+          </Pressable>
           {can('tasks.create') ? (
             <Pressable
               onPress={() =>
@@ -161,7 +195,15 @@ export default function ProjectDetailScreen() {
         </View>
       </View>
 
-      <FlatList
+      <View style={styles.viewSwitcher}>
+        <Segmented<ProjectView>
+          options={[{ value: 'kanban', label: 'Kanban' }, { value: 'list', label: 'Lista' }]}
+          value={mode}
+          onChange={setMode}
+        />
+      </View>
+
+      {mode === 'list' ? <FlatList
         data={tasks}
         keyExtractor={(t) => t.id}
         contentContainerStyle={styles.list}
@@ -287,7 +329,20 @@ export default function ProjectDetailScreen() {
             </Pressable>
           );
         }}
-      />
+      /> : (
+        <View style={styles.kanbanContent}>
+          <View style={styles.kanbanProjectTitle}>
+            <Text style={styles.kanbanProjectName}>{project.name}</Text>
+            {!!project.description && <Text style={styles.kanbanProjectDesc}>{project.description}</Text>}
+          </View>
+          <KanbanBoard
+            statuses={statuses}
+            byStatus={byStatus}
+            onTaskPress={(taskId) => router.push(`/task/${taskId}`)}
+            onTaskDrop={moveTaskToStatus}
+          />
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -305,6 +360,7 @@ const styles = StyleSheet.create({
   },
   topTitle: { color: colors.foreground, fontSize: 15, fontWeight: '700' },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 16, minWidth: 24 },
+  viewSwitcher: { paddingHorizontal: 20, paddingVertical: 10 },
   newTaskBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -374,6 +430,10 @@ const styles = StyleSheet.create({
   saveBtnText: { color: colors.primaryForeground, fontSize: 14.5, fontWeight: '700' },
   disabled: { opacity: 0.5 },
   list: { padding: 20, paddingBottom: 40 },
+  kanbanContent: { flex: 1 },
+  kanbanProjectTitle: { paddingHorizontal: 20, paddingBottom: 10 },
+  kanbanProjectName: { color: colors.foreground, fontSize: 19, fontWeight: '800' },
+  kanbanProjectDesc: { color: colors.mutedForeground, fontSize: 13, marginTop: 4 },
   headerCard: {
     flexDirection: 'row',
     backgroundColor: colors.card,
