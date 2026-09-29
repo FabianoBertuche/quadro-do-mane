@@ -202,6 +202,7 @@ export interface AppNotification {
   message?: string | null;
   isRead: boolean;
   createdAt: string;
+  payloadJson?: string;
 }
 
 export interface AuditEntry {

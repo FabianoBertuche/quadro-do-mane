@@ -32,9 +32,9 @@ export default function RootLayout() {
   // Registra push assim que existe sessão válida
   useEffect(() => {
     if (hydrated && accessToken) {
-      void registerPushToken();
+      void registerPushToken((route) => router.push(route as never));
     }
-  }, [hydrated, accessToken]);
+  }, [hydrated, accessToken, router]);
 
   // Guarda de rotas: sem sessão → login; com sessão → dashboard.
   // O `/` (index) é uma tela vazia de placeholder — nunca deve permanecer
@@ -87,6 +87,7 @@ export default function RootLayout() {
             options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
           />
           <Stack.Screen name="notifications" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="notification-preferences" options={{ animation: 'slide_from_right' }} />
           <Stack.Screen name="routine" options={{ animation: 'slide_from_right' }} />
           <Stack.Screen name="audit" options={{ animation: 'slide_from_right' }} />
           <Stack.Screen name="operational" options={{ animation: 'slide_from_right' }} />

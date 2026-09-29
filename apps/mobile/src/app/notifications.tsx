@@ -16,6 +16,8 @@ import { AppNotification } from '@/lib/types';
 import { formatDateTime } from '@/lib/format';
 import { colors } from '@/theme/colors';
 import { Loading, ErrorState, Card } from '@/components/ui';
+import { resolveNotificationRoute } from '@/lib/notification-navigation';
+import { useRouter } from 'expo-router';
 
 const ICONS: Record<string, keyof typeof Feather.glyphMap> = {
   task_assigned: 'user-check',
@@ -26,6 +28,7 @@ const ICONS: Record<string, keyof typeof Feather.glyphMap> = {
 };
 
 export default function NotificationsScreen() {
+  const router = useRouter();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,7 +104,12 @@ export default function NotificationsScreen() {
         }
         ListEmptyComponent={<Text style={styles.empty}>Nenhuma notificação.</Text>}
         renderItem={({ item }) => (
-          <Pressable onPress={() => void markRead(item)} style={({ pressed }) => [pressed && styles.pressed]}>
+          <Pressable onPress={() => {
+            void markRead(item).then(() => {
+              const route = resolveNotificationRoute(item.payloadJson ?? undefined);
+              if (route) router.push(route as never);
+            });
+          }} style={({ pressed }) => [pressed && styles.pressed]}>
             <Card style={[styles.card, !item.isRead && styles.cardUnread]}>
               <View style={styles.iconBox}>
                 <Feather

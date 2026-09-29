@@ -1,6 +1,8 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { api, apiErrorMessage } from './api';
+import { resolveNotificationRoute } from './notification-navigation';
 
 /**
  * Push notifications (Expo).
@@ -24,7 +26,7 @@ export function configureNotificationHandler() {
 }
 
 /** Registra o device no backend. Chamar após login/hidratação da sessão. */
-export async function registerPushToken(): Promise<void> {
+export async function registerPushToken(onRoute?: (route: string) => void): Promise<void> {
   if (registered) return;
   try {
     const settings = await Notifications.getPermissionsAsync();
@@ -46,7 +48,8 @@ export async function registerPushToken(): Promise<void> {
     // Token Expo (formato ExponentPushToken[...]) — em builds standalone
     // é preciso ter extra.eas.projectId no app.config.js e google-services.json
     // configurado para Android.
-    const t = await Notifications.getExpoPushTokenAsync();
+    const projectId = Constants.easConfig?.projectId ?? Constants.expoConfig?.extra?.eas?.projectId;
+    const t = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = typeof t === 'string' ? t : t.data;
     if (!token || !token.startsWith('Expo')) {
       console.warn('[push] token Expo não obtido (falta integração FCM no Android?)');
@@ -67,10 +70,17 @@ export async function registerPushToken(): Promise<void> {
     currentToken = token;
     registered = true;
 
-    // Listener: toque na notificação abre o app (deep link futuro por data.taskId)
-    Notifications.addNotificationResponseReceivedListener(() => {
-      // v1: apenas abre o app; navegação por payload vem depois
+    // Listener: toque na notificação fechada → navegação por route
+    Notifications.addNotificationResponseReceivedListener((response) => {
+      const route = resolveNotificationRoute(response.notification.request.content.data);
+      if (route) onRoute?.(route);
     });
+
+    const coldStartResponse = await Notifications.getLastNotificationResponseAsync();
+    if (coldStartResponse) {
+      const route = resolveNotificationRoute(coldStartResponse.notification.request.content.data);
+      if (route) onRoute?.(route);
+    }
   } catch (err) {
     console.warn('[push] registro falhou:', apiErrorMessage(err));
   }

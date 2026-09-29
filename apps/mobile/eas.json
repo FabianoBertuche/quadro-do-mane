@@ -15,6 +15,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://montemoria.com/api"
+      },
       "android": {
         "buildType": "app-bundle"
       }
