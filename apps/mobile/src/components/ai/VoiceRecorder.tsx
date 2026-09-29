@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } from 'expo-audio';
@@ -12,28 +12,35 @@ export function VoiceRecorder({ disabled, onSubmitted }: { disabled?: boolean; o
   const [state, setState] = useState(() => machine.getState());
   const [busy, setBusy] = useState(false);
   const cancelling = useRef(false);
+  const submitRef = useRef(onSubmitted);
+  const disabledRef = useRef(disabled);
+  const busyRef = useRef(busy);
 
-  const start = async () => {
-    if (disabled || busy) return;
+  useEffect(() => { disabledRef.current = disabled; }, [disabled]);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => { submitRef.current = onSubmitted; }, [onSubmitted]);
+
+  const start = useCallback(async () => {
+    if (disabledRef.current || busyRef.current) return;
     const permission = await requestRecordingPermissionsAsync();
     if (!permission.granted) return;
     await recorder.prepareToRecordAsync();
     recorder.record();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
     setState(machine.press());
-  };
+  }, [recorder, machine]);
 
-  const finish = async () => {
+  const finish = useCallback(async () => {
     const next = machine.release();
     setState(next);
     if (next.state !== 'submitted') return;
     await recorder.stop();
     if (!recorder.uri) return;
     setBusy(true);
-    try { await onSubmitted(recorder.uri); } finally { setBusy(false); }
-  };
+    try { await submitRef.current(recorder.uri); } finally { setBusy(false); }
+  }, [machine, recorder]);
 
-  const cancelRecording = async () => {
+  const cancelRecording = useCallback(async () => {
     if (cancelling.current || machine.getState().state === 'idle' || machine.getState().state === 'submitted') return;
     cancelling.current = true;
     setState(machine.cancel());
@@ -45,20 +52,22 @@ export function VoiceRecorder({ disabled, onSubmitted }: { disabled?: boolean; o
     } finally {
       cancelling.current = false;
     }
-  };
+  }, [machine, recorder]);
 
-  const responder = PanResponder.create({
-    onStartShouldSetPanResponder: () => !disabled,
-    onPanResponderGrant: () => { void start(); },
-    onPanResponderMove: (_, gesture) => {
-      const previous = machine.getState().state;
-      const next = machine.move(gesture.dy);
-      setState(next);
-      if (next.state === 'cancelled' && previous !== 'cancelled') void cancelRecording();
-    },
-    onPanResponderRelease: () => { void finish(); },
-    onPanResponderTerminate: () => { void cancelRecording(); },
-  });
+  // PanResponder is a stable native gesture object; the compiler rule is a false positive here.
+  // eslint-disable-next-line react-hooks/refs
+  const responder = useMemo(() => PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => { void start(); },
+      onPanResponderMove: (_, gesture) => {
+        const previous = machine.getState().state;
+        const nextState = machine.move(gesture.dy);
+        setState(nextState);
+        if (nextState.state === 'cancelled' && previous !== 'cancelled') void cancelRecording();
+      },
+      onPanResponderRelease: () => { void finish(); },
+      onPanResponderTerminate: () => { void cancelRecording(); },
+    }), [cancelRecording, finish, machine, start]);
 
   return (
     <View {...responder.panHandlers}>
