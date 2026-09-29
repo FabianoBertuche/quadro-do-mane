@@ -116,7 +116,10 @@ export class EnvSchema {
   @Transform(({ value }) => {
     if (typeof value === 'boolean') return value;
     if (value === undefined) return false;
-    return ['1', 'true', 'yes'].includes(String(value).toLowerCase());
+    const normalized = String(value).toLowerCase();
+    if (['1', 'true', 'yes'].includes(normalized)) return true;
+    if (['0', 'false', 'no'].includes(normalized)) return false;
+    return value;
   })
   @IsBoolean()
   AI_ENABLED: boolean = false;

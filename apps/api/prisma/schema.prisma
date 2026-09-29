@@ -1027,7 +1027,7 @@ model AiActionProposal {
   createdByTenantUserId String        @map("created_by_tenant_user_id")
   toolName             String         @map("tool_name")
   argumentsJson        String         @map("arguments_json")
-  status               String         @default("PENDING") // PENDING | CONFIRMED | CANCELLED | EXECUTED | FAILED
+  status               String         @default("PENDING")
   summary              String
   expiresAt            DateTime       @map("expires_at")
   resultJson           String?        @map("result_json")
