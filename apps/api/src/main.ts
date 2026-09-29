@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe, ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { join } from 'path';
@@ -8,48 +8,7 @@ import { AppModule } from './app.module';
 import { EncryptionService } from './common/crypto/encryption.service';
 import { UserActivityService } from './modules/dashboard/user-activity.service';
 import { ActivityTrackingInterceptor } from './common/interceptors/activity-tracking.interceptor';
-
-@Catch()
-class DebugExceptionFilter implements ExceptionFilter {
-  catch(exception: unknown, host: ArgumentsHost) {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse();
-    const request = ctx.getRequest();
-    
-    // Handle Multer file size errors specifically
-    const err = exception as any;
-    if (err?.code === 'LIMIT_FILE_SIZE' || err?.message?.includes('File too large')) {
-      response.status(400).json({
-        statusCode: 400,
-        message: 'O arquivo excede o limite máximo de 100 MB. Reduza o tamanho do arquivo e tente novamente.',
-        error: 'File too large',
-      });
-      return;
-    }
-
-    const status = exception instanceof HttpException
-      ? exception.getStatus()
-      : HttpStatus.INTERNAL_SERVER_ERROR;
-    
-    const message = exception instanceof HttpException
-      ? exception.getResponse()
-      : {
-          statusCode: status,
-          message: 'Internal server error',
-          error: exception instanceof Error ? exception.message : String(exception),
-          stack: exception instanceof Error ? exception.stack : undefined,
-          path: request.url,
-        };
-    
-    console.error(`[DEBUG-EXCEPTION] ${request.method} ${request.url}:`, 
-      exception instanceof Error ? exception.message : exception);
-    if (exception instanceof Error && exception.stack) {
-      console.error(exception.stack);
-    }
-    
-    response.status(status).json(message);
-  }
-}
+import { DebugExceptionFilter } from './common/filters/debug-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
