@@ -52,6 +52,7 @@ module.exports = () => {
         'expo-notifications',
         'expo-document-picker',
         'expo-image-picker',
+        'expo-audio',
         './plugins/withGradleRetry',
       ],
       experiments: {

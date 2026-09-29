@@ -69,6 +69,10 @@ export default function RootLayout() {
           <Stack.Screen name="(auth)/select-tenant" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen
+            name="ai-chat"
+            options={{ presentation: 'card', animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
             name="project/[id]"
             options={{ presentation: 'card', animation: 'slide_from_right' }}
           />

@@ -23,6 +23,7 @@ const SECTIONS: {
   { icon: 'bell', label: 'Notificações', route: '/notifications' },
   { icon: 'shield', label: 'Auditoria', route: '/audit', permission: 'audit.view' },
   { icon: 'activity', label: 'Atividades', route: '/operational', permission: 'audit.view' },
+  { icon: 'message-circle', label: 'Assistente IA', route: '/ai-chat' },
   { icon: 'settings', label: 'Configurações' },
 ];
 
