@@ -25,6 +25,7 @@ import { EmailsModule } from './modules/emails/emails.module';
 import { DailyRoutineModule } from './modules/daily-routine/daily-routine.module';
 import { PushModule } from './modules/push/push.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AiModule } from './modules/ai/ai.module';
 import { UserActivityService } from './modules/dashboard/user-activity.service';
 import { NotificationSchedulerService } from './modules/notifications/notification-scheduler.service';
 
@@ -58,6 +59,7 @@ import { NotificationSchedulerService } from './modules/notifications/notificati
     DailyRoutineModule,
     PushModule,
     AdminModule,
+    AiModule,
   ],
   // O scheduler vive no AppModule de propósito: Events, Tasks, DailyRoutine e
   // Push já importam NotificationsModule, então colocá-lo em NotificationsModule
