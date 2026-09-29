@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
 import React, { useState, useEffect, useRef } from 'react';
 import { Paperclip, X, FileText, Download, AlertCircle, Upload } from 'lucide-react';
+import { shouldCloseAfterTaskCreation } from '@/lib/task-form';
 
 interface TaskFormModalProps {
   isOpen: boolean;
@@ -151,11 +152,18 @@ export function TaskFormModal({ isOpen, onClose, initialData, defaultProjectId }
         setCreatedTaskId(result.id);
         if (pendingFiles.length > 0) {
           (async () => {
-            for (const file of pendingFiles) {
-              await uploadAttachment.mutateAsync({ taskId: result.id, file });
+            try {
+              for (const file of pendingFiles) {
+                await uploadAttachment.mutateAsync({ taskId: result.id, file });
+              }
+              setPendingFiles([]);
+              if (shouldCloseAfterTaskCreation(pendingFiles.length, false)) onClose();
+            } catch {
+              // Keep the modal open so the upload error and retry action remain visible.
             }
-            setPendingFiles([]);
           })();
+        } else if (shouldCloseAfterTaskCreation(0, false)) {
+          onClose();
         }
       }
     },
