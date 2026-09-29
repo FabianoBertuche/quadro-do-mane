@@ -4,11 +4,12 @@ import * as Haptics from 'expo-haptics';
 import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } from 'expo-audio';
 import Feather from '@expo/vector-icons/Feather';
 import { colors } from '@/theme/colors';
-import { createRecordingMachine, stopAndCancelRecording } from '@/lib/ai-chat-state';
+import { createRecordingLifecycle, createRecordingMachine } from '@/lib/ai-chat-state';
 
 export function VoiceRecorder({ disabled, onSubmitted }: { disabled?: boolean; onSubmitted: (uri: string) => Promise<void> | void }) {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [machine] = useState(createRecordingMachine);
+  const [lifecycle] = useState(createRecordingLifecycle);
   const [state, setState] = useState(() => machine.getState());
   const [busy, setBusy] = useState(false);
   const cancelling = useRef(false);
@@ -22,13 +23,19 @@ export function VoiceRecorder({ disabled, onSubmitted }: { disabled?: boolean; o
 
   const start = useCallback(async () => {
     if (disabledRef.current || busyRef.current) return;
-    const permission = await requestRecordingPermissionsAsync();
-    if (!permission.granted) return;
-    await recorder.prepareToRecordAsync();
-    recorder.record();
+    lifecycle.begin();
+    const started = await lifecycle.start(async () => {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) return false;
+      await recorder.prepareToRecordAsync();
+      if (!lifecycle.canStart()) return false;
+      recorder.record();
+      return true;
+    }, () => recorder.stop());
+    if (!started) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
     setState(machine.press());
-  }, [recorder, machine]);
+  }, [lifecycle, recorder, machine]);
 
   const finish = useCallback(async () => {
     const next = machine.release();
@@ -41,18 +48,16 @@ export function VoiceRecorder({ disabled, onSubmitted }: { disabled?: boolean; o
   }, [machine, recorder]);
 
   const cancelRecording = useCallback(async () => {
-    if (cancelling.current || machine.getState().state === 'idle' || machine.getState().state === 'submitted') return;
+    if (cancelling.current) return;
     cancelling.current = true;
     setState(machine.cancel());
     try {
-      await stopAndCancelRecording(
-        () => recorder.stop(),
-        () => setState(machine.release()),
-      );
+      await lifecycle.cancel(() => recorder.stop());
+      setState(machine.release());
     } finally {
       cancelling.current = false;
     }
-  }, [machine, recorder]);
+  }, [lifecycle, machine, recorder]);
 
   // PanResponder is a stable native gesture object; the compiler rule is a false positive here.
   // eslint-disable-next-line react-hooks/refs

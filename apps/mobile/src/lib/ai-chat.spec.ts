@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createProposalState,
   createRecordingMachine,
+  createRecordingLifecycle,
   getResponseMode,
   mergeHistoryPage,
   stopAndCancelRecording,
@@ -45,6 +46,43 @@ describe('AI chat recording machine', () => {
     const calls: string[] = [];
     await stopAndCancelRecording(async () => { calls.push('stop'); }, () => { calls.push('reset'); });
     expect(calls).toEqual(['stop', 'reset']);
+  });
+
+  it('cancels a pending start and stops after the native start promise resolves', async () => {
+    const lifecycle = createRecordingLifecycle();
+    let resolveStart!: (started: boolean) => void;
+    let stopCalls = 0;
+    const startPromise = new Promise<boolean>((resolve) => { resolveStart = resolve; });
+
+    lifecycle.begin();
+    const starting = lifecycle.start(() => startPromise, async () => { stopCalls += 1; });
+    await lifecycle.cancel(async () => { stopCalls += 1; });
+    resolveStart(true);
+
+    expect(await starting).toBe(false);
+    expect(stopCalls).toBe(1);
+  });
+
+  it('prevents recorder start when cancellation wins before preparation completes', async () => {
+    const lifecycle = createRecordingLifecycle();
+    let resolvePreparation!: () => void;
+    let recordCalls = 0;
+    let stopCalls = 0;
+    const preparation = new Promise<void>((resolve) => { resolvePreparation = resolve; });
+
+    lifecycle.begin();
+    const starting = lifecycle.start(async () => {
+      await preparation;
+      if (!lifecycle.canStart()) return false;
+      recordCalls += 1;
+      return true;
+    }, async () => { stopCalls += 1; });
+    await lifecycle.cancel(async () => { stopCalls += 1; });
+    resolvePreparation();
+
+    expect(await starting).toBe(false);
+    expect(recordCalls).toBe(0);
+    expect(stopCalls).toBe(0);
   });
 });
 

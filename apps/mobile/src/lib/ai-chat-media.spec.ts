@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { downloadAuthenticatedAudio } from './ai-chat-media-state';
+import { createCachedAudioLifecycle, downloadAuthenticatedAudio } from './ai-chat-media-state';
 
 describe('authenticated AI audio download', () => {
   it('downloads through the API client before handing playback a local URI', async () => {
@@ -13,5 +13,18 @@ describe('authenticated AI audio download', () => {
 
     expect(calls).toEqual([['/ai/audio/audio%2Fkey', { responseType: 'arraybuffer' }]]);
     expect(result).toBe('file:///cache/2.m4a');
+  });
+
+  it('removes a URI that resolves after the component has unmounted', async () => {
+    const removed: string[] = [];
+    const ready: string[] = [];
+    const lifecycle = createCachedAudioLifecycle(async (uri) => { removed.push(uri); });
+
+    lifecycle.unmount();
+    expect(lifecycle.resolve('file:///cache/late.m4a', (uri) => { ready.push(uri); })).toBe(false);
+    await Promise.resolve();
+
+    expect(ready).toEqual([]);
+    expect(removed).toEqual(['file:///cache/late.m4a']);
   });
 });

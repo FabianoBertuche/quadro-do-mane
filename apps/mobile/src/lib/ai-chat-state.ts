@@ -72,3 +72,41 @@ export async function stopAndCancelRecording(stop: () => Promise<void>, reset: (
     reset();
   }
 }
+
+export function createRecordingLifecycle() {
+  let cancelled = false;
+  let active = false;
+  let stopPromise: Promise<void> | null = null;
+
+  const stopOnce = (stop: () => Promise<void>) => {
+    stopPromise ??= stop();
+    return stopPromise;
+  };
+
+  return {
+    begin() {
+      cancelled = false;
+      active = false;
+      stopPromise = null;
+    },
+    canStart() {
+      return !cancelled;
+    },
+    async start(startNative: () => Promise<boolean>, stop: () => Promise<void>): Promise<boolean> {
+      const started = await startNative();
+      if (!started || !cancelled) {
+        active = started;
+        return started;
+      }
+      await stopOnce(stop);
+      return false;
+    },
+    async cancel(stop: () => Promise<void>): Promise<void> {
+      cancelled = true;
+      if (active) {
+        active = false;
+        await stopOnce(stop);
+      }
+    },
+  };
+}
