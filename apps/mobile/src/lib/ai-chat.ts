@@ -5,6 +5,7 @@ export {
   createProposalState,
   createRecordingMachine,
   getResponseMode,
+  mergeHistoryPage,
   setResponseMode,
 } from './ai-chat-state';
 export type { AiResponseMode, RecordingState } from './ai-chat-state';
@@ -81,10 +82,6 @@ export function sendAudioMessage(input: {
   return api.post(`/ai/conversations/${input.conversationId}/audio`, body, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then((response) => response.data);
-}
-
-export function getAudioUrl(audioObjectKey: string): string {
-  return `${api.defaults.baseURL}/ai/audio/${encodeURIComponent(audioObjectKey)}`;
 }
 
 export function confirmAction(proposalId: string): Promise<AiActionResult> {

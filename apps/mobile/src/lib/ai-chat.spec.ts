@@ -3,6 +3,8 @@ import {
   createProposalState,
   createRecordingMachine,
   getResponseMode,
+  mergeHistoryPage,
+  stopAndCancelRecording,
   setResponseMode,
   type AiResponseMode,
 } from './ai-chat-state';
@@ -30,6 +32,20 @@ describe('AI chat recording machine', () => {
     expect(machine.move(100)).toEqual({ state: 'cancelled', cancelled: true });
     expect(machine.release()).toEqual({ state: 'idle', cancelled: true });
   });
+
+  it('exposes an explicit cancel transition for native recorder cleanup', () => {
+    const machine = createRecordingMachine();
+
+    machine.press();
+    expect(machine.cancel()).toEqual({ state: 'cancelled', cancelled: true });
+    expect(machine.release()).toEqual({ state: 'idle', cancelled: true });
+  });
+
+  it('stops the native recorder before resetting cancelled state', async () => {
+    const calls: string[] = [];
+    await stopAndCancelRecording(async () => { calls.push('stop'); }, () => { calls.push('reset'); });
+    expect(calls).toEqual(['stop', 'reset']);
+  });
 });
 
 describe('AI chat response mode and proposals', () => {
@@ -49,5 +65,12 @@ describe('AI chat response mode and proposals', () => {
 
     expect(pending.confirm()).toEqual({ id: 'proposal-1', status: 'confirmed' });
     expect(pending.cancel()).toEqual({ id: 'proposal-1', status: 'cancelled' });
+  });
+
+  it('appends later history pages without duplicating messages', () => {
+    const first = [{ id: 'one' }, { id: 'two' }] as any;
+    const next = [{ id: 'two' }, { id: 'three' }] as any;
+
+    expect(mergeHistoryPage(first, next)).toEqual([{ id: 'one' }, { id: 'two' }, { id: 'three' }]);
   });
 });

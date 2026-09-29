@@ -1,22 +1,39 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { useAudioPlayer } from 'expo-audio';
 import { colors } from '@/theme/colors';
-import { getAudioUrl, type AiMessage } from '@/lib/ai-chat';
+import { deleteCachedAudio, downloadAudioToCache } from '@/lib/ai-chat-media';
+import type { AiMessage } from '@/lib/ai-chat';
 
 export function ChatMessage({ message }: { message: AiMessage }) {
-  const audioUrl = message.audioObjectKey ? getAudioUrl(message.audioObjectKey) : null;
-  const player = useAudioPlayer(audioUrl);
+  const [localAudioUri, setLocalAudioUri] = useState<string | null>(null);
+  const localAudioRef = useRef<string | null>(null);
+  const player = useAudioPlayer(localAudioUri);
   const isUser = message.role === 'user';
 
-  useEffect(() => () => player.pause(), [player]);
+  useEffect(() => {
+    let active = true;
+    if (message.audioObjectKey) {
+      void downloadAudioToCache(message.audioObjectKey).then((uri) => {
+        if (active) {
+          localAudioRef.current = uri;
+          setLocalAudioUri(uri);
+        }
+      }).catch(() => undefined);
+    }
+    return () => {
+      active = false;
+      player.pause();
+      if (localAudioRef.current) void deleteCachedAudio(localAudioRef.current);
+    };
+  }, [message.audioObjectKey, player]);
 
   return (
     <View style={[styles.row, isUser ? styles.userRow : styles.assistantRow]}>
       <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>
         {message.content ? <Text style={styles.content}>{message.content}</Text> : null}
-        {audioUrl ? (
+        {localAudioUri ? (
           <Pressable onPress={() => player.play()} style={styles.audio} accessibilityLabel="Reproduzir áudio">
             <Feather name="play" size={16} color={isUser ? colors.primaryForeground : colors.primary} />
             <Text style={[styles.audioText, isUser && styles.userAudioText]}>Ouvir resposta</Text>

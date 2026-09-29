@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } from 'expo-audio';
 import Feather from '@expo/vector-icons/Feather';
 import { colors } from '@/theme/colors';
-import { createRecordingMachine } from '@/lib/ai-chat-state';
+import { createRecordingMachine, stopAndCancelRecording } from '@/lib/ai-chat-state';
 
 export function VoiceRecorder({ disabled, onSubmitted }: { disabled?: boolean; onSubmitted: (uri: string) => Promise<void> | void }) {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [machine] = useState(createRecordingMachine);
   const [state, setState] = useState(() => machine.getState());
   const [busy, setBusy] = useState(false);
+  const cancelling = useRef(false);
 
   const start = async () => {
     if (disabled || busy) return;
@@ -32,12 +33,31 @@ export function VoiceRecorder({ disabled, onSubmitted }: { disabled?: boolean; o
     try { await onSubmitted(recorder.uri); } finally { setBusy(false); }
   };
 
+  const cancelRecording = async () => {
+    if (cancelling.current || machine.getState().state === 'idle' || machine.getState().state === 'submitted') return;
+    cancelling.current = true;
+    setState(machine.cancel());
+    try {
+      await stopAndCancelRecording(
+        () => recorder.stop(),
+        () => setState(machine.release()),
+      );
+    } finally {
+      cancelling.current = false;
+    }
+  };
+
   const responder = PanResponder.create({
     onStartShouldSetPanResponder: () => !disabled,
     onPanResponderGrant: () => { void start(); },
-    onPanResponderMove: (_, gesture) => setState(machine.move(gesture.dy)),
+    onPanResponderMove: (_, gesture) => {
+      const previous = machine.getState().state;
+      const next = machine.move(gesture.dy);
+      setState(next);
+      if (next.state === 'cancelled' && previous !== 'cancelled') void cancelRecording();
+    },
     onPanResponderRelease: () => { void finish(); },
-    onPanResponderTerminate: () => { setState(machine.move(100)); setState(machine.release()); },
+    onPanResponderTerminate: () => { void cancelRecording(); },
   });
 
   return (

@@ -10,7 +10,7 @@ import { TemporaryAudioService } from './media/temporary-audio.service';
 export const SPEECH_TO_TEXT_PROVIDER = 'SPEECH_TO_TEXT_PROVIDER';
 export const TEXT_TO_SPEECH_PROVIDER = 'TEXT_TO_SPEECH_PROVIDER';
 export const MAX_AI_AUDIO_BYTES = 10 * 1024 * 1024;
-export const AI_AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4'] as const;
+export const AI_AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4', 'audio/m4a'] as const;
 
 export interface AiMessageResponse {
   message: any;
@@ -54,6 +54,10 @@ export class AiAudioService {
     );
     if (input.responseMode !== AiResponseMode.AUDIO) return response;
 
+    return this.attachResponseAudio(input.actor, response);
+  }
+
+  async attachResponseAudio(actor: RequestUser | AiActor, response: AiMessageResponse): Promise<AiMessageResponse> {
     let synthesized: { audio: Buffer; mimeType: string };
     try {
       synthesized = await this.textToSpeech.synthesize({ text: response.assistantMessage.content ?? '', voice: 'alloy' });
@@ -61,7 +65,10 @@ export class AiAudioService {
       throw new BadRequestException('Não foi possível sintetizar a resposta');
     }
     const audioObjectKey = this.temporaryAudio.put(synthesized.audio, synthesized.mimeType);
-    await this.prisma.aiMessage.update({ where: { id: response.assistantMessage.id }, data: { audioObjectKey } });
+    await this.prisma.aiMessage.update({
+      where: { id: response.assistantMessage.id },
+      data: { audioObjectKey },
+    });
     return { ...response, audioObjectKey };
   }
 

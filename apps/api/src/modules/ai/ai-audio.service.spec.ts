@@ -76,6 +76,15 @@ test('rejects unsupported MIME types and oversized audio before calling STT', as
   assert.equal(transcriptions.length, 0);
 });
 
+test('accepts the audio/m4a MIME emitted by Expo audio recording', async () => {
+  const { service, transcriptions } = setup();
+
+  await service.handleMessage({ conversationId: 'conversation-1', actor, buffer: Buffer.from('audio'), mimeType: 'audio/m4a', responseMode: AiResponseMode.TEXT });
+
+  assert.equal(transcriptions.length, 1);
+  assert.equal((transcriptions[0] as any).mimeType, 'audio/m4a');
+});
+
 test('requires conversation ownership before sending audio to the provider', async () => {
   const { service, transcriptions } = setup({ conversation: null });
 

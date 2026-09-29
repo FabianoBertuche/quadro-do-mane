@@ -6,7 +6,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { colors } from '@/theme/colors';
 import { apiErrorMessage } from '@/lib/api';
 import {
-  createConversation, getConversationMessages, sendAudioMessage, sendTextMessage,
+  createConversation, getConversationMessages, getResponseMode, mergeHistoryPage, sendAudioMessage, sendTextMessage, setResponseMode,
   type AiActionProposal, type AiConversation, type AiMessage, type AiMessageResponse,
 } from '@/lib/ai-chat';
 import { ChatMessage } from '@/components/ai/ChatMessage';
@@ -21,11 +21,15 @@ export default function AiChatScreen() {
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [proposals, setProposals] = useState<AiActionProposal[]>([]);
   const [text, setText] = useState('');
-  const [responseMode, setResponseMode] = useState<'TEXT' | 'AUDIO'>('TEXT');
+  const [responseMode, setSelectedResponseMode] = useState<'TEXT' | 'AUDIO'>('TEXT');
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const listRef = useRef<FlatList<AiMessage>>(null);
+  const responseModes = useRef(new Map<string, 'TEXT' | 'AUDIO'>());
 
   useEffect(() => {
     let active = true;
@@ -37,6 +41,9 @@ export default function AiChatScreen() {
         setConversation(created);
         setMessages(history.messages);
         setProposals(history.pendingProposals);
+        setHistoryPage(1);
+        setHasMore(history.messages.length === 50);
+        setSelectedResponseMode(getResponseMode(responseModes.current, created.id));
       } catch (e) {
         if (active) setError(apiErrorMessage(e, 'Não foi possível abrir o assistente'));
       } finally {
@@ -45,6 +52,28 @@ export default function AiChatScreen() {
     })();
     return () => { active = false; };
   }, [contextProjectId]);
+
+  const loadMore = async () => {
+    if (!conversation || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = historyPage + 1;
+      const history = await getConversationMessages(conversation.id, nextPage);
+      setMessages((current) => mergeHistoryPage(current, history.messages));
+      setProposals((current) => [...current, ...history.pendingProposals.filter((next) => !current.some((item) => item.id === next.id))]);
+      setHistoryPage(nextPage);
+      setHasMore(history.messages.length === 50);
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Não foi possível carregar o histórico'));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const selectResponseMode = (mode: 'TEXT' | 'AUDIO') => {
+    if (conversation) setResponseMode(responseModes.current, conversation.id, mode);
+    setSelectedResponseMode(mode);
+  };
 
   const send = async (request: () => Promise<AiMessageResponse>) => {
     if (pending) return;
@@ -94,13 +123,16 @@ export default function AiChatScreen() {
           data={allItems}
           keyExtractor={(item, index) => `${item.id}-${index}`}
           contentContainerStyle={styles.list}
+          onEndReached={() => { void loadMore(); }}
+          onEndReachedThreshold={0.25}
+          ListHeaderComponent={loadingMore ? <ActivityIndicator color={colors.primary} /> : null}
           renderItem={({ item }) => <ChatMessage message={item} />}
           ListEmptyComponent={<View style={styles.empty}><Feather name="message-circle" size={30} color={colors.primary} /><Text style={styles.emptyTitle}>Como posso ajudar?</Text><Text style={styles.muted}>Pergunte sobre tarefas, prazos e projetos.</Text></View>}
           ListFooterComponent={<>{proposals.map((proposal) => <ActionProposalCard key={proposal.id} proposal={proposal} onChanged={() => setProposals((current) => current.filter((item) => item.id !== proposal.id))} />)}</>}
         />
         <View style={styles.composer}>
           <View style={styles.modePicker}>
-            {(['TEXT', 'AUDIO'] as const).map((mode) => <Pressable key={mode} onPress={() => setResponseMode(mode)} style={[styles.mode, responseMode === mode && styles.modeActive]}><Text style={[styles.modeText, responseMode === mode && styles.modeTextActive]}>{mode === 'TEXT' ? 'Texto' : 'Voz'}</Text></Pressable>)}
+            {(['TEXT', 'AUDIO'] as const).map((mode) => <Pressable key={mode} onPress={() => selectResponseMode(mode)} style={[styles.mode, responseMode === mode && styles.modeActive]}><Text style={[styles.modeText, responseMode === mode && styles.modeTextActive]}>{mode === 'TEXT' ? 'Texto' : 'Voz'}</Text></Pressable>)}
           </View>
           <View style={styles.inputRow}>
             <TextInput value={text} onChangeText={setText} onSubmitEditing={sendText} editable={!pending} placeholder="Pergunte algo..." placeholderTextColor={colors.mutedForeground} style={styles.input} multiline maxLength={4000} />

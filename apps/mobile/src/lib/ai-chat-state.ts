@@ -31,6 +31,13 @@ export function createRecordingMachine(options: { lockThreshold?: number; cancel
       else if (state === 'cancelled') state = 'idle';
       return result();
     },
+    cancel() {
+      if (state === 'recording' || state === 'locked') {
+        state = 'cancelled';
+        cancelled = true;
+      }
+      return result();
+    },
     getState: result,
   };
 }
@@ -48,4 +55,20 @@ export function createProposalState(id: string) {
     confirm: () => ({ id, status: 'confirmed' as const }),
     cancel: () => ({ id, status: 'cancelled' as const }),
   };
+}
+
+export function mergeHistoryPage<T extends { id: string }>(current: T[], next: T[]): T[] {
+  const result = [...current];
+  for (const item of next) {
+    if (!result.some((existing) => existing.id === item.id)) result.push(item);
+  }
+  return result;
+}
+
+export async function stopAndCancelRecording(stop: () => Promise<void>, reset: () => void): Promise<void> {
+  try {
+    await stop();
+  } finally {
+    reset();
+  }
 }
