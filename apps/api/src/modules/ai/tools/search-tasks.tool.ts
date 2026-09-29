@@ -1,10 +1,10 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
-import { clarification, resolveId, resolveOne, TaskToolInput, requirePermission, validateSearchArgs } from './task-tool.schemas';
+import { actorRoleName, clarification, resolveId, resolveOne, TaskToolInput, requirePermission, validateSearchArgs } from './task-tool.schemas';
 
 export class SearchTasksTool implements AiTool {
   name = 'search_tasks';
   description = 'Busca tarefas acessíveis no tenant e retorna resumos limitados.';
-  parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, projectId: { type: 'string' }, statusId: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, priorityId: { type: 'string' } } };
+  parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, projectId: { type: 'string' }, projectName: { type: 'string' }, statusId: { type: 'string' }, statusName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, assigneeName: { type: 'string' }, priorityId: { type: 'string' }, priorityName: { type: 'string' } } };
   constructor(private readonly tasks: any, private readonly users: any, private readonly projects: any) {}
   validate = validateSearchArgs;
   authorize(input: AiToolInput) { return requirePermission(this.users, input as TaskToolInput, 'tasks.view'); }
@@ -12,20 +12,20 @@ export class SearchTasksTool implements AiTool {
     const args = validateSearchArgs(input.args);
     const filters = { ...args };
     if (args.projectName) {
-      const project = resolveOne(await this.projects.findAll(input.tenantId, input.actorTenantUserId), args.projectName, 'projectName');
+      const project = resolveOne(await this.projects.findAll(input.tenantId, input.actorTenantUserId, await actorRoleName(this.users, input as TaskToolInput)), args.projectName, 'projectName');
       if (clarification(project)) return project;
       filters.projectId = project.id;
-    } else if (args.projectId) resolveId(await this.projects.findAll(input.tenantId, input.actorTenantUserId), args.projectId, 'projectId');
+    } else if (args.projectId) filters.projectId = resolveId(await this.projects.findAll(input.tenantId, input.actorTenantUserId, await actorRoleName(this.users, input as TaskToolInput)), args.projectId, 'projectId').id;
     if (args.statusName) {
       const status = resolveOne(await this.tasks.getStatuses(input.tenantId), args.statusName, 'statusName');
       if (clarification(status)) return status;
       filters.statusId = status.id;
-    } else if (args.statusId) resolveId(await this.tasks.getStatuses(input.tenantId), args.statusId, 'statusId');
+    } else if (args.statusId) filters.statusId = resolveId(await this.tasks.getStatuses(input.tenantId), args.statusId, 'statusId').id;
     if (args.priorityName) {
       const priority = resolveOne(await this.tasks.getPriorities(input.tenantId), args.priorityName, 'priorityName');
       if (clarification(priority)) return priority;
       filters.priorityId = priority.id;
-    } else if (args.priorityId) resolveId(await this.tasks.getPriorities(input.tenantId), args.priorityId, 'priorityId');
+    } else if (args.priorityId) filters.priorityId = resolveId(await this.tasks.getPriorities(input.tenantId), args.priorityId, 'priorityId').id;
     if (args.assigneeName) {
       const assignee = resolveOne(await this.users.findAll(input.tenantId), args.assigneeName, 'assigneeName');
       if (clarification(assignee)) return assignee;

@@ -1,5 +1,5 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
-import { clarification, requirePermission, resolveId, resolveOne, TaskToolInput, validateCreateArgs } from './task-tool.schemas';
+import { actorRoleName, clarification, requirePermission, resolveId, resolveOne, TaskToolInput, validateCreateArgs } from './task-tool.schemas';
 
 export class CreateTaskTool implements AiTool {
   name = 'create_task';
@@ -10,7 +10,7 @@ export class CreateTaskTool implements AiTool {
   authorize(input: AiToolInput) { return requirePermission(this.users, input as TaskToolInput, 'tasks.create'); }
   async execute(input: AiToolInput) {
     const args = validateCreateArgs(input.args);
-    const project = args.projectId ? await this.projects.findOne(input.tenantId, args.projectId) : resolveOne(await this.projects.findAll(input.tenantId, input.actorTenantUserId), args.projectName, 'projectName');
+    const project = args.projectId ? await this.projects.findOne(input.tenantId, args.projectId) : resolveOne(await this.projects.findAll(input.tenantId, input.actorTenantUserId, await actorRoleName(this.users, input as TaskToolInput)), args.projectName, 'projectName');
     if (clarification(project)) return project;
     const users = args.assigneeName ? resolveOne(await this.users.findAll(input.tenantId), args.assigneeName, 'assigneeName') : args.assigneeTenantUserId ? await this.users.findOne(input.tenantId, args.assigneeTenantUserId) : null;
     if (clarification(users)) return users;

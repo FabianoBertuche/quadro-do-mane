@@ -72,6 +72,11 @@ export const requirePermission = async (users: any, input: TaskToolInput, permis
   }
 };
 
+export const actorRoleName = async (users: any, input: TaskToolInput) => {
+  const actor = await users.findOne(input.tenantId, input.actorTenantUserId);
+  return actor?.role?.name ?? null;
+};
+
 export const exact = (value: unknown) => typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 
 export const resolveOne = (items: any[], name: string, field: string) => {
