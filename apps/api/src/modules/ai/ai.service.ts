@@ -85,7 +85,7 @@ export class AiService {
     if (!text) throw new BadRequestException('A mensagem de texto é obrigatória');
     if (text.length > this.limits.maxMessageLength) throw new BadRequestException('A mensagem excede o limite permitido');
     if (!actor.rateLimitReserved) await this.reserveRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
-    const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: dto.responseMode, content: text } });
+    const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: dto.inputFormat ?? 'TEXT', content: text } });
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
     const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: this.limits.maxHistoryMessages });
     const completionInput: AiCompletionInput = {
@@ -148,11 +148,18 @@ export class AiService {
       const toolInput = { tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: currentArgs };
       await tool.authorize(toolInput);
       const result = await tool.execute(toolInput);
-      const saved = await this.updateOwnedProposal(actor, proposal.id, { status: 'EXECUTED', resultJson: JSON.stringify(result) }, 'CONFIRMED');
+      if (this.isClarification(result)) {
+        const pending = await this.updateOwnedProposal(actor, proposal.id, { status: 'PENDING', resultJson: this.safeJson(result) }, 'CONFIRMED');
+        const message = await this.persistResultMessage(actor, proposal.conversationId, { status: 'needsClarification', toolName: proposal.toolName, result });
+        return { ...pending, message };
+      }
+      const saved = await this.updateOwnedProposal(actor, proposal.id, { status: 'EXECUTED', resultJson: this.safeJson(result) }, 'CONFIRMED');
+      const message = await this.persistResultMessage(actor, proposal.conversationId, { status: 'success', toolName: proposal.toolName, result });
       await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'proposal.executed', targetId: proposal.id, metadata: { toolName: proposal.toolName } });
-      return saved;
+      return { ...saved, message };
     } catch (error) {
       await this.updateOwnedProposal(actor, proposal.id, { status: 'FAILED' }, 'CONFIRMED');
+      await this.persistResultMessage(actor, proposal.conversationId, { status: 'failure', toolName: proposal.toolName });
       const denied = error instanceof ForbiddenException;
       await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: denied ? 'proposal.confirmation_denied' : 'proposal.confirmation_failed', targetId: proposal.id, metadata: { status: denied ? 'denied' : 'failed' } });
       throw error;
@@ -198,6 +205,27 @@ export class AiService {
   private validateToolArgs(tool: AiTool, args: unknown) {
     if (tool.validate) tool.validate(args);
     else if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
+  }
+
+  private isClarification(value: unknown): value is { needsClarification: true } {
+    return !!value && typeof value === 'object' && (value as any).needsClarification === true;
+  }
+
+  private safeJson(value: unknown): string {
+    const serialized = JSON.stringify(value ?? null);
+    return serialized.length > 4_000 ? `${serialized.slice(0, 4_000)}...` : serialized;
+  }
+
+  private async persistResultMessage(actor: AiActor, conversationId: string, result: Record<string, unknown>) {
+    return this.prisma.aiMessage.create({
+      data: {
+        tenantId: actor.tenantId,
+        conversationId,
+        role: 'assistant',
+        format: 'TEXT',
+        content: this.safeJson(result),
+      },
+    });
   }
 
   async reserveRateLimit(actor: AiActor, cost: number) {

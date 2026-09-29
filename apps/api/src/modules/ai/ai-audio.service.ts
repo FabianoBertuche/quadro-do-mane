@@ -74,7 +74,7 @@ export class AiAudioService {
 
     const response = await this.ai.sendMessage(
       { ...input.actor, conversationId: input.conversationId, rateLimitReserved: true },
-      { text: transcription.text.trim(), responseMode: input.responseMode },
+      { text: transcription.text.trim(), responseMode: input.responseMode, inputFormat: AiResponseMode.AUDIO },
     );
     if (input.responseMode !== AiResponseMode.AUDIO) return response;
 
@@ -89,7 +89,7 @@ export class AiAudioService {
       await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'tts.failed', targetId: response.assistantMessage.id, metadata: { provider: 'TEXT_TO_SPEECH', status: 'failed' } });
       throw new BadRequestException('Não foi possível sintetizar a resposta');
     }
-    const audioObjectKey = this.temporaryAudio.put(synthesized.audio, synthesized.mimeType);
+    const audioObjectKey = await this.temporaryAudio.put(synthesized.audio, synthesized.mimeType);
     await this.prisma.aiMessage.update({
       where: { id: response.assistantMessage.id },
       data: { audioObjectKey },
@@ -106,7 +106,7 @@ export class AiAudioService {
       },
     });
     if (!message) throw new ForbiddenException('Áudio não encontrado');
-    const audio = this.temporaryAudio.get(audioObjectKey);
+    const audio = await this.temporaryAudio.get(audioObjectKey);
     if (!audio) throw new GoneException('O áudio expirou');
     return audio;
   }

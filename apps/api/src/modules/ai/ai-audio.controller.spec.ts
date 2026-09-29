@@ -71,5 +71,5 @@ test('service ownership boundary rejects a different tenant conversation', async
   };
   const controller = new AiAudioController(service as any);
   await assert.rejects(() => controller.download({ ...actor, tenantId: 'tenant-b' }, 'opaque-key', {} as any), ForbiddenException);
-  assert.equal(media.get('opaque-key'), undefined);
+  assert.equal(await media.get('opaque-key'), undefined);
 });

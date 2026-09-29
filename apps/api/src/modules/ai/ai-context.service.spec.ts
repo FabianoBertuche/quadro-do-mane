@@ -52,3 +52,18 @@ test('buildContext returns an explicit no-access result without leaking records'
   assert.deepEqual(context.items, []);
   assert.match(context.summary, /acesso|resultado/i);
 });
+
+test('buildContext includes bounded essential task details for the provider', async () => {
+  const prisma = {
+    project: { findFirst: async () => ({ id: 'project-1', name: 'Projeto', description: 'Descrição' }) },
+    task: { findMany: async () => [{
+      id: 'task-1', title: 'Entrega', description: 'Detalhes', projectId: 'project-1', statusId: 'status-1', dueDate: new Date('2026-10-01'),
+      status: { name: 'Em andamento' }, assignee: { user: { name: 'Maria' } }, project: { name: 'Projeto' },
+    }] },
+  };
+  const context = await new AiContextService(prisma as any).buildContext({ tenantId: 'tenant-a', actorTenantUserId: 'user-a', projectId: 'project-1', query: '' });
+  assert.match(context.summary, /Entrega/);
+  assert.match(context.summary, /2026-10-01/);
+  assert.match(context.summary, /Maria/);
+  assert.match(context.summary, /Em andamento/);
+});

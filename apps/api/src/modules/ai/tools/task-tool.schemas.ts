@@ -77,6 +77,12 @@ export const actorRoleName = async (users: any, input: TaskToolInput) => {
   return actor?.role?.name ?? null;
 };
 
+export const visibleProjects = async (projects: any, users: any, input: TaskToolInput) =>
+  projects.findAll(input.tenantId, input.actorTenantUserId, await actorRoleName(users, input));
+
+export const assertVisibleProject = (projects: any[], projectId: string, field = 'projectId') =>
+  resolveId(projects, projectId, field);
+
 export const exact = (value: unknown) => typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 
 export const resolveOne = (items: any[], name: string, field: string) => {

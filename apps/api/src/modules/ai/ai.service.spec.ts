@@ -171,3 +171,24 @@ test('confirmation reloads and reauthorizes current state immediately before exe
      { id: 'proposal-1', tenantId: 'tenant-a', createdByTenantUserId: 'user-a', status: 'CONFIRMED' },
    ]);
 });
+
+test('confirmation keeps clarification proposals pending and persists a structured result message', async () => {
+  const { service, prisma } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });
+  const messages: any[] = [];
+  (prisma as any).aiMessage.create = async ({ data }: any) => { messages.push(data); return { id: `message-${messages.length}`, ...data }; };
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'demo', parameters: { type: 'object' }, authorize: async () => undefined,
+    execute: async () => ({ needsClarification: true, field: 'projectName', matches: ['p1', 'p2'] }),
+  }]);
+  const result = await service.confirmProposal(actor, 'proposal-1');
+  assert.equal(result.status, 'PENDING');
+  assert.match(messages.at(-1).content, /needsClarification/);
+  assert.equal(messages.at(-1).role, 'assistant');
+});
+
+test('text input is persisted as TEXT even when response mode is AUDIO', async () => {
+  const { service, created } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.AUDIO });
+  assert.equal(result.message.format, 'TEXT');
+  assert.equal(created.length, 0);
+});

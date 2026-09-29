@@ -15,18 +15,18 @@ describe('validateAttachmentSize', () => {
     expect(validateAttachmentSize(null)).toBeNull();
   });
 
-  it('aceita arquivo exatamente no limite de 100 MB', () => {
+  it('aceita arquivo exatamente no limite de 10 MB', () => {
     expect(validateAttachmentSize(MAX_FILE_SIZE_BYTES)).toBeNull();
   });
 
-  it('aceita arquivo abaixo do limite de 100 MB', () => {
+  it('aceita arquivo abaixo do limite de 10 MB', () => {
     expect(validateAttachmentSize(1000)).toBeNull();
   });
 
-  it('rejeita arquivo acima de 100 MB com mensagem de tamanho', () => {
+  it('rejeita arquivo acima de 10 MB com mensagem de tamanho', () => {
     const msg = validateAttachmentSize(MAX_FILE_SIZE_BYTES + 1);
     expect(msg).not.toBeNull();
-    expect(msg).toContain('100 MB');
+    expect(msg).toContain('10 MB');
   });
 });
 

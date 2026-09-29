@@ -6,12 +6,14 @@ import Feather from '@expo/vector-icons/Feather';
 import { colors } from '@/theme/colors';
 import { apiErrorMessage } from '@/lib/api';
 import {
-  createConversation, getConversationMessages, getResponseMode, mergeHistoryPage, sendAudioMessage, sendTextMessage, setResponseMode,
+  getConversationMessages, getResponseMode, mergeHistoryPage, openConversation, sendAudioMessage, sendTextMessage, setResponseMode,
   type AiActionProposal, type AiConversation, type AiMessage, type AiMessageResponse,
 } from '@/lib/ai-chat';
 import { ChatMessage } from '@/components/ai/ChatMessage';
 import { ActionProposalCard } from '@/components/ai/ActionProposalCard';
 import { VoiceRecorder } from '@/components/ai/VoiceRecorder';
+
+const responseModesByConversation = new Map<string, 'TEXT' | 'AUDIO'>();
 
 export default function AiChatScreen() {
   const router = useRouter();
@@ -29,13 +31,13 @@ export default function AiChatScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const listRef = useRef<FlatList<AiMessage>>(null);
-  const responseModes = useRef(new Map<string, 'TEXT' | 'AUDIO'>());
+  const responseModes = useRef(responseModesByConversation);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        const created = await createConversation(contextProjectId);
+        const created = await openConversation(contextProjectId);
         const history = await getConversationMessages(created.id);
         if (!active) return;
         setConversation(created);
@@ -107,6 +109,10 @@ export default function AiChatScreen() {
   };
 
   const allItems = useMemo(() => messages, [messages]);
+  const onProposalChanged = (result?: { status?: string; message?: AiMessage }) => {
+    if (result?.message) setMessages((current) => [...current, result.message as AiMessage]);
+    if (result?.status !== 'PENDING') setProposals((current) => current.filter((item) => item.status === 'PENDING'));
+  };
   if (loading) return <View style={styles.loading}><ActivityIndicator color={colors.primary} /><Text style={styles.muted}>Abrindo assistente...</Text></View>;
 
   return (
@@ -128,7 +134,7 @@ export default function AiChatScreen() {
           ListHeaderComponent={loadingMore ? <ActivityIndicator color={colors.primary} /> : null}
           renderItem={({ item }) => <ChatMessage message={item} />}
           ListEmptyComponent={<View style={styles.empty}><Feather name="message-circle" size={30} color={colors.primary} /><Text style={styles.emptyTitle}>Como posso ajudar?</Text><Text style={styles.muted}>Pergunte sobre tarefas, prazos e projetos.</Text></View>}
-          ListFooterComponent={<>{proposals.map((proposal) => <ActionProposalCard key={proposal.id} proposal={proposal} onChanged={() => setProposals((current) => current.filter((item) => item.id !== proposal.id))} />)}</>}
+          ListFooterComponent={<>{proposals.map((proposal) => <ActionProposalCard key={proposal.id} proposal={proposal} onChanged={onProposalChanged} />)}</>}
         />
         <View style={styles.composer}>
           <View style={styles.modePicker}>

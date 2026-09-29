@@ -42,6 +42,7 @@ export interface AiMessageResponse {
 
 export interface AiActionResult extends AiActionProposal {
   resultJson?: string | null;
+  message?: AiMessage;
 }
 
 export interface AiHistoryResponse {
@@ -51,6 +52,18 @@ export interface AiHistoryResponse {
 
 export function createConversation(contextProjectId?: string): Promise<AiConversation> {
   return api.post('/ai/conversations', contextProjectId ? { contextProjectId } : {}).then((response) => response.data);
+}
+
+export function listConversations(): Promise<AiConversation[]> {
+  return api.get('/ai/conversations', { params: { page: 1, take: 50 } }).then((response) => response.data);
+}
+
+export async function openConversation(contextProjectId?: string): Promise<AiConversation> {
+  const conversations = await listConversations();
+  const existing = contextProjectId
+    ? conversations.find((conversation) => conversation.contextProjectId === contextProjectId)
+    : conversations.find((conversation) => !conversation.contextProjectId) ?? conversations[0];
+  return existing ?? createConversation(contextProjectId);
 }
 
 export function getConversationMessages(conversationId: string, page = 1): Promise<AiHistoryResponse> {

@@ -84,6 +84,7 @@ export class TasksService {
 
   async findByFilters(tenantId: string, filters: {
     projectId?: string;
+    projectIds?: string[];
     statusId?: string;
     assigneeTenantUserId?: string;
     priorityId?: string;
@@ -102,6 +103,7 @@ export class TasksService {
     const where: any = { tenantId, archivedAt: null };
 
     if (filters.projectId) where.projectId = filters.projectId;
+    if (filters.projectIds) where.projectId = { in: filters.projectIds };
     if (filters.statusId) where.statusId = filters.statusId;
     if (filters.assigneeTenantUserId) where.assigneeTenantUserId = filters.assigneeTenantUserId;
     if (filters.priorityId) where.priorityId = filters.priorityId;

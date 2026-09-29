@@ -154,7 +154,7 @@ test('transcribes audio and returns the existing text response envelope', async 
   const result = await service.handleMessage({ conversationId: 'conversation-1', actor, buffer: wav(1), mimeType: 'audio/wav', responseMode: AiResponseMode.TEXT });
 
   assert.equal(result.assistantMessage.content, 'Resposta sintetizável');
-  assert.deepEqual((sent[0] as any).dto, { text: 'transcrição segura', responseMode: AiResponseMode.TEXT });
+  assert.deepEqual((sent[0] as any).dto, { text: 'transcrição segura', responseMode: AiResponseMode.TEXT, inputFormat: 'AUDIO' });
 });
 
 test('creates temporary response audio and persists only its opaque object key', async () => {
@@ -167,21 +167,25 @@ test('creates temporary response audio and persists only its opaque object key',
   assert.ok(audioObjectKey);
   assert.match(audioObjectKey, /^[a-zA-Z0-9_-]+$/);
   assert.deepEqual(updates, [{ where: { id: 'assistant-message' }, data: { audioObjectKey } }]);
-  assert.deepEqual(media.get(audioObjectKey), { audio: Buffer.from('audio'), mimeType: 'audio/mpeg' });
+  assert.deepEqual(await media.get(audioObjectKey), { audio: Buffer.from('audio'), mimeType: 'audio/mpeg' });
 });
 
-test('temporary audio is removed after its retention window', () => {
+test('temporary audio is removed after its retention window', async () => {
   const media = new TemporaryAudioService({ retentionMs: 1 } as any);
-  const key = media.put(Buffer.from('secret audio'), 'audio/mpeg');
+  const key = await media.put(Buffer.from('secret audio'), 'audio/mpeg');
 
-  assert.deepEqual(media.get(key), { audio: Buffer.from('secret audio'), mimeType: 'audio/mpeg' });
-  media.cleanup(Date.now() + 2);
-  assert.equal(media.get(key), undefined);
+  assert.deepEqual(await media.get(key), { audio: Buffer.from('secret audio'), mimeType: 'audio/mpeg' });
+  await media.cleanup(Date.now() + 2);
+  assert.equal(await media.get(key), undefined);
+});
+
+test('production refuses process-local temporary audio without shared storage', () => {
+  assert.throws(() => new TemporaryAudioService({ environment: 'production' }), /shared S3\/object storage/);
 });
 
 test('download lookup requires the owning tenant user', async () => {
   const { service, media } = setup();
-  const key = media.put(Buffer.from('audio'), 'audio/mpeg');
+  const key = await media.put(Buffer.from('audio'), 'audio/mpeg');
   await assert.rejects(() => service.getAudio({ ...actor, tenantId: 'tenant-b' }, key), ForbiddenException);
   await assert.rejects(() => service.getAudio(actor, 'missing-key'), ForbiddenException);
 });

@@ -17,7 +17,7 @@ export class TemporaryAudioCleanupScheduler implements OnModuleInit, OnModuleDes
   ) {}
 
   onModuleInit(): void {
-    this.timer = this.timerApi.setInterval(() => this.media.cleanup(), this.intervalMs);
+    this.timer = this.timerApi.setInterval(() => { void this.media.cleanup(); }, this.intervalMs);
     const timer = this.timer as { unref?: () => void };
     timer.unref?.();
   }

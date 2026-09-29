@@ -4,7 +4,7 @@
  * Sem imports de React Native — testável em Node (vitest) e usável no app.
  */
 
-export const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 export interface PickedAttachment {
   uri: string;
@@ -34,7 +34,7 @@ export function validateAttachmentSize(size?: number | null): string | null {
   if (size == null || size <= 0) return null;
   if (size > MAX_FILE_SIZE_BYTES) {
     const sizeMB = (size / (1024 * 1024)).toFixed(1);
-    return `O arquivo tem ${sizeMB} MB e excede o limite máximo de 100 MB.`;
+    return `O arquivo tem ${sizeMB} MB e excede o limite máximo de 10 MB.`;
   }
   return null;
 }

@@ -144,3 +144,30 @@ test('search_tasks rejects an invalid tenant-scoped project ID before querying t
   await assert.rejects(() => tool.execute(input({ projectId: 'other-project' })), ForbiddenException);
   assert.equal(queried, false);
 });
+
+test('create_task rejects a project outside the actor visibility scope', async () => {
+  const s = services();
+  s.projects.findAll = (async () => [{ id: 'visible-project', name: 'Visível' }]) as any;
+  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+  await assert.rejects(() => tool.execute(input({ title: 'Nova', projectId: 'hidden-project' })), ForbiddenException);
+});
+
+test('update_task and move_task reject tasks whose projects are outside actor visibility', async () => {
+  const s = services();
+  s.tasks.findOne = (async () => ({ id: 'task-1', projectId: 'hidden-project' })) as any;
+  s.projects.findAll = (async () => [{ id: 'visible-project', name: 'Visível' }]) as any;
+  const update = new UpdateTaskTool(s.tasks as any, s.users as any, s.projects as any);
+  const move = new MoveTaskTool(s.tasks as any, s.users as any, s.projects as any);
+  await assert.rejects(() => update.authorize(input({ taskId: 'task-1', title: 'Novo' })), ForbiddenException);
+  await assert.rejects(() => move.authorize(input({ taskId: 'task-1', statusName: 'Em andamento' })), ForbiddenException);
+});
+
+test('search_tasks applies actor project visibility to global searches', async () => {
+  const s = services();
+  s.projects.findAll = (async () => [{ id: 'visible-project', name: 'Visível' }]) as any;
+  let filters: any;
+  s.tasks.findByFilters = (async (_tenant: string, value: any) => { filters = value; return []; }) as any;
+  const tool = new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any);
+  await tool.execute(input({ search: 'privado' }));
+  assert.deepEqual(filters.projectIds, ['visible-project']);
+});

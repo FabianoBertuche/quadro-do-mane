@@ -1,13 +1,22 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
-import { clarification, requirePermission, resolveId, resolveOne, TaskToolInput, validateUpdateArgs } from './task-tool.schemas';
+import { ForbiddenException } from '@nestjs/common';
+import { ProjectsService } from '../../projects/projects.service';
+import { clarification, requirePermission, resolveId, resolveOne, TaskToolInput, validateUpdateArgs, visibleProjects } from './task-tool.schemas';
 
 export class UpdateTaskTool implements AiTool {
   name = 'update_task';
   description = 'Atualiza campos permitidos de uma tarefa.';
   parameters = { type: 'object', additionalProperties: false, required: ['taskId'], properties: { taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, assigneeName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, statusName: { type: 'string' }, statusId: { type: 'string' }, priorityName: { type: 'string' }, priorityId: { type: 'string' }, startDate: { type: 'string' }, dueDate: { type: 'string' } } };
-  constructor(private readonly tasks: any, private readonly users: any) {}
+  constructor(private readonly tasks: any, private readonly users: any, private readonly projects?: ProjectsService) {}
   validate = validateUpdateArgs;
-  async authorize(input: AiToolInput) { await requirePermission(this.users, input as TaskToolInput, 'tasks.edit'); await this.tasks.findOne(input.tenantId, validateUpdateArgs(input.args).taskId); }
+  async authorize(input: AiToolInput) {
+    await requirePermission(this.users, input as TaskToolInput, 'tasks.edit');
+    const task = await this.tasks.findOne(input.tenantId, validateUpdateArgs(input.args).taskId);
+    if (this.projects) {
+      const projects = await visibleProjects(this.projects, this.users, input as TaskToolInput);
+      if (!projects.some((project: any) => project.id === task.projectId)) throw new ForbiddenException('Tarefa não encontrada');
+    }
+  }
   async execute(input: AiToolInput) {
     const args = validateUpdateArgs(input.args);
     const users = args.assigneeName ? resolveOne(await this.users.findAll(input.tenantId), args.assigneeName, 'assigneeName') : args.assigneeTenantUserId ? await this.users.findOne(input.tenantId, args.assigneeTenantUserId) : null;

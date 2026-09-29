@@ -37,7 +37,17 @@ import OpenAI from 'openai';
     UpdateTaskTool,
     MoveTaskTool,
     AiAudioService,
-    TemporaryAudioService,
+    {
+      provide: TemporaryAudioService,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => new TemporaryAudioService({
+        s3: {
+          endpoint: config.get('S3_ENDPOINT'), accessKey: config.get('S3_ACCESS_KEY'),
+          secretKey: config.get('S3_SECRET_KEY'), bucket: config.get('S3_BUCKET'),
+        },
+        environment: config.get('NODE_ENV') ?? process.env.NODE_ENV,
+      }),
+    },
     TemporaryAudioCleanupScheduler,
     {
       provide: AI_RATE_LIMITER,

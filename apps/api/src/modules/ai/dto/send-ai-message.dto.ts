@@ -18,4 +18,7 @@ export class SendAiMessageDto {
   @IsOptional()
   @IsUUID()
   contextProjectId?: string;
+
+  /** Internal transport marker; multipart audio sets this to AUDIO. */
+  inputFormat?: AiResponseMode;
 }

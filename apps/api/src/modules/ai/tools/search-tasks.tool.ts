@@ -1,21 +1,24 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
-import { actorRoleName, clarification, resolveId, resolveOne, TaskToolInput, requirePermission, validateSearchArgs } from './task-tool.schemas';
+import { ProjectsService } from '../../projects/projects.service';
+import { clarification, resolveId, resolveOne, TaskToolInput, requirePermission, validateSearchArgs, visibleProjects } from './task-tool.schemas';
 
 export class SearchTasksTool implements AiTool {
   name = 'search_tasks';
   description = 'Busca tarefas acessíveis no tenant e retorna resumos limitados.';
   parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, projectId: { type: 'string' }, projectName: { type: 'string' }, statusId: { type: 'string' }, statusName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, assigneeName: { type: 'string' }, priorityId: { type: 'string' }, priorityName: { type: 'string' } } };
-  constructor(private readonly tasks: any, private readonly users: any, private readonly projects: any) {}
+  constructor(private readonly tasks: any, private readonly users: any, private readonly projects: ProjectsService) {}
   validate = validateSearchArgs;
   authorize(input: AiToolInput) { return requirePermission(this.users, input as TaskToolInput, 'tasks.view'); }
   async execute(input: AiToolInput) {
     const args = validateSearchArgs(input.args);
-    const filters = { ...args };
+    const filters: any = { ...args };
+    const projects = await visibleProjects(this.projects, this.users, input as TaskToolInput);
     if (args.projectName) {
-      const project = resolveOne(await this.projects.findAll(input.tenantId, input.actorTenantUserId, await actorRoleName(this.users, input as TaskToolInput)), args.projectName, 'projectName');
+      const project = resolveOne(projects, args.projectName, 'projectName');
       if (clarification(project)) return project;
       filters.projectId = project.id;
-    } else if (args.projectId) filters.projectId = resolveId(await this.projects.findAll(input.tenantId, input.actorTenantUserId, await actorRoleName(this.users, input as TaskToolInput)), args.projectId, 'projectId').id;
+    } else if (args.projectId) filters.projectId = resolveId(projects, args.projectId, 'projectId').id;
+    else filters.projectIds = projects.map((project: any) => project.id);
     if (args.statusName) {
       const status = resolveOne(await this.tasks.getStatuses(input.tenantId), args.statusName, 'statusName');
       if (clarification(status)) return status;
