@@ -44,8 +44,8 @@ export class AiService {
     await this.requireConversation(actor, conversationId);
     const safeTake = Math.min(Math.max(take, 1), 50);
     const [messages, proposals] = await Promise.all([
-      this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId }, orderBy: { createdAt: 'asc' }, skip: (page - 1) * safeTake, take: safeTake }),
-      this.prisma.aiActionProposal.findMany({ where: { tenantId: actor.tenantId, conversationId, createdByTenantUserId: actor.tenantUserId, status: 'PENDING' }, orderBy: { createdAt: 'desc' }, take: 20 }),
+      this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'asc' }, skip: (page - 1) * safeTake, take: safeTake }),
+      this.prisma.aiActionProposal.findMany({ where: { tenantId: actor.tenantId, conversationId, createdByTenantUserId: actor.tenantUserId, conversation: { ownerTenantUserId: actor.tenantUserId }, status: 'PENDING' }, orderBy: { createdAt: 'desc' }, take: 20 }),
     ]);
     return { messages, pendingProposals: proposals };
   }
@@ -56,7 +56,7 @@ export class AiService {
     if (!text) throw new BadRequestException('A mensagem de texto é obrigatória');
     const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: dto.responseMode, content: text } });
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
-    const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id }, orderBy: { createdAt: 'desc' }, take: 20 });
+    const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: 20 });
     const completionInput: AiCompletionInput = {
       messages: [
         { role: 'system', content: `Use somente este contexto acessível: ${context.summary}` },
@@ -66,17 +66,18 @@ export class AiService {
     };
     const completion = await this.provider.complete(completionInput);
     const assistantMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount: completion.toolCalls.length }) } });
-    let proposal: any;
-    const toolCall = completion.toolCalls[0];
-    if (toolCall) {
+    const tools = completion.toolCalls.map((toolCall) => {
       const tool = this.registry.get(toolCall.name);
-      if (tool) {
-        this.validateToolArgs(tool, toolCall.arguments);
-        proposal = await this.prisma.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(toolCall.arguments), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } });
-      }
+      if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
+      this.validateToolArgs(tool, toolCall.arguments);
+      return { tool, args: toolCall.arguments };
+    });
+    const proposals: any[] = [];
+    for (const { tool, args } of tools) {
+      proposals.push(await this.prisma.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(args), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } }));
     }
-    await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCall: Boolean(proposal) } });
-    return { message: userMessage, assistantMessage, proposal };
+    await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount: proposals.length } });
+    return { message: userMessage, assistantMessage, proposals, proposal: proposals[0] };
   }
 
   async confirmProposal(actor: AiActor, proposalId: string) {
@@ -86,21 +87,27 @@ export class AiService {
     if (!tool) throw new NotFoundException('Ferramenta não disponível');
     const args = JSON.parse(proposal.argumentsJson);
     this.validateToolArgs(tool, args);
-    await this.prisma.aiActionProposal.update({ where: { id: proposal.id }, data: { status: 'CONFIRMED' } });
+    await this.updateOwnedProposal(actor, proposal.id, { status: 'CONFIRMED' }, 'PENDING');
     try {
-      const result = await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
-      const saved = await this.prisma.aiActionProposal.update({ where: { id: proposal.id }, data: { status: 'EXECUTED', resultJson: JSON.stringify(result) } });
+      const current = await this.findOwnedProposal(actor, proposal.id, 'CONFIRMED');
+      if (!current) throw new ForbiddenException('Proposta não está mais disponível');
+      const currentArgs = JSON.parse(current.argumentsJson);
+      this.validateToolArgs(tool, currentArgs);
+      const toolInput = { tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: currentArgs };
+      await tool.authorize(toolInput);
+      const result = await tool.execute(toolInput);
+      const saved = await this.updateOwnedProposal(actor, proposal.id, { status: 'EXECUTED', resultJson: JSON.stringify(result) }, 'CONFIRMED');
       await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'proposal.executed', targetId: proposal.id, metadata: { toolName: proposal.toolName } });
       return saved;
     } catch (error) {
-      await this.prisma.aiActionProposal.update({ where: { id: proposal.id }, data: { status: 'FAILED' } });
+      await this.updateOwnedProposal(actor, proposal.id, { status: 'FAILED' }, 'CONFIRMED');
       throw error;
     }
   }
 
   async cancelProposal(actor: AiActor, proposalId: string) {
     const proposal = await this.findPendingProposal(actor, proposalId);
-    const cancelled = await this.prisma.aiActionProposal.update({ where: { id: proposal.id }, data: { status: 'CANCELLED' } });
+    const cancelled = await this.updateOwnedProposal(actor, proposal.id, { status: 'CANCELLED' }, 'PENDING');
     await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'proposal.cancelled', targetId: proposal.id });
     return cancelled;
   }
@@ -112,7 +119,24 @@ export class AiService {
   }
 
   private async findPendingProposal(actor: AiActor, proposalId: string) {
-    const proposal = await this.prisma.aiActionProposal.findFirst({ where: { id: proposalId, tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId, status: 'PENDING' } });
+    const proposal = await this.findOwnedProposal(actor, proposalId, 'PENDING');
+    if (!proposal) throw new ForbiddenException('Proposta não encontrada');
+    return proposal;
+  }
+
+  private findOwnedProposal(actor: AiActor, proposalId: string, status?: string) {
+    return this.prisma.aiActionProposal.findFirst({
+      where: { id: proposalId, tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId, ...(status ? { status } : {}) },
+    });
+  }
+
+  private async updateOwnedProposal(actor: AiActor, proposalId: string, data: Record<string, unknown>, expectedStatus: string) {
+    const result = await this.prisma.aiActionProposal.updateMany({
+      where: { id: proposalId, tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId, status: expectedStatus },
+      data,
+    });
+    if (result.count !== 1) throw new ForbiddenException('Proposta não encontrada');
+    const proposal = await this.findOwnedProposal(actor, proposalId);
     if (!proposal) throw new ForbiddenException('Proposta não encontrada');
     return proposal;
   }
