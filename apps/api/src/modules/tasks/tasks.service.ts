@@ -357,6 +357,27 @@ export class TasksService {
       });
     }
 
+    if (updated.statusId !== oldTask.statusId) {
+      const type = updated.status?.category === 'done'
+        ? 'task_completed'
+        : oldTask.status?.category === 'done' ? 'task_reopened' : 'task_status_changed';
+      await this.dispatchCollaboration(tenantId, { ...oldTask, ...updated }, actorTenantUserId, type, `update:${updated.updatedAt.toISOString()}`);
+    }
+
+    if (dto.dueDate !== undefined) {
+      const oldDue = oldTask.dueDate ? new Date(oldTask.dueDate).toISOString() : null;
+      const newDue = updated.dueDate ? new Date(updated.dueDate).toISOString() : null;
+      if (oldDue !== newDue) {
+        await this.dispatchCollaboration(
+          tenantId,
+          { ...oldTask, ...updated },
+          actorTenantUserId,
+          'task_due_date_changed',
+          `update:${updated.updatedAt.toISOString()}`,
+        );
+      }
+    }
+
     return updated;
   }
 
@@ -410,6 +431,10 @@ export class TasksService {
           newStatusName: updated.status?.name,
         },
       });
+      const type = updated.status?.category === 'done'
+        ? 'task_completed'
+        : oldTask.status?.category === 'done' ? 'task_reopened' : 'task_status_changed';
+      await this.dispatchCollaboration(tenantId, { ...oldTask, ...updated }, actorTenantUserId, type, `update:${updated.updatedAt.toISOString()}`);
     }
 
     return updated;
@@ -452,6 +477,10 @@ export class TasksService {
           newStatusName: status?.name,
         },
       });
+      const type = status?.category === 'done'
+        ? 'task_completed'
+        : oldTask.status?.category === 'done' ? 'task_reopened' : 'task_status_changed';
+      await this.dispatchCollaboration(tenantId, { ...oldTask, ...updated }, actorTenantUserId, type, `update:${updated.updatedAt.toISOString()}`);
     }
 
     return updated;
@@ -566,6 +595,41 @@ export class TasksService {
     }
   }
 
+  private collaborationRecipients(task: any, actorTenantUserId?: string): string[] {
+    const recipients = new Set<string>();
+    if (task.reporterTenantUserId) recipients.add(task.reporterTenantUserId);
+    if (task.assigneeTenantUserId) recipients.add(task.assigneeTenantUserId);
+    for (const assignee of task.assignees ?? []) {
+      if (assignee.tenantUserId) recipients.add(assignee.tenantUserId);
+    }
+    if (actorTenantUserId) recipients.delete(actorTenantUserId);
+    return [...recipients];
+  }
+
+  private async dispatchCollaboration(
+    tenantId: string,
+    task: any,
+    actorTenantUserId: string | undefined,
+    type: string,
+    occurrenceKey: string,
+    message = task.title,
+  ): Promise<void> {
+    for (const tenantUserId of this.collaborationRecipients(task, actorTenantUserId)) {
+      await this.deliverAlert({
+        tenantId,
+        tenantUserId,
+        category: 'COLLABORATION',
+        type,
+        title: 'Atualização na tarefa',
+        message,
+        payload: { taskId: task.id, projectId: task.projectId, route: `/task/${task.id}` },
+        entityType: 'task',
+        entityId: task.id,
+        occurrenceKey,
+      });
+    }
+  }
+
   // Comments
   async getComments(tenantId: string, taskId: string) {
     return this.prisma.taskComment.findMany({
@@ -581,10 +645,7 @@ export class TasksService {
       include: { author: { include: { user: { select: { name: true, avatarUrl: true } } } } },
     });
 
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, tenantId },
-      select: { title: true, project: { select: { name: true, code: true } } },
-    });
+    const task = await this.findOne(tenantId, taskId);
 
     await this.activityLog.log({
       tenantId,
@@ -600,6 +661,15 @@ export class TasksService {
         commentContent: content.substring(0, 200),
       },
     });
+
+    await this.dispatchCollaboration(
+      tenantId,
+      task,
+      authorTenantUserId,
+      'task_comment_created',
+      `comment:${comment.id}`,
+      content.substring(0, 200),
+    );
 
     return comment;
   }
