@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { NotificationDispatcherService } from '../notifications/notification-dispatcher.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private dispatcher: NotificationDispatcherService,
+  ) { }
 
   /**
    * Lista os projetos visíveis ao usuário no tenant atual.
@@ -125,10 +129,10 @@ export class ProjectsService {
     });
   }
 
-  async update(tenantId: string, id: string, dto: UpdateProjectDto) {
-    await this.findOne(tenantId, id);
+  async update(tenantId: string, id: string, dto: UpdateProjectDto, actorTenantUserId?: string) {
+    const previous = await this.findOne(tenantId, id);
     const { startDate, dueDate, ...rest } = dto;
-    return this.prisma.project.update({
+    const updated = await this.prisma.project.update({
       where: { id },
       data: {
         ...rest,
@@ -136,6 +140,46 @@ export class ProjectsService {
         ...(dueDate !== undefined && { dueDate: new Date(dueDate) }),
       } as any,
     });
+    const changed = (key: string, next: unknown, previousValue: unknown) => {
+      if (next === undefined) return false;
+      if (next instanceof Date || previousValue instanceof Date) {
+        return (next instanceof Date ? next.getTime() : new Date(next as any).getTime()) !==
+          (previousValue instanceof Date ? previousValue.getTime() : new Date(previousValue as any).getTime());
+      }
+      return next !== previousValue;
+    };
+    const projectChanged = [
+      changed('name', dto.name, previous.name),
+      changed('description', dto.description, previous.description),
+      changed('startDate', startDate, previous.startDate),
+      changed('dueDate', dueDate, previous.dueDate),
+      changed('status', dto.status, previous.status),
+      changed('ownerTenantUserId', dto.ownerTenantUserId, previous.ownerTenantUserId),
+      changed('teamId', dto.teamId, previous.teamId),
+    ].some(Boolean);
+    if (projectChanged) {
+      const recipients = new Set<string>([
+        (updated.ownerTenantUserId ?? dto.ownerTenantUserId ?? previous.ownerTenantUserId),
+        ...(previous.members ?? []).map((member: { tenantUserId: string }) => member.tenantUserId),
+      ].filter((value): value is string => Boolean(value)));
+      if (actorTenantUserId) recipients.delete(actorTenantUserId);
+      const type = dto.ownerTenantUserId !== undefined && dto.ownerTenantUserId !== previous.ownerTenantUserId
+        ? 'project_owner_changed'
+        : 'project_updated';
+      await Promise.all([...recipients].map((tenantUserId) => this.dispatcher.dispatch({
+        tenantId,
+        tenantUserId,
+        category: 'PROJECTS_TEAMS' as any,
+        type,
+        title: type === 'project_owner_changed' ? 'Responsável do projeto alterado' : 'Projeto atualizado',
+        message: updated.name,
+        payload: { projectId: id, route: `/project/${id}` },
+        entityType: 'project',
+        entityId: id,
+        occurrenceKey: `update:${updated.updatedAt.toISOString()}`,
+      })));
+    }
+    return updated;
   }
 
   async remove(tenantId: string, id: string) {
@@ -146,10 +190,34 @@ export class ProjectsService {
     });
   }
 
-  async addMember(tenantId: string, projectId: string, tenantUserId: string, roleInProject?: string) {
-    return this.prisma.projectMember.create({
+  async addMember(
+    tenantId: string,
+    projectId: string,
+    tenantUserId: string,
+    roleInProject?: string,
+    actorTenantUserId?: string,
+  ) {
+    const membership = await this.prisma.projectMember.create({
       data: { tenantId, projectId, tenantUserId, roleInProject },
     });
+    // The fourth argument used to be the role; treat it as the actor when no
+    // explicit fifth argument is supplied so the old call shape remains valid.
+    const actorId = actorTenantUserId ?? roleInProject;
+    if (tenantUserId !== actorId) {
+      await this.dispatcher.dispatch({
+        tenantId,
+        tenantUserId,
+        category: 'PROJECTS_TEAMS' as any,
+        type: 'project_member_added',
+        title: 'Você foi adicionado a um projeto',
+        message: 'Você agora participa deste projeto',
+        payload: { projectId, route: `/project/${projectId}` },
+        entityType: 'project',
+        entityId: projectId,
+        occurrenceKey: `membership:${membership.createdAt.toISOString()}`,
+      });
+    }
+    return membership;
   }
 
   async removeMember(tenantId: string, projectId: string, tenantUserId: string) {

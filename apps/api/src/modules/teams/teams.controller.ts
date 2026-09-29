@@ -36,8 +36,13 @@ export class TeamsController {
 
   @Patch(':id')
   @RequirePermissions('teams.edit')
-  update(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string, @Body() dto: UpdateTeamDto) {
-    return this.teamsService.update(tenantId, id, dto);
+  update(
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('tenantUserId') actorTenantUserId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateTeamDto,
+  ) {
+    return this.teamsService.update(tenantId, id, dto, actorTenantUserId);
   }
 
   @Delete(':id')
@@ -50,10 +55,11 @@ export class TeamsController {
   @RequirePermissions('teams.manage_members')
   addMember(
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('tenantUserId') actorTenantUserId: string,
     @Param('id') teamId: string,
     @Body('tenantUserId') tenantUserId: string,
   ) {
-    return this.teamsService.addMember(tenantId, teamId, tenantUserId);
+    return this.teamsService.addMember(tenantId, teamId, tenantUserId, actorTenantUserId);
   }
 
   @Delete(':id/members/:tenantUserId')

@@ -40,8 +40,13 @@ export class ProjectsController {
 
   @Patch(':id')
   @RequirePermissions('projects.edit')
-  update(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string, @Body() dto: UpdateProjectDto) {
-    return this.projectsService.update(tenantId, id, dto);
+  update(
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('tenantUserId') actorTenantUserId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateProjectDto,
+  ) {
+    return this.projectsService.update(tenantId, id, dto, actorTenantUserId);
   }
 
   @Delete(':id')
@@ -54,11 +59,12 @@ export class ProjectsController {
   @RequirePermissions('projects.manage_members')
   addMember(
     @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('tenantUserId') actorTenantUserId: string,
     @Param('id') projectId: string,
     @Body('tenantUserId') tenantUserId: string,
     @Body('roleInProject') role?: string,
   ) {
-    return this.projectsService.addMember(tenantId, projectId, tenantUserId, role);
+    return this.projectsService.addMember(tenantId, projectId, tenantUserId, role, actorTenantUserId);
   }
 
   @Delete(':id/members/:tenantUserId')
