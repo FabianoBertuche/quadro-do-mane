@@ -65,7 +65,14 @@ test('defines concrete tenant-safe AI persistence contracts', () => {
   assert.match(message, /@@index\(\[tenantId, conversationId, createdAt\]\)/);
 
   const proposal = modelBlock('AiActionProposal');
-  assert.equal(modelLine(proposal, 'status'), 'status               String         @default("PENDING")');
+  const proposalStatus = modelLine(proposal, 'status');
+  assert.equal(
+    proposalStatus,
+    'status               String         @default("PENDING") // PENDING | CONFIRMED | CANCELLED | EXECUTED | FAILED',
+  );
+  for (const status of ['PENDING', 'CONFIRMED', 'CANCELLED', 'EXECUTED', 'FAILED']) {
+    assert.match(proposalStatus, new RegExp(`\\b${status}\\b`));
+  }
   assert.equal(modelLine(proposal, 'expiresAt'), 'expiresAt            DateTime       @map("expires_at")');
   assert.match(proposal, /tenant\s+Tenant\s+@relation\(fields: \[tenantId\], references: \[id\], onDelete: Cascade\)/);
   assert.match(proposal, /conversation\s+AiConversation\s+@relation\(fields: \[conversationId\], references: \[id\], onDelete: Cascade\)/);
