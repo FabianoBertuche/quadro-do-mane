@@ -635,6 +635,14 @@ export class UsersService {
    *  6. Registra evento de auditoria `user.password_change`.
    */
   async changeMyPassword(userId: string, tenantId: string, dto: ChangePasswordDto) {
+    const tenantUser = await this.prisma.tenantUser.findFirst({
+      where: { userId, tenantId, isActive: true },
+      select: { id: true },
+    });
+    if (!tenantUser) {
+      throw new NotFoundException('Vínculo do usuário com o workspace não encontrado');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, passwordHash: true },
@@ -664,10 +672,10 @@ export class UsersService {
       throw new BadRequestException('A nova senha deve ser diferente da senha atual');
     }
 
-    await this.prisma.user.update({
+    const updatedUser = await this.prisma.user.update({
       where: { id: userId },
       data: { passwordHash: newHash },
-      select: { id: true },
+      select: { id: true, updatedAt: true },
     });
 
     // Limpa a flag mustChangePassword em todos os tenantUsers vinculados.
@@ -694,6 +702,20 @@ export class UsersService {
         source: 'self_service',
       },
     });
+
+    const passwordNotification: DispatchInput = {
+      tenantId,
+      tenantUserId: tenantUser.id,
+      category: 'SECURITY',
+      type: 'security_password_changed',
+      title: 'Sua senha foi alterada',
+      message: 'A senha da sua conta foi alterada com sucesso.',
+      payload: { route: '/notifications' },
+      entityType: 'user',
+      entityId: userId,
+      occurrenceKey: `update:${updatedUser.updatedAt.toISOString()}`,
+    };
+    await this.dispatcher.dispatch(passwordNotification);
 
     return {
       ok: true,

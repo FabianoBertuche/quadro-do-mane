@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
 
 type Mock = ((...args: any[]) => any) & { mock: { calls: any[][] } };
@@ -89,4 +90,54 @@ test('não notifica quando o ator e o usuário afetado são a mesma pessoa', asy
   );
 
   assert.equal(dispatcher.dispatch.mock.calls.length, 0);
+});
+
+test('notifica após concluir a troca da própria senha', async () => {
+  const passwordHash = await bcrypt.hash('old-secret', 4);
+  const newUpdatedAt = new Date('2026-09-29T10:00:00.000Z');
+  const calls: string[] = [];
+  const dispatcher = { dispatch: mock(async (input: any) => { calls.push('dispatch'); return input; }) };
+  const prisma = {
+    user: {
+      findUnique: mock(async () => ({ id: 'user-1', passwordHash })),
+      update: mock(async () => { calls.push('user.update'); return { id: 'user-1', updatedAt: newUpdatedAt }; }),
+    },
+    tenantUser: {
+      findFirst: mock(async () => ({ id: 'tenant-user-1' })),
+      updateMany: mock(async () => { calls.push('tenantUser.updateMany'); return { count: 1 }; }),
+    },
+    refreshToken: { updateMany: mock(async () => { calls.push('refreshToken.updateMany'); return { count: 1 }; }) },
+  };
+  const audit = { log: mock(async () => { calls.push('audit'); }) };
+  const service = new (UsersService as any)(
+    prisma as any,
+    { get: () => 4 } as any,
+    audit as any,
+    dispatcher as any,
+  );
+
+  await service.changeMyPassword('user-1', 'tenant-1', {
+    currentPassword: 'old-secret',
+    newPassword: 'new-secret',
+  });
+
+  assert.deepEqual(calls, [
+    'user.update',
+    'tenantUser.updateMany',
+    'refreshToken.updateMany',
+    'audit',
+    'dispatch',
+  ]);
+  assert.deepEqual(dispatcher.dispatch.mock.calls[0][0], {
+    tenantId: 'tenant-1',
+    tenantUserId: 'tenant-user-1',
+    category: 'SECURITY',
+    type: 'security_password_changed',
+    title: 'Sua senha foi alterada',
+    message: 'A senha da sua conta foi alterada com sucesso.',
+    payload: { route: '/notifications' },
+    entityType: 'user',
+    entityId: 'user-1',
+    occurrenceKey: 'update:2026-09-29T10:00:00.000Z',
+  });
 });

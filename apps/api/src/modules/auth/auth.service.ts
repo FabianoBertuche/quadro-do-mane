@@ -1,4 +1,5 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -8,6 +9,7 @@ import { EncryptionService } from '../../common/crypto/encryption.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { LoginDto } from './dto/login.dto';
 import { SelectTenantDto } from './dto/select-tenant.dto';
+import { DispatchInput, NotificationDispatcherService } from '../notifications/notification-dispatcher.service';
 
 export interface AuthRequestMeta {
   ipAddress?: string;
@@ -25,6 +27,7 @@ export class AuthService {
     private config: ConfigService,
     private encryption: EncryptionService,
     private redis: RedisService,
+    private moduleRef: ModuleRef,
   ) {}
 
   async login(dto: LoginDto, meta: AuthRequestMeta = {}) {
@@ -61,7 +64,7 @@ export class AuthService {
     }
 
     if (tenantUsers.length === 1) {
-      return this.issueTenantSession(user.id, tenantUsers[0], meta);
+      return this.issueInteractiveTenantSession(user.id, tenantUsers[0], meta);
     }
 
     // Multiple tenants: auto-select "Monte Moria" if available
@@ -71,11 +74,11 @@ export class AuthService {
     );
 
     if (monteMoriaTenantUser) {
-      return this.issueTenantSession(user.id, monteMoriaTenantUser, meta);
+      return this.issueInteractiveTenantSession(user.id, monteMoriaTenantUser, meta);
     }
 
     // Fallback: use first tenant (edge case: Monte Moria not among user's tenants)
-    return this.issueTenantSession(user.id, tenantUsers[0], meta);
+    return this.issueInteractiveTenantSession(user.id, tenantUsers[0], meta);
   }
 
   async selectTenant(userId: string, dto: SelectTenantDto, meta: AuthRequestMeta = {}) {
@@ -235,6 +238,29 @@ export class AuthService {
   // ────────────────────────────────────────────────────────────────────────
   // Internals
   // ────────────────────────────────────────────────────────────────────────
+
+  private async issueInteractiveTenantSession(
+    userId: string,
+    tenantUser: any,
+    meta: AuthRequestMeta,
+  ) {
+    const session = await this.issueTenantSession(userId, tenantUser, meta);
+    const input: DispatchInput = {
+      tenantId: tenantUser.tenantId,
+      tenantUserId: session.tenantUserId!,
+      category: 'SECURITY',
+      type: 'security_login',
+      title: 'Novo login detectado',
+      message: 'Sua conta foi acessada com sucesso.',
+      payload: { route: '/notifications' },
+      entityType: 'user',
+      entityId: userId,
+      occurrenceKey: `login:${this.encryption.hash(session.refreshToken)}`,
+    };
+    const dispatcher = this.moduleRef.get(NotificationDispatcherService, { strict: false });
+    await dispatcher.dispatch(input);
+    return session;
+  }
 
   private async issueTenantSession(userId: string, tenantUser: any, meta: AuthRequestMeta) {
     const tuWithRole = await this.prisma.tenantUser.findUnique({
