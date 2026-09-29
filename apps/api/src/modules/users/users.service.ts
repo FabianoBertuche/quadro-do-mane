@@ -14,6 +14,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { TenantUserStatusEnum, SetStatusDto } from './dto/set-status.dto';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { DispatchInput, NotificationDispatcherService } from '../notifications/notification-dispatcher.service';
 
 /**
  * Contexto do ator para registrar auditoria. Sempre que possível,
@@ -32,10 +33,37 @@ export class UsersService {
     private prisma: PrismaService,
     private config: ConfigService,
     private audit: AuditLogService,
+    private dispatcher: NotificationDispatcherService,
   ) {}
 
   private get bcryptRounds(): number {
     return this.config.get<number>('BCRYPT_ROUNDS', 12);
+  }
+
+  private async notifyStateChange(
+    tenantId: string,
+    affected: { id: string; userId: string },
+    actor: ActorContext,
+    type: string,
+    title: string,
+    message: string,
+    occurrenceKey: string,
+  ) {
+    if (actor.actorUserId === affected.userId) return;
+
+    const input: DispatchInput = {
+      tenantId,
+      tenantUserId: affected.id,
+      category: 'SECURITY',
+      type,
+      title,
+      message,
+      payload: { tenantUserId: affected.id },
+      entityType: 'tenant-user',
+      entityId: affected.id,
+      occurrenceKey,
+    };
+    await this.dispatcher.dispatch(input);
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -280,6 +308,18 @@ export class UsersService {
       },
     });
 
+    if (inviteMode) {
+      await this.notifyStateChange(
+        tenantId,
+        tenantUser,
+        actor,
+        'user_invited',
+        'Você foi convidado para um workspace',
+        'Você recebeu um convite para participar deste workspace.',
+        `invite:${tenantUser.createdAt.toISOString()}`,
+      );
+    }
+
     return tenantUser;
   }
 
@@ -374,6 +414,18 @@ export class UsersService {
       },
     });
 
+    if (dto.roleId !== undefined && tenantUser.roleId !== updated.roleId) {
+      await this.notifyStateChange(
+        tenantId,
+        updated,
+        actor,
+        'user_role_changed',
+        'Sua função foi alterada',
+        `Sua função no workspace foi alterada para ${updated.role?.name ?? 'sem função'}.`,
+        `update:${updated.updatedAt.toISOString()}`,
+      );
+    }
+
     return updated;
   }
 
@@ -438,6 +490,35 @@ export class UsersService {
       metadata: { previousStatus, newStatus: dto.status, reason: dto.reason ?? null },
     });
 
+    if (previousStatus !== dto.status) {
+      const notification = dto.status === TenantUserStatusEnum.ACTIVE
+        ? {
+            type: 'user_activated',
+            title: 'Seu usuário foi ativado',
+            message: 'Seu acesso ao workspace foi ativado.',
+          }
+        : dto.status === TenantUserStatusEnum.SUSPENDED
+        ? {
+            type: 'user_suspended',
+            title: 'Seu usuário foi suspenso',
+            message: 'Seu acesso ao workspace foi suspenso.',
+          }
+        : {
+            type: 'user_invited',
+            title: 'Você foi convidado para um workspace',
+            message: 'Você recebeu um convite para participar deste workspace.',
+          };
+      await this.notifyStateChange(
+        tenantId,
+        updated,
+        actor,
+        notification.type,
+        notification.title,
+        notification.message,
+        `update:${updated.updatedAt.toISOString()}`,
+      );
+    }
+
     return updated;
   }
 
@@ -495,6 +576,18 @@ export class UsersService {
         newRoleName: updated.role?.name ?? null,
       },
     });
+
+    if (tenantUser.roleId !== newRoleId) {
+      await this.notifyStateChange(
+        tenantId,
+        updated,
+        actor,
+        'user_role_changed',
+        'Sua função foi alterada',
+        `Sua função no workspace foi alterada para ${updated.role?.name ?? 'sem função'}.`,
+        `update:${updated.updatedAt.toISOString()}`,
+      );
+    }
 
     return updated;
   }
