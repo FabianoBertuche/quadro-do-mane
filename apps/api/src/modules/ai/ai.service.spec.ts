@@ -166,8 +166,8 @@ test('confirmation reloads and reauthorizes current state immediately before exe
   await service.confirmProposal(actor, 'proposal-1');
   const reloadIndex = order.indexOf('reload:CONFIRMED');
   assert.deepEqual(order.slice(reloadIndex, reloadIndex + 3), ['reload:CONFIRMED', 'authorize', 'execute']);
-  assert.deepEqual(proposalUpdates.map((entry) => entry.where), [
-    { id: 'proposal-1', tenantId: 'tenant-a', createdByTenantUserId: 'user-a', status: 'PENDING' },
-    { id: 'proposal-1', tenantId: 'tenant-a', createdByTenantUserId: 'user-a', status: 'CONFIRMED' },
-  ]);
+   assert.deepEqual(proposalUpdates.map((entry) => entry.where), [
+     { id: 'proposal-1', tenantId: 'tenant-a', createdByTenantUserId: 'user-a', status: 'PENDING', expiresAt: { gt: proposalUpdates[0].where.expiresAt.gt } },
+     { id: 'proposal-1', tenantId: 'tenant-a', createdByTenantUserId: 'user-a', status: 'CONFIRMED' },
+   ]);
 });

@@ -93,6 +93,7 @@ model Tenant {
   aiConversations         AiConversation[]
   aiMessages              AiMessage[]
   aiActionProposals       AiActionProposal[]
+  aiRateLimitBuckets      AiRateLimitBucket[]
 
   @@map("tenants")
 }
@@ -145,6 +146,7 @@ model TenantUser {
   pushDevices                PushDevice[]
   aiConversations            AiConversation[]
   aiActionProposals          AiActionProposal[]
+  aiRateLimitBuckets         AiRateLimitBucket[]
 
   @@unique([tenantId, userId])
   @@map("tenant_users")
@@ -1039,4 +1041,24 @@ model AiActionProposal {
 
   @@index([tenantId, createdByTenantUserId, status])
   @@map("ai_action_proposals")
+}
+
+model AiRateLimitBucket {
+  id            String     @id @default(uuid())
+  tenantId      String     @map("tenant_id")
+  tenantUserId  String?    @map("tenant_user_id")
+  scopeKey      String     @map("scope_key")
+  windowStart   DateTime   @map("window_start")
+  requestCount  Int        @default(0) @map("request_count")
+  costUnits     Int        @default(0) @map("cost_units")
+  requestLimit  Int        @map("request_limit")
+  costLimit     Int        @map("cost_limit")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  tenant        Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser    TenantUser? @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, scopeKey, windowStart])
+  @@index([tenantId, windowStart])
+  @@map("ai_rate_limit_buckets")
 }

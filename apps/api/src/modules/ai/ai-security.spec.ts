@@ -10,11 +10,13 @@ import { OpenAiProvider } from './providers/openai.provider';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
-function setup(overrides: { limits?: Partial<AiSecurityLimits>; conversation?: unknown; proposal?: unknown; provider?: any } = {}) {
+function setup(overrides: { limits?: Partial<AiSecurityLimits>; conversation?: unknown; proposal?: unknown; provider?: any; rateLimiter?: any; proposalUpdateCount?: number } = {}) {
   const provider = overrides.provider ?? { complete: async () => ({ text: 'ok', toolCalls: [] }) };
   const calls: any[] = [];
   const history: any[] = [];
   const auditLog: any[] = [];
+  const proposalUpdates: any[] = [];
+  const rateCalls = new Map<string, number>();
   const prisma = {
     aiConversation: {
       findFirst: async ({ where }: any) => overrides.conversation === undefined
@@ -37,10 +39,19 @@ function setup(overrides: { limits?: Partial<AiSecurityLimits>; conversation?: u
         : overrides.proposal,
       findMany: async () => [],
       create: async ({ data }: any) => ({ id: 'proposal-1', ...data }),
-      updateMany: async () => ({ count: 1 }),
+      updateMany: async ({ where, data }: any) => { proposalUpdates.push({ where, data }); return { count: overrides.proposalUpdateCount ?? 1 }; },
     },
   };
   const context = new AiContextService({ project: { findFirst: async () => null }, task: { findMany: async () => [] } } as any);
+  const rateLimiter = {
+    consume: async (rateActor: any, cost: number) => {
+      const key = `${rateActor.tenantId}:${rateActor.tenantUserId}`;
+      const count = (rateCalls.get(key) ?? 0) + 1;
+      const limits = { ...({ userRequestsPerMinute: 60, tenantRequestsPerMinute: 300, costUnitsPerMinute: 120 }), ...overrides.limits };
+      if (count > limits.userRequestsPerMinute || cost > limits.costUnitsPerMinute) throw new HttpException('rate limited', 429);
+      rateCalls.set(key, count);
+    },
+  };
   const service = new AiService(
     prisma as any,
     provider,
@@ -48,8 +59,9 @@ function setup(overrides: { limits?: Partial<AiSecurityLimits>; conversation?: u
     new AiToolRegistryService([]),
     new AiAuditService({ log: async (entry: any) => auditLog.push(entry) } as any),
     overrides.limits,
+    (overrides.rateLimiter ?? rateLimiter) as any,
   );
-  return { service, calls, history, auditLog };
+  return { service, calls, history, auditLog, proposalUpdates };
 }
 
 test('rejects oversized messages before persistence or provider calls', async () => {
@@ -96,6 +108,19 @@ test('redacts secrets and prompt content from AI audit metadata', async () => {
   assert.doesNotMatch(JSON.stringify(auditLog[0]), /provider-secret|raw provider payload/);
 });
 
+test('redacts secrets nested inside audit arrays and objects', async () => {
+  const auditLog: any[] = [];
+  const audit = new AiAuditService({ log: async (entry: any) => auditLog.push(entry) } as any);
+
+  await audit.record({ tenantId: 'tenant-a', actorTenantUserId: 'user-a', action: 'provider.failed', metadata: {
+    details: [{ authorization: 'Bearer nested-secret' }, { safeStatus: 'failed' }],
+  } });
+
+  assert.equal(auditLog[0].metadata.details[0].authorization, '[REDACTED]');
+  assert.equal(auditLog[0].metadata.details[1].safeStatus, 'failed');
+  assert.doesNotMatch(JSON.stringify(auditLog[0]), /nested-secret/);
+});
+
 test('maps provider timeout/failure without leaking provider tokens', async () => {
   const provider = new OpenAiProvider(
     { get: (key: string, fallback?: string) => ({ OPENAI_API_KEY: 'provider-secret', OPENAI_MODEL: 'test-model' } as any)[key] ?? fallback } as any,
@@ -119,4 +144,60 @@ test('denies cross-tenant conversation and proposal access, including expired pr
 
   const expired = setup({ proposal: { id: 'proposal-1', tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId, status: 'PENDING', expiresAt: new Date(Date.now() - 1), toolName: 'demo', argumentsJson: '{}' } });
   await assert.rejects(() => expired.service.confirmProposal(actor, 'proposal-1'), GoneException);
+});
+
+test('claims proposals only while they are unexpired', async () => {
+  const { service, proposalUpdates } = setup();
+  (service as any).registry = new AiToolRegistryService([{ name: 'demo', parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => ({ ok: true }) }]);
+  await service.confirmProposal(actor, 'proposal-1');
+
+  assert.deepEqual(proposalUpdates[0].where.expiresAt, { gt: proposalUpdates[0].where.expiresAt.gt });
+  assert.ok(proposalUpdates[0].where.expiresAt.gt instanceof Date);
+});
+
+test('audits denied proposal confirmation without sensitive details', async () => {
+  const { service, auditLog } = setup({ proposal: null });
+  await assert.rejects(() => service.confirmProposal({ tenantId: 'tenant-b', tenantUserId: 'user-b' }, 'proposal-1'), ForbiddenException);
+
+  assert.equal(auditLog.at(-1).action, 'ai.proposal.confirmation_denied');
+  assert.deepEqual(auditLog.at(-1).metadata, { actorTenantUserId: 'user-b', reason: 'proposal_not_found' });
+});
+
+test('audits provider failures without recording the prompt or provider error', async () => {
+  const { service, auditLog } = setup({ provider: { complete: async () => { throw new Error('provider-secret raw payload'); } } });
+  await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'secret prompt', responseMode: AiResponseMode.TEXT }));
+
+  assert.equal(auditLog.at(-1).action, 'ai.provider.failed');
+  assert.deepEqual(auditLog.at(-1).metadata, { actorTenantUserId: 'user-a', provider: 'AI_PROVIDER', status: 'failed' });
+  assert.doesNotMatch(JSON.stringify(auditLog), /secret prompt|provider-secret|raw payload/);
+});
+
+test('fails closed before the provider when the shared limiter is unavailable', async () => {
+  let providerCalls = 0;
+  const { service } = setup({
+    provider: { complete: async () => { providerCalls += 1; return { text: 'unexpected', toolCalls: [] }; } },
+    rateLimiter: { consume: async () => { throw new Error('database unavailable'); } },
+  });
+
+  await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'question', responseMode: AiResponseMode.TEXT }));
+  assert.equal(providerCalls, 0);
+});
+
+test('does not execute a proposal when the expiring claim updates zero rows', async () => {
+  let executions = 0;
+  const { service, auditLog } = setup({ proposalUpdateCount: 0 });
+  (service as any).registry = new AiToolRegistryService([{ name: 'demo', parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => { executions += 1; } }]);
+
+  await assert.rejects(() => service.confirmProposal(actor, 'proposal-1'), ForbiddenException);
+  assert.equal(executions, 0);
+  assert.equal(auditLog.at(-1).action, 'ai.proposal.confirmation_denied');
+});
+
+test('audits authorization denial during confirmation without proposal arguments', async () => {
+  const { service, auditLog } = setup();
+  (service as any).registry = new AiToolRegistryService([{ name: 'demo', parameters: { type: 'object' }, authorize: async () => { throw new ForbiddenException('not allowed'); }, execute: async () => ({}) }]);
+
+  await assert.rejects(() => service.confirmProposal(actor, 'proposal-1'), ForbiddenException);
+  assert.equal(auditLog.at(-1).action, 'ai.proposal.confirmation_denied');
+  assert.equal(auditLog.at(-1).metadata.status, 'denied');
 });

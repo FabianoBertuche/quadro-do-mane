@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, NotFoundException, HttpException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiCompletionInput, AiProvider } from './ports/ai-provider.port';
 import { AiContextService } from './ai-context.service';
@@ -6,8 +6,10 @@ import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
 import { AiTool } from './tools/ai-tool.port';
 import { SendAiMessageDto } from './dto/send-ai-message.dto';
+import type { AiRateLimiter } from './ai-rate-limit.service';
 
 export const AI_PROVIDER = 'AI_PROVIDER';
+export const AI_RATE_LIMITER = 'AI_RATE_LIMITER';
 export interface AiActor { tenantId: string; tenantUserId: string; userId?: string }
 
 export interface AiSecurityLimits {
@@ -31,8 +33,6 @@ export const DEFAULT_AI_SECURITY_LIMITS: AiSecurityLimits = {
   costUnitsPerMinute: positiveInt('AI_COST_UNITS_PER_MINUTE', 120),
 };
 
-interface RateBucket { startedAt: number; requests: number; cost: number }
-
 @Injectable()
 export class AiService {
   constructor(
@@ -42,12 +42,12 @@ export class AiService {
     public registry: AiToolRegistryService,
     private readonly audit: AiAuditService,
     limits: Partial<AiSecurityLimits> = {},
+    @Optional() @Inject(AI_RATE_LIMITER) private readonly rateLimiter?: AiRateLimiter,
   ) {
     this.limits = { ...DEFAULT_AI_SECURITY_LIMITS, ...limits };
   }
 
   private readonly limits: AiSecurityLimits;
-  private readonly rateBuckets = new Map<string, RateBucket>();
 
   async createConversation(actor: AiActor, input: { contextProjectId?: string } = {}) {
     if (input.contextProjectId) {
@@ -79,12 +79,12 @@ export class AiService {
     return { messages, pendingProposals: proposals };
   }
 
-  async sendMessage(actor: AiActor & { conversationId: string }, dto: SendAiMessageDto) {
+  async sendMessage(actor: AiActor & { conversationId: string; rateLimitReserved?: boolean }, dto: SendAiMessageDto) {
     const conversation = await this.requireConversation(actor, actor.conversationId);
     const text = dto.text?.trim();
     if (!text) throw new BadRequestException('A mensagem de texto é obrigatória');
     if (text.length > this.limits.maxMessageLength) throw new BadRequestException('A mensagem excede o limite permitido');
-    this.consumeRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
+    if (!actor.rateLimitReserved) await this.reserveRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
     const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: dto.responseMode, content: text } });
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
     const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: this.limits.maxHistoryMessages });
@@ -95,7 +95,13 @@ export class AiService {
       ],
       tools: this.registry.list().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
     };
-    const completion = await this.provider.complete(completionInput);
+    let completion: Awaited<ReturnType<AiProvider['complete']>>;
+    try {
+      completion = await this.provider.complete(completionInput);
+    } catch (error) {
+      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'provider.failed', targetId: conversation.id, metadata: { provider: 'AI_PROVIDER', status: 'failed' } });
+      throw error;
+    }
     const assistantMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount: completion.toolCalls.length }) } });
     const tools = completion.toolCalls.map((toolCall) => {
       const tool = this.registry.get(toolCall.name);
@@ -112,16 +118,31 @@ export class AiService {
   }
 
   async confirmProposal(actor: AiActor, proposalId: string) {
-    const proposal = await this.findPendingProposal(actor, proposalId);
-    if (proposal.expiresAt <= new Date()) throw new GoneException('A proposta expirou');
+    let proposal;
+    try {
+      proposal = await this.findPendingProposal(actor, proposalId);
+    } catch (error) {
+      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'proposal.confirmation_denied', targetId: proposalId, metadata: { reason: 'proposal_not_found' } });
+      throw error;
+    }
+    if (proposal.expiresAt <= new Date()) {
+      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'proposal.expired', targetId: proposalId, metadata: { status: 'expired' } });
+      throw new GoneException('A proposta expirou');
+    }
     const tool = this.registry.get(proposal.toolName);
     if (!tool) throw new NotFoundException('Ferramenta não disponível');
     const args = JSON.parse(proposal.argumentsJson);
     this.validateToolArgs(tool, args);
-    await this.updateOwnedProposal(actor, proposal.id, { status: 'CONFIRMED' }, 'PENDING');
+    try {
+      await this.updateOwnedProposal(actor, proposal.id, { status: 'CONFIRMED' }, 'PENDING', true);
+    } catch (error) {
+      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'proposal.confirmation_denied', targetId: proposalId, metadata: { reason: 'expired_or_claimed' } });
+      throw error;
+    }
     try {
       const current = await this.findOwnedProposal(actor, proposal.id, 'CONFIRMED');
-      if (!current) throw new ForbiddenException('Proposta não está mais disponível');
+       if (!current) throw new ForbiddenException('Proposta não está mais disponível');
+       if (current.expiresAt <= new Date()) throw new GoneException('A proposta expirou');
       const currentArgs = JSON.parse(current.argumentsJson);
       this.validateToolArgs(tool, currentArgs);
       const toolInput = { tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: currentArgs };
@@ -132,6 +153,8 @@ export class AiService {
       return saved;
     } catch (error) {
       await this.updateOwnedProposal(actor, proposal.id, { status: 'FAILED' }, 'CONFIRMED');
+      const denied = error instanceof ForbiddenException;
+      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: denied ? 'proposal.confirmation_denied' : 'proposal.confirmation_failed', targetId: proposal.id, metadata: { status: denied ? 'denied' : 'failed' } });
       throw error;
     }
   }
@@ -161,9 +184,9 @@ export class AiService {
     });
   }
 
-  private async updateOwnedProposal(actor: AiActor, proposalId: string, data: Record<string, unknown>, expectedStatus: string) {
+  private async updateOwnedProposal(actor: AiActor, proposalId: string, data: Record<string, unknown>, expectedStatus: string, requireUnexpired = false) {
     const result = await this.prisma.aiActionProposal.updateMany({
-      where: { id: proposalId, tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId, status: expectedStatus },
+      where: { id: proposalId, tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId, status: expectedStatus, ...(requireUnexpired ? { expiresAt: { gt: new Date() } } : {}) },
       data,
     });
     if (result.count !== 1) throw new ForbiddenException('Proposta não encontrada');
@@ -177,25 +200,7 @@ export class AiService {
     else if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
   }
 
-  private consumeRateLimit(actor: AiActor, cost: number) {
-    const now = Date.now();
-    const keys = [
-      [`user:${actor.tenantId}:${actor.tenantUserId}`, this.limits.userRequestsPerMinute],
-      [`tenant:${actor.tenantId}`, this.limits.tenantRequestsPerMinute],
-    ] as const;
-    const buckets = keys.map(([key, requestLimit]) => {
-      const current = this.rateBuckets.get(key);
-      return [key, requestLimit, !current || now - current.startedAt >= 60_000
-        ? { startedAt: now, requests: 0, cost: 0 }
-        : current] as const;
-    });
-    if (buckets.some(([, requestLimit, bucket]) => bucket.requests + 1 > requestLimit || bucket.cost + cost > this.limits.costUnitsPerMinute)) {
-      throw new HttpException('Limite de uso da IA excedido', 429);
-    }
-    for (const [key, , bucket] of buckets) {
-      bucket.requests += 1;
-      bucket.cost += cost;
-      this.rateBuckets.set(key, bucket);
-    }
+  async reserveRateLimit(actor: AiActor, cost: number) {
+    if (this.rateLimiter) await this.rateLimiter.consume(actor, cost);
   }
 }

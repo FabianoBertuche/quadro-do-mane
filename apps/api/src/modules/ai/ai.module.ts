@@ -4,7 +4,9 @@ import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { FakeAiProvider } from './providers/fake-ai.provider';
 import { OpenAiProvider } from './providers/openai.provider';
-import { AI_PROVIDER, AiService } from './ai.service';
+import { AI_PROVIDER, AI_RATE_LIMITER, AiService, DEFAULT_AI_SECURITY_LIMITS } from './ai.service';
+import { AiRateLimitService } from './ai-rate-limit.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiController } from './ai.controller';
 import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
@@ -37,6 +39,15 @@ import OpenAI from 'openai';
     AiAudioService,
     TemporaryAudioService,
     TemporaryAudioCleanupScheduler,
+    {
+      provide: AI_RATE_LIMITER,
+      inject: [PrismaService, ConfigService],
+      useFactory: (prisma: PrismaService, config: ConfigService) => new AiRateLimitService(prisma, {
+        userRequestsPerMinute: Number(config.get('AI_USER_REQUESTS_PER_MINUTE')) || DEFAULT_AI_SECURITY_LIMITS.userRequestsPerMinute,
+        tenantRequestsPerMinute: Number(config.get('AI_TENANT_REQUESTS_PER_MINUTE')) || DEFAULT_AI_SECURITY_LIMITS.tenantRequestsPerMinute,
+        costUnitsPerMinute: Number(config.get('AI_COST_UNITS_PER_MINUTE')) || DEFAULT_AI_SECURITY_LIMITS.costUnitsPerMinute,
+      }),
+    },
     {
       provide: SPEECH_TO_TEXT_PROVIDER,
       inject: [ConfigService],

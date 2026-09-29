@@ -27,9 +27,15 @@ export class AiAuditService {
     if (depth > 4) return { value: '[REDACTED]' };
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
       if (/prompt|content|token|secret|authorization|password|error|payload/i.test(key)) return [key, '[REDACTED]'];
-      if (entry && typeof entry === 'object' && !Array.isArray(entry)) return [key, this.redact(entry as Record<string, unknown>, depth + 1)];
-      if (typeof entry === 'string' && /bearer\s+|sk-[a-z0-9_-]+|api[-_ ]?key/i.test(entry)) return [key, '[REDACTED]'];
-      return [key, entry];
+      return [key, this.redactValue(entry, depth + 1)];
     }));
+  }
+
+  private redactValue(value: unknown, depth: number): unknown {
+    if (depth > 4) return '[REDACTED]';
+    if (typeof value === 'string' && /bearer\s+|sk-[a-z0-9_-]+|api[-_ ]?key/i.test(value)) return '[REDACTED]';
+    if (Array.isArray(value)) return value.map((entry) => this.redactValue(entry, depth + 1));
+    if (value && typeof value === 'object') return this.redact(value as Record<string, unknown>, depth + 1);
+    return value;
   }
 }

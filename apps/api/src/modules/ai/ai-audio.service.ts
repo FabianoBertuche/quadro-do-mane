@@ -6,6 +6,7 @@ import { AiResponseMode } from './dto/send-ai-message.dto';
 import { SpeechToTextProvider } from './ports/speech-to-text.port';
 import { TextToSpeechProvider } from './ports/text-to-speech.port';
 import { TemporaryAudioService } from './media/temporary-audio.service';
+import { parseBuffer } from 'music-metadata';
 
 export const SPEECH_TO_TEXT_PROVIDER = 'SPEECH_TO_TEXT_PROVIDER';
 export const TEXT_TO_SPEECH_PROVIDER = 'TEXT_TO_SPEECH_PROVIDER';
@@ -39,6 +40,7 @@ export class AiAudioService {
     @Inject(TEXT_TO_SPEECH_PROVIDER) private readonly textToSpeech: TextToSpeechProvider,
     private readonly temporaryAudio: TemporaryAudioService,
     limits: Partial<AiAudioLimits> = {},
+    private readonly audit?: { record(input: { tenantId: string; actorTenantUserId: string; actorUserId?: string; action: string; targetId?: string; metadata?: Record<string, unknown> }): Promise<void> },
   ) {
     this.limits = { maxBytes: MAX_AI_AUDIO_BYTES, maxDurationSeconds: MAX_AI_AUDIO_DURATION_SECONDS, ...limits };
   }
@@ -50,22 +52,28 @@ export class AiAudioService {
     actor: RequestUser | AiActor;
     buffer: Buffer;
     mimeType: string;
-    durationSeconds?: number;
     responseMode: AiResponseMode;
   }): Promise<AiMessageResponse> {
-    this.validateAudio(input.buffer, input.mimeType, input.durationSeconds);
+    await this.validateAudio(input.buffer, input.mimeType);
     await this.requireConversation(input.actor, input.conversationId);
+    try {
+      await this.ai.reserveRateLimit(input.actor, 1);
+    } catch (error) {
+      await this.audit?.record({ tenantId: input.actor.tenantId, actorTenantUserId: input.actor.tenantUserId, actorUserId: input.actor.userId, action: 'rate_limit.failed', targetId: input.conversationId, metadata: { status: 'failed' } });
+      throw error;
+    }
 
     let transcription: { text: string };
     try {
       transcription = await this.speechToText.transcribe({ buffer: input.buffer, mimeType: input.mimeType });
     } catch {
+      await this.audit?.record({ tenantId: input.actor.tenantId, actorTenantUserId: input.actor.tenantUserId, actorUserId: input.actor.userId, action: 'stt.failed', targetId: input.conversationId, metadata: { provider: 'SPEECH_TO_TEXT', status: 'failed' } });
       throw new BadRequestException('Não foi possível transcrever o áudio');
     }
     if (!transcription.text?.trim()) throw new BadRequestException('O áudio não contém uma mensagem');
 
     const response = await this.ai.sendMessage(
-      { ...input.actor, conversationId: input.conversationId },
+      { ...input.actor, conversationId: input.conversationId, rateLimitReserved: true },
       { text: transcription.text.trim(), responseMode: input.responseMode },
     );
     if (input.responseMode !== AiResponseMode.AUDIO) return response;
@@ -78,6 +86,7 @@ export class AiAudioService {
     try {
       synthesized = await this.textToSpeech.synthesize({ text: response.assistantMessage.content ?? '', voice: 'alloy' });
     } catch {
+      await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'tts.failed', targetId: response.assistantMessage.id, metadata: { provider: 'TEXT_TO_SPEECH', status: 'failed' } });
       throw new BadRequestException('Não foi possível sintetizar a resposta');
     }
     const audioObjectKey = this.temporaryAudio.put(synthesized.audio, synthesized.mimeType);
@@ -110,14 +119,20 @@ export class AiAudioService {
     return conversation;
   }
 
-  private validateAudio(buffer: Buffer, mimeType: string, durationSeconds?: number) {
+  private async validateAudio(buffer: Buffer, mimeType: string) {
     if (!AI_AUDIO_MIME_TYPES.includes(mimeType as (typeof AI_AUDIO_MIME_TYPES)[number])) {
       throw new BadRequestException('Tipo de áudio não permitido');
     }
     if (!buffer?.length || buffer.length > this.limits.maxBytes) {
       throw new BadRequestException('O áudio excede o limite permitido');
     }
-    if (durationSeconds !== undefined && (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > this.limits.maxDurationSeconds)) {
+    let durationSeconds: number | undefined;
+    try {
+      durationSeconds = (await parseBuffer(buffer, mimeType)).format.duration;
+    } catch {
+      durationSeconds = undefined;
+    }
+    if (!durationSeconds || !Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > this.limits.maxDurationSeconds) {
       throw new BadRequestException('A duração do áudio excede o limite permitido');
     }
   }
