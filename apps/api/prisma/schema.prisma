@@ -90,6 +90,9 @@ model Tenant {
   dailyRoutineItems       DailyRoutineItem[]
   dailyRoutineLogs        DailyRoutineLog[]
   pushDevices             PushDevice[]
+  aiConversations         AiConversation[]
+  aiMessages              AiMessage[]
+  aiActionProposals       AiActionProposal[]
 
   @@map("tenants")
 }
@@ -140,6 +143,8 @@ model TenantUser {
   createdRoutineItems        DailyRoutineItem[]   @relation("CreatedRoutineUser")
   dailyRoutineLogs           DailyRoutineLog[]
   pushDevices                PushDevice[]
+  aiConversations            AiConversation[]
+  aiActionProposals          AiActionProposal[]
 
   @@unique([tenantId, userId])
   @@map("tenant_users")
@@ -979,4 +984,59 @@ model PushDevice {
 
   @@index([tenantUserId])
   @@map("push_devices")
+}
+
+model AiConversation {
+  id                String              @id @default(uuid())
+  tenantId          String              @map("tenant_id")
+  ownerTenantUserId String              @map("owner_tenant_user_id")
+  contextProjectId  String?             @map("context_project_id")
+  title             String?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner             TenantUser          @relation(fields: [ownerTenantUserId], references: [id], onDelete: Cascade)
+  messages          AiMessage[]
+  proposals         AiActionProposal[]
+
+  @@index([tenantId, ownerTenantUserId, updatedAt])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id               String         @id @default(uuid())
+  tenantId         String         @map("tenant_id")
+  conversationId   String         @map("conversation_id")
+  role             String
+  format           String         @default("TEXT")
+  content          String?
+  audioObjectKey   String?        @map("audio_object_key")
+  providerMetaJson String?        @map("provider_meta_json")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  tenant           Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation     AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, conversationId, createdAt])
+  @@map("ai_messages")
+}
+
+model AiActionProposal {
+  id                   String         @id @default(uuid())
+  tenantId             String         @map("tenant_id")
+  conversationId       String         @map("conversation_id")
+  createdByTenantUserId String        @map("created_by_tenant_user_id")
+  toolName             String         @map("tool_name")
+  argumentsJson        String         @map("arguments_json")
+  status               String         @default("PENDING") // PENDING | CONFIRMED | CANCELLED | EXECUTED | FAILED
+  summary              String
+  expiresAt            DateTime       @map("expires_at")
+  resultJson           String?        @map("result_json")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+  tenant               Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation         AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdBy            TenantUser     @relation(fields: [createdByTenantUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdByTenantUserId, status])
+  @@map("ai_action_proposals")
 }

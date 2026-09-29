@@ -10,6 +10,7 @@ import {
   IsUrl,
   Min,
   MinLength,
+  ValidateIf,
   validateSync,
 } from 'class-validator';
 
@@ -110,6 +111,32 @@ export class EnvSchema {
   @Min(8)
   @IsOptional()
   BCRYPT_ROUNDS?: number = 12;
+
+  // ─── AI provider ────────────────────────────────────────────────────────
+  @Transform(({ value }) => {
+    if (typeof value === 'boolean') return value;
+    if (value === undefined) return false;
+    return ['1', 'true', 'yes'].includes(String(value).toLowerCase());
+  })
+  @IsBoolean()
+  AI_ENABLED: boolean = false;
+
+  @ValidateIf((o) => o.AI_ENABLED === true)
+  @IsString()
+  @IsNotEmpty()
+  OPENAI_API_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  OPENAI_MODEL?: string = 'gpt-4o-mini';
+
+  @IsString()
+  @IsOptional()
+  OPENAI_STT_MODEL?: string = 'gpt-4o-mini-transcribe';
+
+  @IsString()
+  @IsOptional()
+  OPENAI_TTS_MODEL?: string = 'gpt-4o-mini-tts';
 
   // ─── Seed ───────────────────────────────────────────────────────────────
   @IsEmail()

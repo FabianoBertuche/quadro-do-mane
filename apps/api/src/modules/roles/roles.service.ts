@@ -32,7 +32,8 @@ export class RolesService {
             'projects.view',
             'calendar.view', 'calendar.create', 'calendar.edit',
             'contacts.view',
-            'email.view'
+            'email.view',
+            'ai.use'
         ];
 
         const permissions = await this.prisma.permission.findMany({

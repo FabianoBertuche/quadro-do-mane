@@ -160,6 +160,7 @@ async function main() {
     { code: 'audit.view', name: 'Ver Auditoria', module: 'audit' },
     { code: 'email.view', name: 'Usar E-mail', module: 'email' },
     { code: 'email.admin', name: 'Configurar Servidor de E-mail', module: 'email' },
+    { code: 'ai.use', name: 'Usar Assistente de IA', module: 'ai' },
     { code: 'daily_routine.view', name: 'Ver Rotina Diária', module: 'daily_routine' },
     { code: 'daily_routine.manage', name: 'Gerenciar Rotinas Diárias', module: 'daily_routine' },
     { code: 'daily_routine.complete', name: 'Executar Rotina Diária', module: 'daily_routine' },
@@ -210,7 +211,8 @@ async function main() {
     'calendar.view', 'calendar.create', 'calendar.edit',
     'contacts.view', 'contacts.create', 'contacts.edit',
     'reports.view', 'reports.export', 'notifications.view',
-    'daily_routine.view', 'daily_routine.manage', 'daily_routine.complete',
+     'daily_routine.view', 'daily_routine.manage', 'daily_routine.complete',
+    'ai.use',
   ];
 
   const colaboradorPermCodes = [
@@ -219,7 +221,8 @@ async function main() {
     'tasks.comment', 'tasks.checklist_manage', 'tasks.attachments_manage',
     'tasks.change_status',
     'calendar.view', 'contacts.view', 'notifications.view',
-    'daily_routine.view', 'daily_routine.complete',
+     'daily_routine.view', 'daily_routine.complete',
+    'ai.use',
   ];
 
   const convidadoPermCodes = [
