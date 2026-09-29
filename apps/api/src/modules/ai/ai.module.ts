@@ -18,6 +18,7 @@ import { MoveTaskTool } from './tools/move-task.tool';
 import { AiAudioController } from './ai-audio.controller';
 import { AiAudioService, SPEECH_TO_TEXT_PROVIDER, TEXT_TO_SPEECH_PROVIDER } from './ai-audio.service';
 import { TemporaryAudioService } from './media/temporary-audio.service';
+import { TemporaryAudioCleanupScheduler } from './media/temporary-audio-cleanup.scheduler';
 import { OpenAiSpeechToTextProvider } from './providers/openai-speech-to-text.provider';
 import { OpenAiTextToSpeechProvider } from './providers/openai-text-to-speech.provider';
 import OpenAI from 'openai';
@@ -35,6 +36,7 @@ import OpenAI from 'openai';
     MoveTaskTool,
     AiAudioService,
     TemporaryAudioService,
+    TemporaryAudioCleanupScheduler,
     {
       provide: SPEECH_TO_TEXT_PROVIDER,
       inject: [ConfigService],

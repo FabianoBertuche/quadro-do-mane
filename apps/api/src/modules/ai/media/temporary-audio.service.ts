@@ -31,6 +31,10 @@ export class TemporaryAudioService {
     return { audio: object.audio, mimeType: object.mimeType };
   }
 
+  has(key: string): boolean {
+    return this.objects.has(key);
+  }
+
   cleanup(now = Date.now()): void {
     for (const [key, object] of this.objects) {
       if (object.expiresAt <= now) this.objects.delete(key);
