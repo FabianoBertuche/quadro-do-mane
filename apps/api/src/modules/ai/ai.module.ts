@@ -9,15 +9,29 @@ import { AiController } from './ai.controller';
 import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
+import { UsersModule } from '../users/users.module';
+import { UsersService } from '../users/users.service';
+import { SearchTasksTool } from './tools/search-tasks.tool';
+import { CreateTaskTool } from './tools/create-task.tool';
+import { UpdateTaskTool } from './tools/update-task.tool';
+import { MoveTaskTool } from './tools/move-task.tool';
 
 @Module({
-  imports: [ProjectsModule, TasksModule],
+  imports: [ProjectsModule, TasksModule, UsersModule],
   controllers: [AiController],
   providers: [
     AiService,
     AiContextService,
     AiAuditService,
-    AiToolRegistryService,
+    SearchTasksTool,
+    CreateTaskTool,
+    UpdateTaskTool,
+    MoveTaskTool,
+    {
+      provide: AiToolRegistryService,
+      inject: [SearchTasksTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool],
+      useFactory: (...tools: any[]) => new AiToolRegistryService(tools),
+    },
     {
       provide: AI_PROVIDER,
       inject: [ConfigService],

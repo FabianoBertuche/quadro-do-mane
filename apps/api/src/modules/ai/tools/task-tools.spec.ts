@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { CreateTaskTool } from './create-task.tool';
+import { MoveTaskTool } from './move-task.tool';
+import { SearchTasksTool } from './search-tasks.tool';
+import { UpdateTaskTool } from './update-task.tool';
+import { AiToolRegistryService } from './ai-tool-registry.service';
+
+const input = (args: unknown, actorTenantUserId = 'actor-1') => ({
+  tenantId: 'tenant-1', actorTenantUserId, args,
+});
+
+const user = (permissions = ['tasks.view', 'tasks.create', 'tasks.edit', 'tasks.change_status']) => ({
+  id: 'actor-1', tenantId: 'tenant-1', role: { rolePermissions: permissions.map((code) => ({ permission: { code } })) },
+});
+
+const services = () => ({
+  tasks: {
+    findByFilters: async () => [{ id: 'task-1', title: 'Tarefa', tenantId: 'tenant-1', description: 'segredo interno' }],
+    findOne: async () => ({ id: 'task-1', tenantId: 'tenant-1' }),
+    create: async (...args: any[]) => ({ id: 'created-1', args }),
+    update: async (...args: any[]) => ({ id: 'task-1', args }),
+    changeStatus: (async (...args: any[]) => ({ id: 'task-1', args })) as any,
+    getStatuses: async () => [{ id: 'status-1', tenantId: 'tenant-1', name: 'Em andamento' }],
+    getPriorities: async () => [{ id: 'priority-1', tenantId: 'tenant-1', name: 'Alta' }],
+  },
+  projects: { findAll: async () => [{ id: 'project-1', tenantId: 'tenant-1', name: 'Projeto' }] },
+  users: { findAll: async () => [{ id: 'user-1', tenantId: 'tenant-1', user: { name: 'Maria' } }], findOne: async () => user() },
+});
+
+test('registry exposes exactly the four task tools', () => {
+  const s = services();
+  const registry = new AiToolRegistryService([
+    new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any),
+    new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any),
+    new UpdateTaskTool(s.tasks as any, s.users as any),
+    new MoveTaskTool(s.tasks as any, s.users as any),
+  ]);
+  assert.deepEqual(registry.list().map((tool) => tool.name), ['search_tasks', 'create_task', 'update_task', 'move_task']);
+});
+
+test('create_task resolves exact tenant names and passes actor to TasksService.create', async () => {
+  const s = services();
+  const calls: any[] = [];
+  s.tasks.create = (async (...args: any[]) => { calls.push(args); return { id: 'created-1' }; }) as any;
+  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+  await tool.authorize(input({ title: 'Nova', projectName: 'Projeto', assigneeName: 'Maria' }));
+  await tool.execute(input({ title: 'Nova', projectName: 'Projeto', assigneeName: 'Maria' }));
+  assert.equal(calls[0][0], 'tenant-1');
+  assert.equal(calls[0][2], 'actor-1');
+  assert.equal(calls[0][1].projectId, 'project-1');
+  assert.equal(calls[0][1].assigneeTenantUserId, 'user-1');
+});
+
+test('ambiguous project names return clarification instead of guessing', async () => {
+  const s = services();
+  s.projects.findAll = async () => [
+    { id: 'project-1', tenantId: 'tenant-1', name: 'Projeto' },
+    { id: 'project-2', tenantId: 'tenant-1', name: 'Projeto' },
+  ];
+  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+  const result = await tool.execute(input({ title: 'Nova', projectName: 'Projeto' }));
+  assert.deepEqual(result, { needsClarification: true, field: 'projectName', matches: ['project-1', 'project-2'] });
+});
+
+test('cross-tenant IDs are rejected during authorization', async () => {
+  const s = services();
+  s.tasks.findOne = async () => { throw new ForbiddenException('Tarefa não encontrada'); };
+  const tool = new UpdateTaskTool(s.tasks as any, s.users as any);
+  await assert.rejects(() => tool.authorize(input({ taskId: 'other-task', title: 'Novo' })), ForbiddenException);
+});
+
+test('update_task rejects an empty patch', () => {
+  const s = services();
+  const tool = new UpdateTaskTool(s.tasks as any, s.users as any);
+  assert.throws(() => tool.validate?.({ taskId: 'task-1' }), BadRequestException);
+});
+
+test('move_task delegates status changes with tenant and actor', async () => {
+  const s = services();
+  const calls: any[] = [];
+  s.tasks.changeStatus = async (...args: any[]) => { calls.push(args); return { ok: true }; };
+  const tool = new MoveTaskTool(s.tasks as any, s.users as any);
+  await tool.authorize(input({ taskId: 'task-1', statusName: 'Em andamento' }));
+  await tool.execute(input({ taskId: 'task-1', statusName: 'Em andamento' }));
+  assert.deepEqual(calls[0], ['tenant-1', 'task-1', 'status-1', 'actor-1']);
+});
+
+test('search_tasks returns bounded summaries without unrestricted user data', async () => {
+  const s = services();
+  const tool = new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any);
+  const result = await tool.execute(input({ search: 'Tarefa' }));
+  assert.deepEqual(result, [{ id: 'task-1', title: 'Tarefa', projectId: undefined, status: undefined, priority: undefined, assignee: undefined }]);
+});
