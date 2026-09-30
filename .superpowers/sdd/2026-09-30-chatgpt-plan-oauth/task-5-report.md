@@ -31,4 +31,19 @@ Implemented the ChatGPT OAuth client and connection card without changing backen
 ## Concerns
 
 - The web workspace has no existing browser component-test runner or React Testing Library setup. Tests follow the existing Node client-library convention; the card behavior is covered by the production build and typed client tests.
-- Clipboard support assumes the browser exposes `navigator.clipboard`; authorization can still be opened directly if copying is unavailable.
+- Clipboard failures are caught and reported while authorization can still be opened directly.
+
+## Review Follow-up
+
+- Revoked connections now use a fresh authorization attempt for `Reconectar`; active connections use the refresh-token endpoint.
+- OAuth completion errors now become structured `BadRequestException` responses with stable `AI_OAUTH_DENIED`, `AI_OAUTH_EXPIRED`, `AI_OAUTH_SCOPE_INSUFFICIENT`, or generic `AI_OAUTH_FAILED` codes. The existing global filter preserves these payloads, and the web client maps the stable codes.
+- OAuth mutation state uses request-generation guards and disables conflicting controls, preventing stale callbacks from replacing current state.
+- Added direct tests for refresh/disconnect helpers, revoked reconnect selection, stable API error codes, clipboard error mapping, and stale-request guards.
+
+## Follow-up Verification
+
+- Web OAuth/chat tests: 15 passed.
+- API OAuth service/controller/error tests: 19 passed.
+- `npx tsc --noEmit`: passed.
+- `npm run build` in `apps/api`: passed.
+- `npm run build` in `apps/web`: passed with existing webpack cache snapshot warnings.
