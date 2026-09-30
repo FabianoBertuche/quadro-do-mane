@@ -118,3 +118,17 @@ O web poderá consumir os mesmos endpoints posteriormente, sem duplicar orquestr
 - Testes mobile para estados do gesto de gravação, seletor de saída e confirmação de comandos.
 - Teste de integração com provider usando adapter fake; chamadas reais ficam fora da suíte padrão.
 - Typecheck, build API e testes mobile/web devem passar antes da entrega.
+
+## Entrega Web em Etapas
+
+### Etapa 1: texto e comandos
+
+Antes de migrar a validação funcional para o Android, o mesmo contrato de API será disponibilizado no web autenticado. A rota `/ai-chat` terá histórico de conversas, entrada de texto, propostas de ação com confirmação/cancelamento, mensagens de esclarecimento e contexto opcional de projeto. O sidebar terá uma entrada global para o assistente e o detalhe de projeto poderá abrir o chat com `contextProjectId`.
+
+O cliente web usará o Axios autenticado existente e não terá dependência do SDK ou credenciais do provider. Conversas globais não poderão selecionar automaticamente uma conversa vinculada a projeto; o contexto de projeto só será aplicado quando explicitamente informado pela navegação.
+
+Nesta etapa também serão corrigidos os bloqueios residuais identificados na revisão: o estado visual de `needsClarification`, a seleção de conversa global e a validação estrita de `inputFormat` no API.
+
+### Etapa 2: voz no web
+
+Após validar perguntas e comandos por texto no web, uma etapa separada adicionará `MediaRecorder`, envio multipart e reprodução de respostas de voz no navegador. Ela reutilizará os endpoints de áudio existentes, sem alterar a abstração de provider ou a execução de ferramentas.
