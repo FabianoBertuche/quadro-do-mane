@@ -1,0 +1,151 @@
+import crypto from 'node:crypto';
+
+export const REQUIRED_SCOPE = 'chatgpt.tokens.use.direct';
+export const DEFAULT_ISSUER = 'https://auth.openai.com';
+export const DEFAULT_AUTHORIZATION_ENDPOINT = `${DEFAULT_ISSUER}/api/accounts/authorize`;
+export const DEFAULT_TOKEN_ENDPOINT = `${DEFAULT_ISSUER}/api/accounts/oauth/token`;
+export const DEFAULT_JWKS_URI = `${DEFAULT_ISSUER}/.well-known/jwks.json`;
+export const DEFAULT_SCOPES = [
+  'openid', 'profile', 'email', 'offline_access', 'resource.invoke', REQUIRED_SCOPE,
+];
+
+export interface AuthorizationUrlOptions {
+  authorizationEndpoint: string;
+  clientId: string;
+  redirectUri: string;
+  state: string;
+  nonce: string;
+  codeChallenge: string;
+  scopes: string[];
+  agentNameHint?: string;
+  idTokenHint?: string;
+  loginHint?: string;
+}
+
+export interface CallbackResult {
+  code?: string;
+  state?: string;
+  error?: Error;
+  errorDescription?: string;
+}
+
+export interface IdTokenClaims {
+  iss: string;
+  sub: string;
+  aud: string | string[];
+  nonce: string;
+  exp?: number;
+  email?: string;
+  name?: string;
+  [key: string]: unknown;
+}
+
+export function randomSecret(bytes = 32): string {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+
+export function sha256(value: string): string {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+export function codeChallenge(verifier: string): string {
+  return crypto.createHash('sha256').update(verifier, 'ascii').digest('base64url');
+}
+
+export function buildAuthorizationUrl(options: AuthorizationUrlOptions): string {
+  const url = new URL(options.authorizationEndpoint);
+  url.searchParams.set('client_id', options.clientId);
+  url.searchParams.set('redirect_uri', options.redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', options.scopes.join(' '));
+  url.searchParams.set('state', options.state);
+  url.searchParams.set('nonce', options.nonce);
+  url.searchParams.set('code_challenge', options.codeChallenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  if (options.agentNameHint) url.searchParams.set('agent_name_hint', options.agentNameHint);
+  if (options.idTokenHint) url.searchParams.set('id_token_hint', options.idTokenHint);
+  if (options.loginHint) url.searchParams.set('login_hint', options.loginHint);
+  return url.toString();
+}
+
+export function parseCallbackUrl(
+  callbackUrl: string,
+  expectedState: string,
+  redirectUri: string,
+  expectedClientId?: string,
+): CallbackResult {
+  const url = new URL(callbackUrl);
+  if (url.origin + url.pathname !== new URL(redirectUri).origin + new URL(redirectUri).pathname) {
+    throw new Error('OAuth redirect URI mismatch');
+  }
+  const state = url.searchParams.get('state') ?? undefined;
+  if (!state || !safeEqual(state, expectedState)) return { state, error: new Error('OAuth state mismatch') };
+  const callbackClientId = url.searchParams.get('client_id');
+  if (expectedClientId && callbackClientId && callbackClientId !== expectedClientId) {
+    throw new Error('OAuth client id mismatch');
+  }
+  const error = url.searchParams.get('error');
+  if (error) return { state, error: new Error(`OAuth authorization failed: ${error}`), errorDescription: url.searchParams.get('error_description') ?? undefined };
+  const code = url.searchParams.get('code');
+  if (!code) throw new Error('OAuth callback did not contain an authorization code');
+  return { code, state };
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+export async function exchangeToken(
+  endpoint: string,
+  form: Record<string, string>,
+  fetcher: typeof fetch = fetch,
+): Promise<Record<string, any>> {
+  const response = await fetcher(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    body: new URLSearchParams(form),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const errorCode = typeof body?.error === 'string' ? `: ${body.error}` : '';
+    throw new Error(`OAuth token exchange failed (${response.status})${errorCode}`);
+  }
+  return body;
+}
+
+export async function validateIdToken(
+  token: string,
+  options: {
+    issuer: string;
+    audience: string | string[];
+    nonce: string;
+    jwksUri?: string;
+    fetchJwks?: (uri: string) => Promise<{ keys: JsonWebKey[] }>;
+    now?: number;
+  },
+): Promise<IdTokenClaims> {
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new Error('Invalid OAuth ID token');
+  const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')) as { alg?: string; kid?: string };
+  const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as IdTokenClaims;
+  if (claims.iss !== options.issuer) throw new Error('OAuth ID token issuer mismatch');
+  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  const expectedAudiences = Array.isArray(options.audience) ? options.audience : [options.audience];
+  if (!expectedAudiences.some((audience) => audiences.includes(audience))) throw new Error('OAuth ID token audience mismatch');
+  if (claims.nonce !== options.nonce) throw new Error('OAuth ID token nonce mismatch');
+  if (claims.exp !== undefined && claims.exp <= (options.now ?? Math.floor(Date.now() / 1000))) throw new Error('OAuth ID token expired');
+  if (!header.kid || header.alg !== 'RS256') throw new Error('Unsupported OAuth ID token signing key');
+  const fetchJwks = options.fetchJwks ?? (async (uri: string) => {
+    const response = await fetch(uri);
+    if (!response.ok) throw new Error('Unable to load OAuth signing keys');
+    return response.json() as Promise<{ keys: JsonWebKey[] }>;
+  });
+  const jwks = await fetchJwks(options.jwksUri ?? DEFAULT_JWKS_URI);
+  const jwk = jwks.keys.find((key: any) => key.kid === header.kid);
+  if (!jwk) throw new Error('OAuth ID token signing key not found');
+  const valid = crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), crypto.createPublicKey({ key: jwk as any, format: 'jwk' }), Buffer.from(parts[2], 'base64url'));
+  if (!valid) throw new Error('OAuth ID token signature invalid');
+  return claims;
+}

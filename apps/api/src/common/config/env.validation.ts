@@ -141,6 +141,35 @@ export class EnvSchema {
   @IsOptional()
   OPENAI_TTS_MODEL?: string = 'gpt-4o-mini-tts';
 
+  // ─── ChatGPT OAuth ──────────────────────────────────────────────────────
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  CHATGPT_OAUTH_ISSUER?: string = 'https://auth.openai.com';
+
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  CHATGPT_OAUTH_AUTHORIZATION_ENDPOINT?: string = 'https://auth.openai.com/api/accounts/authorize';
+
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  CHATGPT_OAUTH_TOKEN_ENDPOINT?: string = 'https://auth.openai.com/api/accounts/oauth/token';
+
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  CHATGPT_OAUTH_JWKS_URI?: string = 'https://auth.openai.com/.well-known/jwks.json';
+
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  CHATGPT_OAUTH_REDIRECT_URI?: string = 'http://127.0.0.1/callback';
+
+  @IsString()
+  @IsOptional()
+  CHATGPT_OAUTH_AGENT_NAME?: string = 'Monte Moria';
+
+  @IsString()
+  @IsOptional()
+  CHATGPT_OAUTH_EXT_AGENT_HOST_ID?: string = 'monte-moria';
+
   // ─── Seed ───────────────────────────────────────────────────────────────
   @IsEmail()
   @IsNotEmpty()
