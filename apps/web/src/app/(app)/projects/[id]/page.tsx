@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Users, Calendar, Kanban, Plus, X, Edit2 } from 'lucide-react';
+import { ArrowLeft, Users, Calendar, Kanban, Plus, X, Edit2, Bot } from 'lucide-react';
 import { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 
@@ -87,6 +87,9 @@ export default function ProjectDetailPage() {
             </Link>
             <Link href={`/tasks/kanban?projectId=${project.id}`} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-muted text-sm font-medium hover:bg-muted/80 transition-colors">
               <Kanban className="w-4 h-4" /> Kanban
+            </Link>
+            <Link href={`/ai-chat?contextProjectId=${encodeURIComponent(project.id)}`} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-muted text-sm font-medium hover:bg-muted/80 transition-colors">
+              <Bot className="w-4 h-4" /> Assistente IA
             </Link>
           </div>
         </div>

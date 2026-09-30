@@ -19,6 +19,7 @@ import {
   ListChecks,
   ClipboardCheck,
   Activity,
+  Bot,
   X,
 } from 'lucide-react';
 import { useState, useEffect, Fragment } from 'react';
@@ -26,6 +27,7 @@ import { useState, useEffect, Fragment } from 'react';
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Projetos', href: '/projects', icon: FolderKanban },
+  { name: 'Assistente IA', href: '/ai-chat', icon: Bot },
   { name: 'Tarefas', href: '/tasks', icon: CheckSquare },
   { name: 'Equipes', href: '/teams', icon: Users },
   { name: 'Colaboradores', href: '/collaborators', icon: UserCircle },
