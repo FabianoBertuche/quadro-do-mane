@@ -88,6 +88,10 @@ test('migration enforces singleton runtime and preserves disconnected legacy own
   assert.match(migration, /"oauth_connection_id" TEXT/);
   assert.match(migration, /"selected_model_slug" TEXT/);
   assert.match(migration, /"selected_model_display_name" TEXT/);
+  assert.match(
+    migration,
+    /INSERT INTO "ai_server_runtime" \("id", "updated_at"\)\s+VALUES \('global', CURRENT_TIMESTAMP\);/,
+  );
   assert.match(migration, /CREATE UNIQUE INDEX "ai_server_runtime_oauth_connection_id_key"/);
   assert.match(
     migration,
@@ -95,5 +99,9 @@ test('migration enforces singleton runtime and preserves disconnected legacy own
   );
   assert.match(migration, /ALTER COLUMN "tenant_id" DROP NOT NULL/);
   assert.match(migration, /ALTER COLUMN "tenant_user_id" DROP NOT NULL/);
+  assert.match(
+    migration,
+    /CONSTRAINT "ai_oauth_connections_ownership_pair_check"\s+CHECK \(\("tenant_id" IS NULL\) = \("tenant_user_id" IS NULL\)\)/,
+  );
   assert.doesNotMatch(migration, /INSERT INTO "ai_server_runtime"[\s\S]*SELECT/);
 });

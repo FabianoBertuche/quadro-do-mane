@@ -1,6 +1,8 @@
 ALTER TABLE "ai_oauth_connections"
     ALTER COLUMN "tenant_id" DROP NOT NULL,
-    ALTER COLUMN "tenant_user_id" DROP NOT NULL;
+    ALTER COLUMN "tenant_user_id" DROP NOT NULL,
+    ADD CONSTRAINT "ai_oauth_connections_ownership_pair_check"
+        CHECK (("tenant_id" IS NULL) = ("tenant_user_id" IS NULL));
 
 CREATE TABLE "ai_server_runtime" (
     "id" TEXT NOT NULL DEFAULT 'global',
@@ -13,6 +15,9 @@ CREATE TABLE "ai_server_runtime" (
     CONSTRAINT "ai_server_runtime_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "ai_server_runtime_singleton_key" CHECK ("id" = 'global')
 );
+
+INSERT INTO "ai_server_runtime" ("id", "updated_at")
+    VALUES ('global', CURRENT_TIMESTAMP);
 
 CREATE UNIQUE INDEX "ai_server_runtime_oauth_connection_id_key"
     ON "ai_server_runtime"("oauth_connection_id");

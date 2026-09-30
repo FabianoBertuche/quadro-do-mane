@@ -16,6 +16,10 @@ const hardeningMigration = readFileSync(
   join(apiRoot, 'prisma/migrations/20260930110000_harden_chatgpt_oauth/migration.sql'),
   'utf8',
 );
+const runtimeMigration = readFileSync(
+  join(apiRoot, 'prisma/migrations/20260930120000_add_ai_server_runtime/migration.sql'),
+  'utf8',
+);
 
 function modelBlock(modelName: string): string {
   const match = schema.match(
@@ -33,7 +37,7 @@ function modelLine(model: string, field: string): string {
   return line.trim();
 }
 
-test('defines encrypted tenant-user ChatGPT OAuth connection persistence', () => {
+test('defines encrypted global or tenant-user ChatGPT OAuth connection persistence', () => {
   const connection = modelBlock('AiOAuthConnection');
   const tenantUser = modelBlock('TenantUser');
 
@@ -67,15 +71,24 @@ test('defines encrypted tenant-user ChatGPT OAuth connection persistence', () =>
   }
   assert.match(
     connection,
-    /tenant\s+Tenant\s+@relation\(fields: \[tenantId\], references: \[id\], onDelete: Cascade\)/,
+    /tenant\s+Tenant\?\s+@relation\(fields: \[tenantId\], references: \[id\], onDelete: Cascade\)/,
   );
   assert.match(
     connection,
-    /tenantUser\s+TenantUser\s+@relation\(fields: \[tenantId, tenantUserId\], references: \[tenantId, id\], onDelete: Cascade\)/,
+    /tenantUser\s+TenantUser\?\s+@relation\(fields: \[tenantId, tenantUserId\], references: \[tenantId, id\], onDelete: Cascade\)/,
   );
   assert.match(connection, /@@unique\(\[tenantId, tenantUserId, issuer, subject, clientId\]\)/);
   assert.match(connection, /@@index\(\[tenantId, tenantUserId/);
   assert.match(tenantUser, /@@unique\(\[tenantId, id\]\)/);
+});
+
+test('migration allows only fully global or fully tenant-owned OAuth connections', () => {
+  assert.match(runtimeMigration, /ALTER COLUMN "tenant_id" DROP NOT NULL/);
+  assert.match(runtimeMigration, /ALTER COLUMN "tenant_user_id" DROP NOT NULL/);
+  assert.match(
+    runtimeMigration,
+    /CONSTRAINT "ai_oauth_connections_ownership_pair_check"\s+CHECK \(\("tenant_id" IS NULL\) = \("tenant_user_id" IS NULL\)\)/,
+  );
 });
 
 test('defines expiring one-time OAuth attempts without token storage', () => {
