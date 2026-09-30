@@ -50,6 +50,16 @@ export interface AiHistoryResponse {
   pendingProposals: AiActionProposal[];
 }
 
+export function selectConversation(conversations: AiConversation[], contextProjectId?: string): AiConversation | undefined {
+  return contextProjectId
+    ? conversations.find((conversation) => conversation.contextProjectId === contextProjectId)
+    : conversations.find((conversation) => !conversation.contextProjectId);
+}
+
+export function resolveProposalStatus(resultStatus: string | undefined, fallbackStatus: string): string {
+  return resultStatus ?? fallbackStatus;
+}
+
 export function createConversation(contextProjectId?: string): Promise<AiConversation> {
   return api.post('/ai/conversations', contextProjectId ? { contextProjectId } : {}).then((response) => response.data);
 }
@@ -60,9 +70,7 @@ export function listConversations(): Promise<AiConversation[]> {
 
 export async function openConversation(contextProjectId?: string): Promise<AiConversation> {
   const conversations = await listConversations();
-  const existing = contextProjectId
-    ? conversations.find((conversation) => conversation.contextProjectId === contextProjectId)
-    : conversations.find((conversation) => !conversation.contextProjectId) ?? conversations[0];
+  const existing = selectConversation(conversations, contextProjectId);
   return existing ?? createConversation(contextProjectId);
 }
 

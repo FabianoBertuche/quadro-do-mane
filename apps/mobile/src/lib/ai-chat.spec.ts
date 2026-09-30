@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createProposalState,
   createRecordingMachine,
@@ -9,6 +9,8 @@ import {
   setResponseMode,
   type AiResponseMode,
 } from './ai-chat-state';
+vi.mock('./api', () => ({ api: {} }));
+import { resolveProposalStatus, selectConversation, type AiConversation } from './ai-chat';
 
 describe('AI chat recording machine', () => {
   it('starts on press and submits on release', () => {
@@ -87,6 +89,26 @@ describe('AI chat recording machine', () => {
 });
 
 describe('AI chat response mode and proposals', () => {
+  it('keeps clarification proposals pending after confirmation', () => {
+    expect(resolveProposalStatus('PENDING', 'EXECUTED')).toBe('PENDING');
+  });
+
+  it('does not reuse a project conversation for global chat', () => {
+    const projectConversation = { id: 'project-chat', contextProjectId: 'project-1' } satisfies AiConversation;
+
+    expect(selectConversation([projectConversation])).toBeUndefined();
+  });
+
+  it('selects only the requested project conversation for project chat', () => {
+    const conversations = [
+      { id: 'global' },
+      { id: 'project-chat', contextProjectId: 'project-1' },
+    ] satisfies AiConversation[];
+
+    expect(selectConversation(conversations, 'project-1')?.id).toBe('project-chat');
+    expect(selectConversation(conversations, 'project-2')).toBeUndefined();
+  });
+
   it('persists response mode independently per conversation', () => {
     const modes = new Map<string, AiResponseMode>();
 

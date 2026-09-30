@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import 'reflect-metadata';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { PERMISSIONS_KEY } from '../../common/decorators/require-permissions.decorator';
 import { AiController } from './ai.controller';
-import { AiResponseMode } from './dto/send-ai-message.dto';
+import { AiResponseMode, SendAiMessageDto } from './dto/send-ai-message.dto';
 
 test('AI controller exposes required guards and ai.use metadata', () => {
   const controller = AiController as any;
@@ -26,4 +28,14 @@ test('text messages in AUDIO mode are synthesized before returning the same enve
 
   assert.equal(attached, 1);
   assert.equal((result as any).audioObjectKey, 'audio-key');
+});
+
+test('send message rejects an arbitrary input format', () => {
+  const errors = validateSync(plainToInstance(SendAiMessageDto, {
+    text: 'olá',
+    responseMode: AiResponseMode.TEXT,
+    inputFormat: 'VIDEO',
+  }));
+
+  assert.ok(errors.some((error) => error.property === 'inputFormat'));
 });

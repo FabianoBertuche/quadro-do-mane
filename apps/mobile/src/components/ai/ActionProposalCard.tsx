@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import Feather from '@expo/vector-icons/Feather';
 import { colors } from '@/theme/colors';
 import { apiErrorMessage } from '@/lib/api';
-import { cancelAction, confirmAction, type AiActionProposal, type AiActionResult } from '@/lib/ai-chat';
+import { cancelAction, confirmAction, resolveProposalStatus, type AiActionProposal, type AiActionResult } from '@/lib/ai-chat';
 
 export function ActionProposalCard({ proposal, onChanged }: { proposal: AiActionProposal; onChanged?: (result?: AiActionResult) => void }) {
   const [status, setStatus] = useState(proposal.status);
@@ -15,7 +15,7 @@ export function ActionProposalCard({ proposal, onChanged }: { proposal: AiAction
     setError(null);
     try {
       const result = await action() as AiActionResult | undefined;
-      setStatus(nextStatus);
+      setStatus(resolveProposalStatus(result?.status, nextStatus));
       onChanged?.(result ?? { ...proposal, status: nextStatus });
     } catch (e) {
       setError(apiErrorMessage(e, 'Não foi possível atualizar a proposta'));
