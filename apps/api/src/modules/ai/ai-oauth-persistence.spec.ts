@@ -12,6 +12,10 @@ const migration = readFileSync(
   ),
   'utf8',
 );
+const hardeningMigration = readFileSync(
+  join(apiRoot, 'prisma/migrations/20260930110000_harden_chatgpt_oauth/migration.sql'),
+  'utf8',
+);
 
 function modelBlock(modelName: string): string {
   const match = schema.match(
@@ -69,7 +73,7 @@ test('defines encrypted tenant-user ChatGPT OAuth connection persistence', () =>
     connection,
     /tenantUser\s+TenantUser\s+@relation\(fields: \[tenantId, tenantUserId\], references: \[tenantId, id\], onDelete: Cascade\)/,
   );
-  assert.match(connection, /@@unique\(\[tenantUserId, issuer, subject, clientId\]\)/);
+  assert.match(connection, /@@unique\(\[tenantId, tenantUserId, issuer, subject, clientId\]\)/);
   assert.match(connection, /@@index\(\[tenantId, tenantUserId/);
   assert.match(tenantUser, /@@unique\(\[tenantId, id\]\)/);
 });
@@ -90,6 +94,12 @@ test('defines expiring one-time OAuth attempts without token storage', () => {
     'consumedAt',
   ]) {
     assert.ok(modelLine(attempt, field));
+  }
+  for (const field of [
+    'pkceVerifierCiphertext', 'pkceVerifierIv', 'pkceVerifierAuthTag',
+    'nonceCiphertext', 'nonceIv', 'nonceAuthTag',
+  ]) {
+    assert.match(modelLine(attempt, field), /String/);
   }
   assert.match(
     attempt,
@@ -131,4 +141,8 @@ test('migration creates OAuth tables, encrypted columns, identity constraint, an
     /FOREIGN KEY \("tenant_id", "tenant_user_id"\) REFERENCES "tenant_users"\("tenant_id", "id"\) ON DELETE CASCADE/,
   );
   assert.match(migration, /REFERENCES "tenants"\("id"\) ON DELETE CASCADE/);
+  assert.match(hardeningMigration, /pkce_verifier_ciphertext/);
+  assert.match(hardeningMigration, /nonce_ciphertext/);
+  assert.match(hardeningMigration, /refresh_lease_token/);
+  assert.match(hardeningMigration, /tenant_id_tenant_user_id_issuer_subject_client_id/);
 });

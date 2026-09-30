@@ -5,6 +5,7 @@ export const DEFAULT_ISSUER = 'https://auth.openai.com';
 export const DEFAULT_AUTHORIZATION_ENDPOINT = `${DEFAULT_ISSUER}/api/accounts/authorize`;
 export const DEFAULT_TOKEN_ENDPOINT = `${DEFAULT_ISSUER}/api/accounts/oauth/token`;
 export const DEFAULT_JWKS_URI = `${DEFAULT_ISSUER}/.well-known/jwks.json`;
+export const DEFAULT_RESOURCE = 'https://api.openai.com/v1';
 export const DEFAULT_SCOPES = [
   'openid', 'profile', 'email', 'offline_access', 'resource.invoke', REQUIRED_SCOPE,
 ];
@@ -20,6 +21,7 @@ export interface AuthorizationUrlOptions {
   agentNameHint?: string;
   idTokenHint?: string;
   loginHint?: string;
+  resource?: string;
 }
 
 export interface CallbackResult {
@@ -34,10 +36,24 @@ export interface IdTokenClaims {
   sub: string;
   aud: string | string[];
   nonce: string;
+  azp?: string;
   exp?: number;
   email?: string;
   name?: string;
   [key: string]: unknown;
+}
+
+export function assertRequiredScope(scope: string | undefined): string[] {
+  const scopes = String(scope ?? '').split(/\s+/).filter(Boolean);
+  if (!scopes.includes(REQUIRED_SCOPE)) throw new Error(`OAuth required scope missing: ${REQUIRED_SCOPE}`);
+  return scopes;
+}
+
+export function resolveClientId(attemptClientId: string, tokenResponse: Record<string, any>): string {
+  const issuedClientId = tokenResponse.client_id ?? tokenResponse.issued_client_id;
+  if (attemptClientId === 'dynamic_agent_client' && !issuedClientId) throw new Error('OAuth dynamic client id missing');
+  if (attemptClientId !== 'dynamic_agent_client' && issuedClientId && issuedClientId !== attemptClientId) throw new Error('OAuth client id mismatch');
+  return issuedClientId ?? attemptClientId;
 }
 
 export function randomSecret(bytes = 32): string {
@@ -62,6 +78,7 @@ export function buildAuthorizationUrl(options: AuthorizationUrlOptions): string 
   url.searchParams.set('nonce', options.nonce);
   url.searchParams.set('code_challenge', options.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('resource', options.resource ?? DEFAULT_RESOURCE);
   if (options.agentNameHint) url.searchParams.set('agent_name_hint', options.agentNameHint);
   if (options.idTokenHint) url.searchParams.set('id_token_hint', options.idTokenHint);
   if (options.loginHint) url.searchParams.set('login_hint', options.loginHint);
@@ -135,7 +152,8 @@ export async function validateIdToken(
   const expectedAudiences = Array.isArray(options.audience) ? options.audience : [options.audience];
   if (!expectedAudiences.some((audience) => audiences.includes(audience))) throw new Error('OAuth ID token audience mismatch');
   if (claims.nonce !== options.nonce) throw new Error('OAuth ID token nonce mismatch');
-  if (claims.exp !== undefined && claims.exp <= (options.now ?? Math.floor(Date.now() / 1000))) throw new Error('OAuth ID token expired');
+  if (typeof claims.exp !== 'number') throw new Error('OAuth ID token exp missing');
+  if (claims.exp <= (options.now ?? Math.floor(Date.now() / 1000))) throw new Error('OAuth ID token expired');
   if (!header.kid || header.alg !== 'RS256') throw new Error('Unsupported OAuth ID token signing key');
   const fetchJwks = options.fetchJwks ?? (async (uri: string) => {
     const response = await fetch(uri);
@@ -148,4 +166,33 @@ export async function validateIdToken(
   const valid = crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), crypto.createPublicKey({ key: jwk as any, format: 'jwk' }), Buffer.from(parts[2], 'base64url'));
   if (!valid) throw new Error('OAuth ID token signature invalid');
   return claims;
+}
+
+export interface OpenIdConfiguration {
+  token_endpoint?: string;
+  revocation_endpoint?: string;
+  jwks_uri?: string;
+}
+
+export async function discoverOpenIdConfiguration(
+  issuer: string,
+  fetcher: typeof fetch = fetch,
+): Promise<OpenIdConfiguration> {
+  const response = await fetcher(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`, { headers: { accept: 'application/json' } });
+  if (!response.ok) throw new Error('OAuth OpenID configuration unavailable');
+  return response.json() as Promise<OpenIdConfiguration>;
+}
+
+export async function revokeToken(
+  endpoint: string,
+  token: string,
+  clientId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetcher(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    body: new URLSearchParams({ token, client_id: clientId }),
+  });
+  if (!response.ok) throw new Error(`OAuth token revocation failed (${response.status})`);
 }

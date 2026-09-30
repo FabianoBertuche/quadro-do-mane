@@ -1074,11 +1074,13 @@ model AiOAuthConnection {
   lastUsedAt             DateTime? @map("last_used_at")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
+  refreshLeaseToken      String?   @map("refresh_lease_token")
+  refreshLeaseExpiresAt  DateTime? @map("refresh_lease_expires_at")
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tenantUser TenantUser @relation(fields: [tenantId, tenantUserId], references: [tenantId, id], onDelete: Cascade)
 
-  @@unique([tenantUserId, issuer, subject, clientId])
+  @@unique([tenantId, tenantUserId, issuer, subject, clientId])
   @@index([tenantId, tenantUserId, expiresAt])
   @@map("ai_oauth_connections")
 }
@@ -1090,6 +1092,12 @@ model AiOAuthAttempt {
   stateHash        String    @unique @map("state_hash")
   nonceHash        String    @map("nonce_hash")
   pkceVerifierHash String    @map("pkce_verifier_hash")
+  pkceVerifierCiphertext String @map("pkce_verifier_ciphertext")
+  pkceVerifierIv    String    @map("pkce_verifier_iv")
+  pkceVerifierAuthTag String  @map("pkce_verifier_auth_tag")
+  nonceCiphertext   String    @map("nonce_ciphertext")
+  nonceIv           String    @map("nonce_iv")
+  nonceAuthTag      String    @map("nonce_auth_tag")
   redirectUri      String    @map("redirect_uri")
   clientId         String    @map("client_id")
   extAgentHostId   String    @map("ext_agent_host_id")

@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Max,
   Min,
   MinLength,
   ValidateIf,
@@ -158,9 +159,12 @@ export class EnvSchema {
   @IsOptional()
   CHATGPT_OAUTH_JWKS_URI?: string = 'https://auth.openai.com/.well-known/jwks.json';
 
-  @IsUrl({ require_tld: false })
+  @IsInt()
+  @Min(1)
+  @Max(65535)
   @IsOptional()
-  CHATGPT_OAUTH_REDIRECT_URI?: string = 'http://127.0.0.1/callback';
+  @Transform(({ value }) => (value === undefined ? 1455 : Number(value)))
+  CHATGPT_OAUTH_CALLBACK_PORT!: number;
 
   @IsString()
   @IsOptional()
@@ -168,7 +172,7 @@ export class EnvSchema {
 
   @IsString()
   @IsOptional()
-  CHATGPT_OAUTH_EXT_AGENT_HOST_ID?: string = 'monte-moria';
+  CHATGPT_OAUTH_HOST_ID?: string = 'monte-moria';
 
   // ─── Seed ───────────────────────────────────────────────────────────────
   @IsEmail()

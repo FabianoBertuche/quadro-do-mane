@@ -29,4 +29,34 @@ passed
 
 - No controller, provider, UI, or unrelated application files were changed.
 - PKCE verifier and nonce plaintext are held in process memory while an authorization attempt is pending; only hashes are persisted as required by the Task 1 schema. A process restart invalidates pending attempts safely.
-- Provider revocation is represented by the actor-scoped local revoked state; controller/provider integration remains assigned to later tasks.
+- Controller/provider integration remains assigned to later tasks; this service owns remote revocation and actor-scoped local revoked state.
+
+## Review Fixes
+
+- Authorization now includes `resource=https://api.openai.com/v1` and uses `http://127.0.0.1:<CHATGPT_OAUTH_CALLBACK_PORT>/auth/callback`.
+- PKCE verifier and nonce are encrypted in `AiOAuthAttempt`; their hashes remain authoritative for validation. Completion no longer depends on process-local maps and was tested with a fresh service instance.
+- Added persisted refresh lease columns and conditional database claims, making refresh serialization work across API replicas.
+- Added OpenID configuration discovery for token/JWKS/revocation endpoints. Remote refresh-token revocation is attempted safely, and local revocation is always applied even when discovery/provider revocation fails.
+- ID-token `exp` is now mandatory and checked; dynamic client IDs are required/captured from token exchange and checked against ID-token audience/authorized party.
+- Connection identity uniqueness now includes `tenantId`; migration and persistence tests cover the corrected key.
+- Environment validation now uses `CHATGPT_OAUTH_HOST_ID` and `CHATGPT_OAUTH_CALLBACK_PORT`.
+- Expanded focused tests for scope/client binding, expiry, persisted encrypted PKCE/nonce, restart-safe completion, refresh rotation/serialization, remote revocation, ownership, and safe output/error behavior.
+
+## Fix Verification
+
+```text
+node -r ts-node/register --test src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai-oauth-persistence.spec.ts
+14 tests passed
+
+DATABASE_URL=... npx prisma validate
+passed
+
+DATABASE_URL=... npx prisma generate
+passed
+
+npm run build
+passed
+
+git diff --check
+passed
+```

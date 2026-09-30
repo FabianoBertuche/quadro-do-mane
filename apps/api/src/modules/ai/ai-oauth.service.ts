@@ -4,8 +4,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
 import {
   buildAuthorizationUrl, codeChallenge, DEFAULT_AUTHORIZATION_ENDPOINT, DEFAULT_ISSUER,
-  DEFAULT_JWKS_URI, DEFAULT_SCOPES, DEFAULT_TOKEN_ENDPOINT, exchangeToken, parseCallbackUrl,
-  randomSecret, REQUIRED_SCOPE, sha256, validateIdToken,
+  DEFAULT_JWKS_URI, DEFAULT_SCOPES, DEFAULT_TOKEN_ENDPOINT, discoverOpenIdConfiguration,
+  assertRequiredScope, exchangeToken, OpenIdConfiguration, parseCallbackUrl, randomSecret, revokeToken, resolveClientId, sha256, validateIdToken,
 } from './ai-oauth.protocol';
 
 export interface AiOAuthActor { tenantId: string; tenantUserId: string }
@@ -18,10 +18,6 @@ const ATTEMPT_TTL_MS = 10 * 60 * 1000;
 
 @Injectable()
 export class AiOAuthService {
-  private readonly verifiers = new Map<string, string>();
-  private readonly nonces = new Map<string, string>();
-  private readonly refreshes = new Map<string, Promise<void>>();
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
@@ -30,20 +26,23 @@ export class AiOAuthService {
 
   async startAuthorization(actor: AiOAuthActor) {
     const issuer = this.config.get<string>('CHATGPT_OAUTH_ISSUER') ?? DEFAULT_ISSUER;
-    const redirectUri = this.config.get<string>('CHATGPT_OAUTH_REDIRECT_URI') ?? 'http://127.0.0.1/callback';
+    const callbackPort = this.config.get<number>('CHATGPT_OAUTH_CALLBACK_PORT') ?? 1455;
+    const redirectUri = `http://127.0.0.1:${callbackPort}/auth/callback`;
     const existing = await this.prisma.aiOAuthConnection.findFirst({ where: { tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, issuer, isRevoked: false }, orderBy: { updatedAt: 'desc' } });
     const clientId = existing?.clientId ?? 'dynamic_agent_client';
     const state = randomSecret();
     const nonce = randomSecret();
     const verifier = randomSecret(48);
     const expiresAt = new Date(Date.now() + ATTEMPT_TTL_MS);
-    const hostId = this.config.get<string>('CHATGPT_OAUTH_EXT_AGENT_HOST_ID') ?? 'monte-moria';
+    const hostId = this.config.get<string>('CHATGPT_OAUTH_HOST_ID') ?? 'monte-moria';
+    const encryptedVerifier = this.encryption.encrypt(verifier);
+    const encryptedNonce = this.encryption.encrypt(nonce);
     const created = await this.prisma.aiOAuthAttempt.create({ data: {
       tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, stateHash: sha256(state), nonceHash: sha256(nonce),
-      pkceVerifierHash: sha256(verifier), redirectUri, clientId, extAgentHostId: hostId, expiresAt,
+      pkceVerifierHash: sha256(verifier), pkceVerifierCiphertext: encryptedVerifier.ciphertext, pkceVerifierIv: encryptedVerifier.iv,
+      pkceVerifierAuthTag: encryptedVerifier.authTag, nonceCiphertext: encryptedNonce.ciphertext, nonceIv: encryptedNonce.iv,
+      nonceAuthTag: encryptedNonce.authTag, redirectUri, clientId, extAgentHostId: hostId, expiresAt,
     } });
-    this.verifiers.set(sha256(state), verifier);
-    this.nonces.set(sha256(state), nonce);
     return {
       authorizationUrl: buildAuthorizationUrl({
         authorizationEndpoint: this.config.get<string>('CHATGPT_OAUTH_AUTHORIZATION_ENDPOINT') ?? DEFAULT_AUTHORIZATION_ENDPOINT,
@@ -68,19 +67,19 @@ export class AiOAuthService {
     if (parsed.error) throw parsed.error;
     const claimed = await this.prisma.aiOAuthAttempt.updateMany({ where: { id: attempt.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, consumedAt: null, expiresAt: { gt: now } }, data: { consumedAt: now } });
     if (claimed.count !== 1) throw new Error('OAuth attempt is already consumed');
-    const verifier = this.verifiers.get(stateHash);
-    this.verifiers.delete(stateHash);
-    const nonce = this.nonces.get(stateHash);
-    this.nonces.delete(stateHash);
-    if (!verifier || sha256(verifier) !== attempt.pkceVerifierHash) throw new Error('OAuth PKCE verifier unavailable');
-    const tokens = await exchangeToken(this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, {
+    const verifier = this.encryption.decrypt({ ciphertext: attempt.pkceVerifierCiphertext, iv: attempt.pkceVerifierIv, authTag: attempt.pkceVerifierAuthTag });
+    const nonce = this.encryption.decrypt({ ciphertext: attempt.nonceCiphertext, iv: attempt.nonceIv, authTag: attempt.nonceAuthTag });
+    if (sha256(verifier) !== attempt.pkceVerifierHash) throw new Error('OAuth PKCE verifier mismatch');
+    if (sha256(nonce) !== attempt.nonceHash) throw new Error('OAuth nonce mismatch');
+    const issuer = this.config.get<string>('CHATGPT_OAUTH_ISSUER') ?? DEFAULT_ISSUER;
+    const discovered = await discoverOpenIdConfiguration(issuer).catch((): OpenIdConfiguration => ({}));
+    const tokens = await exchangeToken(discovered.token_endpoint ?? this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, {
       grant_type: 'authorization_code', code: parsed.code!, redirect_uri: attempt.redirectUri, client_id: attempt.clientId, code_verifier: verifier,
     });
-    const issuer = this.config.get<string>('CHATGPT_OAUTH_ISSUER') ?? DEFAULT_ISSUER;
-    const clientId = tokens.client_id ?? tokens.issued_client_id ?? attempt.clientId;
-    const scopes = String(tokens.scope ?? '').split(/\s+/).filter(Boolean);
-    if (!scopes.includes(REQUIRED_SCOPE)) throw new Error(`OAuth required scope missing: ${REQUIRED_SCOPE}`);
-    const claims = await validateIdToken(tokens.id_token, { issuer, audience: clientId, nonce: nonce ?? '', jwksUri: this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
+    const clientId = resolveClientId(attempt.clientId, tokens);
+    const scopes = assertRequiredScope(tokens.scope);
+    const claims = await validateIdToken(tokens.id_token, { issuer, audience: clientId, nonce, jwksUri: discovered.jwks_uri ?? this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
+    if (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== clientId) throw new Error('OAuth ID token authorized-party mismatch');
     const saved = await this.persistTokens(actor, attempt, clientId, scopes, claims, tokens);
     return this.toConnectionView(saved);
   }
@@ -90,7 +89,7 @@ export class AiOAuthService {
     const access = encrypt(tokens.access_token);
     const refresh = encrypt(tokens.refresh_token);
     const idToken = encrypt(tokens.id_token);
-    return this.prisma.aiOAuthConnection.upsert({ where: { tenantUserId_issuer_subject_clientId: { tenantUserId: actor.tenantUserId, issuer: claims.iss, subject: claims.sub, clientId } }, create: {
+    return this.prisma.aiOAuthConnection.upsert({ where: { tenantId_tenantUserId_issuer_subject_clientId: { tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, issuer: claims.iss, subject: claims.sub, clientId } }, create: {
       tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, issuer: claims.iss, subject: claims.sub, clientId,
       accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag,
       refreshTokenCiphertext: refresh.ciphertext, refreshTokenIv: refresh.iv, refreshTokenAuthTag: refresh.authTag,
@@ -102,11 +101,24 @@ export class AiOAuthService {
   }
 
   async refreshConnection(actor: AiOAuthActor, connectionId: string): Promise<void> {
-    const running = this.refreshes.get(connectionId);
-    if (running) return running;
-    const operation = this.doRefresh(actor, connectionId).finally(() => this.refreshes.delete(connectionId));
-    this.refreshes.set(connectionId, operation);
-    return operation;
+    const leaseToken = randomSecret(24);
+    const leaseExpiresAt = new Date(Date.now() + 30_000);
+    const claimed = await this.prisma.aiOAuthConnection.updateMany({ where: {
+      id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false,
+      OR: [{ refreshLeaseToken: null }, { refreshLeaseExpiresAt: null }, { refreshLeaseExpiresAt: { lt: new Date() } }],
+    }, data: { refreshLeaseToken: leaseToken, refreshLeaseExpiresAt: leaseExpiresAt } });
+    if (!claimed.count) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const current = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false } });
+      if (!current) throw new Error('OAuth connection not found');
+      if (current.refreshLeaseToken && current.refreshLeaseExpiresAt && current.refreshLeaseExpiresAt > new Date()) return;
+      return this.refreshConnection(actor, connectionId);
+    }
+    try {
+      await this.doRefresh(actor, connectionId);
+    } finally {
+      await this.prisma.aiOAuthConnection.updateMany({ where: { id: connectionId, refreshLeaseToken: leaseToken }, data: { refreshLeaseToken: null, refreshLeaseExpiresAt: null } });
+    }
   }
 
   private async doRefresh(actor: AiOAuthActor, connectionId: string): Promise<void> {
@@ -114,7 +126,8 @@ export class AiOAuthService {
     if (!connection) throw new Error('OAuth connection not found');
     const refreshToken = this.encryption.decrypt({ ciphertext: connection.refreshTokenCiphertext, iv: connection.refreshTokenIv, authTag: connection.refreshTokenAuthTag });
     try {
-      const tokens = await exchangeToken(this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: connection.clientId });
+      const discovered = await discoverOpenIdConfiguration(connection.issuer).catch((): OpenIdConfiguration => ({}));
+      const tokens = await exchangeToken(discovered.token_endpoint ?? this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: connection.clientId });
       const access = this.encryption.encrypt(tokens.access_token);
       const refresh = this.encryption.encrypt(tokens.refresh_token ?? refreshToken);
       await this.prisma.aiOAuthConnection.update({ where: { id: connection.id }, data: { accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag, refreshTokenCiphertext: refresh.ciphertext, refreshTokenIv: refresh.iv, refreshTokenAuthTag: refresh.authTag, expiresAt: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000), lastUsedAt: new Date() } });
@@ -125,6 +138,17 @@ export class AiOAuthService {
   }
 
   async disconnectConnection(actor: AiOAuthActor, connectionId: string): Promise<void> {
+    const connection = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false } });
+    if (!connection) return;
+    try {
+      const configuration = await discoverOpenIdConfiguration(connection.issuer);
+      if (configuration.revocation_endpoint) {
+        const refreshToken = this.encryption.decrypt({ ciphertext: connection.refreshTokenCiphertext, iv: connection.refreshTokenIv, authTag: connection.refreshTokenAuthTag });
+        await revokeToken(configuration.revocation_endpoint, refreshToken, connection.clientId);
+      }
+    } catch {
+      // Local revocation is still enforced when discovery or provider revocation is unavailable.
+    }
     await this.prisma.aiOAuthConnection.updateMany({ where: { id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false }, data: { isRevoked: true, revokedAt: new Date() } });
   }
 
