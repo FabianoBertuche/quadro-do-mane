@@ -151,6 +151,28 @@ test('selects a model after provider auth updates last-used metadata for the sam
   }
 });
 
+test('rejects catalog selection when the runtime switches after auth resolves but before reload', async () => {
+  const prisma = createPrisma(runtime({ id: 'connection-a', updatedAt: new Date('2030-01-01T00:01:00.000Z') }));
+  const originalFetch = globalThis.fetch;
+  let catalogRequests = 0;
+  globalThis.fetch = (async () => { catalogRequests += 1; return { ok: true, json: async () => ({ data: [] }) } as any; }) as any;
+  try {
+    const service = new AiServerRuntimeService(prisma as any, {
+      resolveProviderAuth: async () => {
+        await prisma.aiServerRuntime.update({ data: {
+          oauthConnectionId: 'connection-b',
+          oauthConnection: { id: 'connection-b', updatedAt: new Date('2030-01-01T00:02:00.000Z') },
+        } });
+        return { type: 'oauth', accessToken: 'token-a', connectionId: 'connection-a', connectionUpdatedAt: '2030-01-01T00:01:00.000Z' };
+      },
+    } as any);
+    await assert.rejects(() => service.selectModel('model-a'), /conexão.*alterada/i);
+    assert.equal(catalogRequests, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('returns redacted global runtime metadata', async () => {
   const prisma = createPrisma(runtime({ id: 'global-connection' }, 'gpt-5', 'GPT-5'));
   let resolveCalls = 0;

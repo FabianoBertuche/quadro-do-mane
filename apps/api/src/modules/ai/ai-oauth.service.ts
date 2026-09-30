@@ -181,11 +181,15 @@ export class AiOAuthService {
       });
       if (!connection) return undefined;
     }
-    const accessToken = this.encryption.decrypt({ ciphertext: connection.accessTokenCiphertext, iv: connection.accessTokenIv, authTag: connection.accessTokenAuthTag });
     await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, isRevoked: false }, data: { lastUsedAt: new Date() } });
+    connection = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connection.id, isRevoked: false } });
+    if (!connection) return undefined;
+    const accessToken = this.encryption.decrypt({ ciphertext: connection.accessTokenCiphertext, iv: connection.accessTokenIv, authTag: connection.accessTokenAuthTag });
     return {
       type: 'oauth',
       accessToken,
+      connectionId: connection.id,
+      connectionUpdatedAt: connection.updatedAt ? new Date(connection.updatedAt).toISOString() : undefined,
       refresh: async () => {
         await this.refreshConnection(connection!.id);
         const refreshed = await this.resolveProviderAuth();

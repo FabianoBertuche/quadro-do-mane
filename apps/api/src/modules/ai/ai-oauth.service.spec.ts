@@ -364,7 +364,7 @@ test('resolves and refreshes the expired global OAuth connection without an acto
     id: 'global-connection', issuer: 'https://auth.example', clientId: 'client', isRevoked: false,
     accessTokenCiphertext: 'enc:old-access', accessTokenIv: 'iv', accessTokenAuthTag: 'tag',
     refreshTokenCiphertext: 'enc:refresh', refreshTokenIv: 'iv', refreshTokenAuthTag: 'tag',
-    expiresAt: new Date(Date.now() - 1_000), refreshLeaseToken: null, refreshLeaseExpiresAt: null,
+    expiresAt: new Date(Date.now() - 1_000), updatedAt: new Date('2030-01-01T00:00:00.000Z'), refreshLeaseToken: null, refreshLeaseExpiresAt: null,
   };
   const prisma = {
     aiServerRuntime: { upsert: async () => ({ id: 'global', oauthConnectionId: row.id, oauthConnection: row }) },
@@ -382,7 +382,10 @@ test('resolves and refreshes the expired global OAuth connection without an acto
       decrypt: ({ ciphertext }: any) => ciphertext.replace('enc:', ''),
       encrypt: (value: string) => ({ ciphertext: `enc:${value}`, iv: 'iv', authTag: 'tag' }),
     } as any, { get: () => undefined } as any);
-    assert.equal((await service.resolveProviderAuth())?.accessToken, 'new-access');
+    const auth = await service.resolveProviderAuth();
+    assert.equal(auth?.accessToken, 'new-access');
+    assert.equal(auth?.connectionId, 'global-connection');
+    assert.equal(auth?.connectionUpdatedAt, '2030-01-01T00:00:00.000Z');
     assert.equal(row.accessTokenCiphertext, 'enc:new-access');
   } finally {
     globalThis.fetch = originalFetch;

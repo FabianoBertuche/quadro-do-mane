@@ -56,6 +56,10 @@ export class AiServerRuntimeService {
       throw new BadRequestException('Catálogo de modelos indisponível');
     }
     const connectionKey = this.connectionKey(runtime);
+    if (auth.connectionId && (auth.connectionId !== runtime.oauthConnectionId
+      || (auth.connectionUpdatedAt && auth.connectionUpdatedAt !== runtime.oauthConnection?.updatedAt?.toISOString?.()))) {
+      throw new BadRequestException('A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.');
+    }
     if (this.catalog?.connectionKey === connectionKey) return this.catalog;
     try {
       const models = await fetchOpenAiModels(auth.accessToken);

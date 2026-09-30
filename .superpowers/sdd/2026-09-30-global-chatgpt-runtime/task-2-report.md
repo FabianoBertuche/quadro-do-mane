@@ -37,6 +37,25 @@ git diff --check
 exited 0
 ```
 
+## Auth-To-Runtime Switch Fix
+
+- `resolveProviderAuth()` now returns the resolved global connection ID and `updatedAt` version as internal auth metadata after recording usage.
+- Before fetching or tagging a catalog, the runtime service reloads the singleton and verifies that its connection ID/version still match the credential that resolved authorization. A switch in that window returns the same safe retry error before a model-catalog request is made.
+- Regression coverage switches from connection A to B inside `resolveProviderAuth()` and verifies catalog fetch is not attempted.
+
+Verification for this fix:
+
+```text
+node -r ts-node/register --test src/modules/ai/ai-server-runtime.service.spec.ts src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai-oauth.controller.spec.ts
+35 passed, 0 failed
+
+npm run build
+nest build exited 0
+
+git diff --check
+exited 0
+```
+
 ## Stale Catalog Race Fix
 
 - Model selection now retains the runtime connection ID and connection `updatedAt` value that produced its catalog entry.

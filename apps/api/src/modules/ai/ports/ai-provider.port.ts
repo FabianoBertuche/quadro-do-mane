@@ -29,6 +29,8 @@ export interface AiCompletionResult {
 export interface AiProviderAuth {
   type: 'oauth' | 'api-key';
   accessToken: string;
+  connectionId?: string;
+  connectionUpdatedAt?: string;
   refresh?: () => Promise<AiProviderAuth>;
 }
 
