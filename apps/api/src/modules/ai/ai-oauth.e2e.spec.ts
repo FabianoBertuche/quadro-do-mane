@@ -8,7 +8,7 @@ import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
-test('completes ChatGPT OAuth and resolves the stored token for an OpenAI request', async () => {
+test('uses the callback-issued dynamic client ID to complete ChatGPT OAuth and resolve an OpenAI token', async () => {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
   const attempts = new Map<string, any>();
   const connections = new Map<string, any>();
@@ -85,12 +85,12 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
     const nonceAttempt = [...attempts.values()].find((attempt) => attempt.pkceVerifierCiphertext === `encrypted:${body.get('code_verifier')}`);
     const nonce = nonceAttempt?.nonceCiphertext.slice('encrypted:'.length);
     const payload = Buffer.from(JSON.stringify({
-      iss: 'https://auth.example', aud: 'issued-client', sub: 'openai-subject', nonce,
+      iss: 'https://auth.example', aud: 'oaiapp_callback-issued-client', sub: 'openai-subject', nonce,
       email: 'person@example.com', name: 'Person', exp: Math.floor(Date.now() / 1000) + 3600,
     })).toString('base64url');
     const signed = `${header}.${payload}`;
     const idToken = `${signed}.${crypto.sign('RSA-SHA256', Buffer.from(signed), privateKey).toString('base64url')}`;
-    return new Response(JSON.stringify({ client_id: 'issued-client', access_token: 'oauth-access', refresh_token: 'oauth-refresh', id_token: idToken, scope: 'openid offline_access chatgpt.tokens.use.direct', expires_in: 3600 }), { status: 200 });
+    return new Response(JSON.stringify({ access_token: 'oauth-access', refresh_token: 'oauth-refresh', id_token: idToken, scope: 'openid offline_access chatgpt.tokens.use.direct', expires_in: 3600 }), { status: 200 });
   }) as typeof fetch;
 
   try {
@@ -135,14 +135,14 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
     assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 1);
 
     const completed = await controller.complete(actor as any, {
-      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${authorization.searchParams.get('state')}&client_id=issued-client`,
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${authorization.searchParams.get('state')}&client_id=oaiapp_callback-issued-client`,
     });
     assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 2);
     assert.equal(tokenRequests[1].url, 'https://auth.example/token');
     assert.equal(tokenRequests[1].body.get('grant_type'), 'authorization_code');
     assert.equal(tokenRequests[1].body.get('code'), 'auth-code');
     assert.equal(tokenRequests[1].body.get('redirect_uri'), attempt.redirectUri);
-    assert.equal(tokenRequests[1].body.get('client_id'), 'dynamic_agent_client');
+    assert.equal(tokenRequests[1].body.get('client_id'), 'oaiapp_callback-issued-client');
     assert.equal(tokenRequests[1].body.get('code_verifier'), verifier);
     assert.equal(tokenRequests[1].body.get('resource'), 'https://api.openai.com/v1');
     assert.deepEqual(completed, {

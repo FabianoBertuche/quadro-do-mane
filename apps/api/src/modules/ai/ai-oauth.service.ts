@@ -105,15 +105,16 @@ export class AiOAuthService {
     if (sha256(nonce) !== attempt.nonceHash) throw new Error('OAuth nonce mismatch');
     const issuer = this.config.get<string>('CHATGPT_OAUTH_ISSUER') ?? DEFAULT_ISSUER;
     const discovered = await discoverOpenIdConfiguration(issuer).catch((): OpenIdConfiguration => ({}));
+    const clientId = parsed.clientId ?? attempt.clientId;
     const tokens = await exchangeToken(discovered.token_endpoint ?? this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, {
-      grant_type: 'authorization_code', code: parsed.code!, redirect_uri: attempt.redirectUri, client_id: attempt.clientId, code_verifier: verifier,
+      grant_type: 'authorization_code', code: parsed.code!, redirect_uri: attempt.redirectUri, client_id: clientId, code_verifier: verifier,
     });
-    const clientId = resolveClientId(attempt.clientId, tokens);
-    if (parsed.clientId) assertCallbackClientId(parsed.clientId, clientId);
+    const resolvedClientId = resolveClientId(clientId, tokens);
+    if (parsed.clientId) assertCallbackClientId(parsed.clientId, resolvedClientId);
     const scopes = assertRequiredScope(tokens.scope);
-    const claims = await validateIdToken(tokens.id_token, { issuer, audience: clientId, nonce, jwksUri: discovered.jwks_uri ?? this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
-    if (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== clientId) throw new Error('OAuth ID token authorized-party mismatch');
-    const saved = await this.persistTokens(actor, attempt, clientId, scopes, claims, tokens);
+    const claims = await validateIdToken(tokens.id_token, { issuer, audience: resolvedClientId, nonce, jwksUri: discovered.jwks_uri ?? this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
+    if (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== resolvedClientId) throw new Error('OAuth ID token authorized-party mismatch');
+    const saved = await this.persistTokens(actor, attempt, resolvedClientId, scopes, claims, tokens);
     return this.toConnectionView(saved);
   }
 
