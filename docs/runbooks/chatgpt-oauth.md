@@ -109,16 +109,28 @@ Run from the repository root, with production secrets supplied out-of-band:
 npm run db:generate
 npm run build:api
 npm run build:web
-docker compose -f docker-compose.prod.yml run --rm migrate
+docker compose -f docker-compose.prod.yml build api web
+docker compose -f docker-compose.prod.yml run --build --rm migrate
 docker compose -f docker-compose.prod.yml up -d --build api web
 docker compose -f docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:3001/api/auth/me -o /dev/null -w '%{http_code}\n'
+api_status="$(curl -sS http://127.0.0.1:3001/api/auth/me -o /dev/null -w '%{http_code}')"
+case "$api_status" in 200|401) ;; *) exit 1 ;; esac
+web_status="$(curl -sS http://127.0.0.1:3000/ -o /dev/null -w '%{http_code}')"
+test "$web_status" = 200 || test "$web_status" = 307
 ```
 
-The unauthenticated health route should return `401` (or `200` for an already
-authenticated probe), not a server error. Inspect logs only for status/request
-IDs and confirm no `access_token`, `refresh_token`, ID token, PKCE verifier, or
-authorization callback query is logged. Perform one authenticated text request
-with a test account and verify the response is successful. Do not run this
-procedure with real user callbacks in CI, and do not publish or push deployment
-secrets.
+The unauthenticated API route should return `401` (or `200` for an already
+authenticated probe), and the web root should return `200` or its expected
+`307` login redirect. The commands above assert those statuses without `curl
+-f`, which would incorrectly fail on the expected API `401`. Inspect logs only
+for status/request IDs and confirm no `access_token`, `refresh_token`, ID token,
+PKCE verifier, or authorization callback query is logged. Perform one
+authenticated text request with a test account and verify the response is
+successful. Do not run this procedure with real user callbacks in CI, and do
+not publish or push deployment secrets.
+
+The mocked integration test verifies URL parameters, PKCE, token form fields,
+callback rejection, replay rejection, metadata redaction, and provider token
+resolution. It does not replace an authenticated HTTP test of tenant isolation
+or Nest route guards; those remain covered by the controller/unit tests and the
+runtime permission/tenant guards.

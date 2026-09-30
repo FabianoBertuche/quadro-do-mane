@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import test from 'node:test';
 import { AiOAuthController } from './ai-oauth.controller';
 import { AiOAuthService } from './ai-oauth.service';
+import { codeChallenge } from './ai-oauth.protocol';
 import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
@@ -12,6 +13,7 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
   const attempts = new Map<string, any>();
   const connections = new Map<string, any>();
   const calls: Array<{ url: string; authorization?: string }> = [];
+  const tokenRequests: Array<{ url: string; body: URLSearchParams }> = [];
   const encryption = {
     encrypt: (value: string) => ({ ciphertext: `encrypted:${value}`, iv: 'iv', authTag: 'tag' }),
     decrypt: ({ ciphertext }: { ciphertext: string }) => ciphertext.slice('encrypted:'.length),
@@ -76,7 +78,9 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
     if (url.endsWith('/jwks')) {
       return new Response(JSON.stringify({ keys: [{ kid: 'test-key', ...publicKey.export({ format: 'jwk' }) }] }), { status: 200 });
     }
+    if (url !== 'https://auth.example/token') throw new Error(`unexpected mocked OAuth endpoint: ${url}`);
     const body = new URLSearchParams(String(init?.body));
+    tokenRequests.push({ url, body });
     assert.equal(body.get('code'), 'auth-code');
     const nonce = [...attempts.values()][0].nonceCiphertext.slice('encrypted:'.length);
     const payload = Buffer.from(JSON.stringify({
@@ -91,8 +95,25 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
   try {
     const started = await controller.start(actor as any);
     const authorization = new URL(started.authorizationUrl);
+    const attempt = attempts.get(started.attemptId);
+    const verifier = attempt.pkceVerifierCiphertext.slice('encrypted:'.length);
     assert.equal(authorization.searchParams.get('agent_name_hint'), 'Monte Moria Test');
-    assert.equal(authorization.searchParams.get('scope')?.includes('chatgpt.tokens.use.direct'), true);
+    assert.equal(authorization.searchParams.get('resource'), 'https://api.openai.com/v1');
+    assert.equal(authorization.searchParams.get('redirect_uri'), attempt.redirectUri);
+    assert.deepEqual(authorization.searchParams.get('scope')?.split(' '), [
+      'openid', 'profile', 'email', 'offline_access', 'resource.invoke', 'chatgpt.tokens.use.direct',
+    ]);
+    assert.equal(authorization.searchParams.get('code_challenge'), codeChallenge(verifier));
+    assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+
+    const tokenCallsBeforeRejectedCallbacks = tokenRequests.length;
+    await assert.rejects(() => controller.complete(actor as any, {
+      callbackUrl: `http://localhost:1455/auth/callback?code=auth-code&state=${authorization.searchParams.get('state')}`,
+    }), /redirect URI mismatch|Não foi possível concluir/);
+    await assert.rejects(() => controller.complete(actor as any, {
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?state=${authorization.searchParams.get('state')}`,
+    }), /callback did not contain|Não foi possível concluir/);
+    assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks);
 
     await assert.rejects(() => controller.complete(actor as any, {
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=wrong`,
@@ -101,12 +122,29 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
     const completed = await controller.complete(actor as any, {
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${authorization.searchParams.get('state')}`,
     });
+    assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 1);
+    assert.equal(tokenRequests[0].url, 'https://auth.example/token');
+    assert.equal(tokenRequests[0].body.get('grant_type'), 'authorization_code');
+    assert.equal(tokenRequests[0].body.get('code'), 'auth-code');
+    assert.equal(tokenRequests[0].body.get('redirect_uri'), attempt.redirectUri);
+    assert.equal(tokenRequests[0].body.get('client_id'), 'dynamic_agent_client');
+    assert.equal(tokenRequests[0].body.get('code_verifier'), verifier);
     assert.deepEqual(completed, {
       id: 'connection-1', provider: 'https://auth.example', email: 'person@example.com',
       scopes: ['openid', 'offline_access', 'chatgpt.tokens.use.direct'],
       expiresAt: completed.expiresAt, status: 'connected',
     });
     assert.equal(JSON.stringify(completed).includes('oauth-access'), false);
+
+    await assert.rejects(() => controller.complete(actor as any, {
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${authorization.searchParams.get('state')}`,
+    }), /attempt is invalid or expired|A autorização expirou/);
+
+    const secondStarted = await controller.start(actor as any);
+    const secondAuthorization = new URL(secondStarted.authorizationUrl);
+    await assert.rejects(() => controller.complete(actor as any, {
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${secondAuthorization.searchParams.get('state')}&client_id=other-client`,
+    }), /client id mismatch|Não foi possível concluir/);
 
     const listed = await controller.connections(actor as any);
     assert.equal(listed.length, 1);
