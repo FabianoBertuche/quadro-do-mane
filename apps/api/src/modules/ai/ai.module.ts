@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { FakeAiProvider } from './providers/fake-ai.provider';
-import { OpenAiProvider } from './providers/openai.provider';
+import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
 import { AI_PROVIDER, AI_RATE_LIMITER, AiService, DEFAULT_AI_SECURITY_LIMITS } from './ai.service';
 import { AiRateLimitService } from './ai-rate-limit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -83,7 +83,7 @@ import OpenAI from 'openai';
     {
       provide: AI_PROVIDER,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => config.get<boolean>('AI_ENABLED') ? new OpenAiProvider(config) : new FakeAiProvider(),
+      useFactory: (config: ConfigService) => config.get<boolean>('AI_ENABLED') ? new OpenAiResponsesProvider(config) : new FakeAiProvider(),
     },
   ],
   exports: [AiService],

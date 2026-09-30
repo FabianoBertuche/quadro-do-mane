@@ -10,7 +10,7 @@ import { AiResponseMode } from './dto/send-ai-message.dto';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
-function setup(provider: AiProvider) {
+function setup(provider: AiProvider, oauth?: any) {
   const created: any[] = [];
   const updated: any[] = [];
   const conversationQueries: any[] = [];
@@ -70,9 +70,25 @@ function setup(provider: AiProvider) {
     context,
     new AiToolRegistryService([]),
     new AiAuditService({ log: async () => undefined } as any),
+    {},
+    undefined,
+    oauth,
   );
   return { service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates };
 }
+
+test('resolves provider credentials from the authenticated actor', async () => {
+  let receivedAuth: any;
+  const provider = { complete: async (_input: any, auth: any) => { receivedAuth = auth; return { text: 'ok', toolCalls: [] }; } };
+  const { service } = setup(provider, { resolveProviderAuth: async (receivedActor: any) => {
+    assert.deepEqual(receivedActor, actor);
+    return { type: 'oauth', accessToken: 'actor-token' };
+  } });
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
+
+  assert.deepEqual(receivedAuth, { type: 'oauth', accessToken: 'actor-token' });
+});
 
 test('conversation reads are owned by the authenticated tenant user', async () => {
   const { service, conversationQueries } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });

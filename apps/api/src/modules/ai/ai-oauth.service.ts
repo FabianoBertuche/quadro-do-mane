@@ -7,6 +7,7 @@ import {
   DEFAULT_JWKS_URI, DEFAULT_SCOPES, DEFAULT_TOKEN_ENDPOINT, discoverOpenIdConfiguration,
   assertRequiredScope, exchangeToken, OpenIdConfiguration, parseCallbackUrl, randomSecret, revokeToken, resolveClientId, sha256, validateIdToken,
 } from './ai-oauth.protocol';
+import { AiProviderAuth } from './ports/ai-provider.port';
 
 export interface AiOAuthActor { tenantId: string; tenantUserId: string }
 export interface AiOAuthConnectionView {
@@ -119,6 +120,33 @@ export class AiOAuthService {
     } finally {
       await this.prisma.aiOAuthConnection.updateMany({ where: { id: connectionId, refreshLeaseToken: leaseToken }, data: { refreshLeaseToken: null, refreshLeaseExpiresAt: null } });
     }
+  }
+
+  async resolveProviderAuth(actor: AiOAuthActor): Promise<AiProviderAuth | undefined> {
+    let connection = await this.prisma.aiOAuthConnection.findFirst({
+      where: { tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (!connection) return undefined;
+    if (new Date(connection.expiresAt) <= new Date()) {
+      await this.refreshConnection(actor, connection.id);
+      connection = await this.prisma.aiOAuthConnection.findFirst({
+        where: { id: connection.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false },
+      });
+      if (!connection) return undefined;
+    }
+    const accessToken = this.encryption.decrypt({ ciphertext: connection.accessTokenCiphertext, iv: connection.accessTokenIv, authTag: connection.accessTokenAuthTag });
+    await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false }, data: { lastUsedAt: new Date() } });
+    return {
+      type: 'oauth',
+      accessToken,
+      refresh: async () => {
+        await this.refreshConnection(actor, connection!.id);
+        const refreshed = await this.resolveProviderAuth(actor);
+        if (!refreshed) throw new Error('OAuth connection refresh failed');
+        return refreshed;
+      },
+    };
   }
 
   private async doRefresh(actor: AiOAuthActor, connectionId: string, leaseToken: string): Promise<void> {

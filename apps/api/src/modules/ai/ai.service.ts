@@ -7,6 +7,7 @@ import { AiToolRegistryService } from './tools/ai-tool-registry.service';
 import { AiTool } from './tools/ai-tool.port';
 import { AiResponseMode, SendAiMessageDto } from './dto/send-ai-message.dto';
 import type { AiRateLimiter } from './ai-rate-limit.service';
+import type { AiOAuthService } from './ai-oauth.service';
 
 export const AI_PROVIDER = 'AI_PROVIDER';
 export const AI_RATE_LIMITER = 'AI_RATE_LIMITER';
@@ -41,8 +42,9 @@ export class AiService {
     private readonly context: AiContextService,
     public registry: AiToolRegistryService,
     private readonly audit: AiAuditService,
-    limits: Partial<AiSecurityLimits> = {},
+    @Optional() limits: Partial<AiSecurityLimits> = {},
     @Optional() @Inject(AI_RATE_LIMITER) private readonly rateLimiter?: AiRateLimiter,
+    @Optional() private readonly oauth?: AiOAuthService,
   ) {
     this.limits = { ...DEFAULT_AI_SECURITY_LIMITS, ...limits };
   }
@@ -97,7 +99,9 @@ export class AiService {
     };
     let completion: Awaited<ReturnType<AiProvider['complete']>>;
     try {
-      completion = await this.provider.complete(completionInput);
+      completion = await this.provider.complete(completionInput, this.oauth
+        ? await this.oauth.resolveProviderAuth({ tenantId: actor.tenantId, tenantUserId: actor.tenantUserId })
+        : undefined);
     } catch (error) {
       await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'provider.failed', targetId: conversation.id, metadata: { provider: 'AI_PROVIDER', status: 'failed' } });
       throw error;

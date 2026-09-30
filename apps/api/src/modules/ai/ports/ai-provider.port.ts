@@ -26,6 +26,12 @@ export interface AiCompletionResult {
   toolCalls: AiToolCall[];
 }
 
+export interface AiProviderAuth {
+  type: 'oauth' | 'api-key';
+  accessToken: string;
+  refresh?: () => Promise<AiProviderAuth>;
+}
+
 export interface AiProvider {
-  complete(input: AiCompletionInput): Promise<AiCompletionResult>;
+  complete(input: AiCompletionInput, auth?: AiProviderAuth): Promise<AiCompletionResult>;
 }
