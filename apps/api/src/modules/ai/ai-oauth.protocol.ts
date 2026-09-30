@@ -27,6 +27,7 @@ export interface AuthorizationUrlOptions {
 export interface CallbackResult {
   code?: string;
   state?: string;
+  clientId?: string;
   error?: Error;
   errorDescription?: string;
 }
@@ -102,10 +103,14 @@ export function parseCallbackUrl(
     throw new Error('OAuth client id mismatch');
   }
   const error = url.searchParams.get('error');
-  if (error) return { state, error: new Error(`OAuth authorization failed: ${error}`), errorDescription: url.searchParams.get('error_description') ?? undefined };
+  if (error) return { state, clientId: callbackClientId ?? undefined, error: new Error(`OAuth authorization failed: ${error}`), errorDescription: url.searchParams.get('error_description') ?? undefined };
   const code = url.searchParams.get('code');
   if (!code) throw new Error('OAuth callback did not contain an authorization code');
-  return { code, state };
+  return { code, state, clientId: callbackClientId ?? undefined };
+}
+
+export function assertCallbackClientId(callbackClientId: string | undefined, expectedClientId: string): void {
+  if (callbackClientId && callbackClientId !== expectedClientId) throw new Error('OAuth client id mismatch');
 }
 
 function safeEqual(left: string, right: string): boolean {
@@ -118,6 +123,7 @@ export async function exchangeToken(
   endpoint: string,
   form: Record<string, string>,
   fetcher: typeof fetch = fetch,
+  options: { requireRefreshToken?: boolean; requireIdToken?: boolean } = {},
 ): Promise<Record<string, any>> {
   const response = await fetcher(endpoint, {
     method: 'POST',
@@ -129,6 +135,19 @@ export async function exchangeToken(
     const errorCode = typeof body?.error === 'string' ? `: ${body.error}` : '';
     throw new Error(`OAuth token exchange failed (${response.status})${errorCode}`);
   }
+  const requiredFields = ['access_token', 'expires_in'];
+  if (options.requireRefreshToken !== false) requiredFields.push('refresh_token');
+  if (options.requireIdToken !== false) requiredFields.push('id_token');
+  for (const field of requiredFields) {
+    const value = body?.[field];
+    const invalid = field === 'expires_in'
+      ? !Number.isFinite(Number(value)) || Number(value) <= 0
+      : typeof value !== 'string' || value.length === 0;
+    if (invalid) {
+      throw new Error(`OAuth token response missing required field: ${field}`);
+    }
+  }
+  if (body.refresh_token !== undefined && typeof body.refresh_token !== 'string') throw new Error('OAuth token response contains an invalid refresh_token');
   return body;
 }
 

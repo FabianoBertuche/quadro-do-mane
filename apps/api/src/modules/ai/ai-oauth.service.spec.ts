@@ -7,7 +7,9 @@ import {
   codeChallenge,
   discoverOpenIdConfiguration,
   assertRequiredScope,
+  assertCallbackClientId,
   parseCallbackUrl,
+  exchangeToken,
   revokeToken,
   resolveClientId,
   sha256,
@@ -53,6 +55,25 @@ test('rejects callback client id mismatch before token exchange', () => {
     ),
     /OAuth client id mismatch/,
   );
+});
+
+test('retains a dynamic callback client id for validation after token exchange', () => {
+  const callback = parseCallbackUrl(
+    'http://127.0.0.1:1455/auth/callback?code=code&state=state&client_id=issued-client',
+    'state',
+    'http://127.0.0.1:1455/auth/callback',
+  );
+  assert.equal(callback.clientId, 'issued-client');
+  assert.doesNotThrow(() => assertCallbackClientId(callback.clientId, 'issued-client'));
+  assert.throws(() => assertCallbackClientId('other-client', 'issued-client'), /OAuth client id mismatch/);
+});
+
+test('rejects incomplete token responses before callers encrypt token fields', async () => {
+  await assert.rejects(() => exchangeToken('https://auth.example/token', {}, async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ access_token: 'access', expires_in: 3600 }),
+  } as any)), /OAuth token response missing required field: refresh_token/);
 });
 
 test('rejects missing direct-token scope and captures dynamic client identity', () => {

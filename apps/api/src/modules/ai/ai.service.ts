@@ -1,6 +1,6 @@
 import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { AiCompletionInput, AiProvider } from './ports/ai-provider.port';
+import { AiCompletionInput, AiProvider, AiProviderError } from './ports/ai-provider.port';
 import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
@@ -104,7 +104,12 @@ export class AiService {
         ? await this.oauth.resolveProviderAuth({ tenantId: actor.tenantId, tenantUserId: actor.tenantUserId })
         : undefined);
     } catch (error) {
-      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'provider.failed', targetId: conversation.id, metadata: { provider: 'AI_PROVIDER', status: 'failed' } });
+      const metadata = error instanceof AiProviderError ? {
+        providerStatus: error.metadata.status,
+        providerCode: error.metadata.code,
+        providerRequestId: error.metadata.requestId,
+      } : {};
+      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'provider.failed', targetId: conversation.id, metadata: { provider: 'AI_PROVIDER', status: 'failed', ...metadata } });
       throw error;
     }
     const assistantMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount: completion.toolCalls.length }) } });

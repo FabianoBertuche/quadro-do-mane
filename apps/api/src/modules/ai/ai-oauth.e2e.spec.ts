@@ -21,7 +21,7 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
   const prisma = {
     aiOAuthAttempt: {
       create: async ({ data }: any) => {
-        const attempt = { ...data, id: 'attempt-1', consumedAt: null };
+        const attempt = { ...data, id: `attempt-${attempts.size + 1}`, consumedAt: null };
         attempts.set(attempt.id, attempt);
         return attempt;
       },
@@ -119,16 +119,23 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=wrong`,
     }), /OAuth state mismatch|A autorização expirou|Não foi possível concluir/);
 
-    const completed = await controller.complete(actor as any, {
-      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${authorization.searchParams.get('state')}`,
-    });
+    const dynamicMismatchStart = await controller.start(actor as any);
+    await assert.rejects(() => controller.complete(actor as any, {
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${new URL(dynamicMismatchStart.authorizationUrl).searchParams.get('state')}&client_id=wrong-client`,
+    }), /client id mismatch|Não foi possível concluir/);
+    assert.equal(connections.size, 0);
     assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 1);
-    assert.equal(tokenRequests[0].url, 'https://auth.example/token');
-    assert.equal(tokenRequests[0].body.get('grant_type'), 'authorization_code');
-    assert.equal(tokenRequests[0].body.get('code'), 'auth-code');
-    assert.equal(tokenRequests[0].body.get('redirect_uri'), attempt.redirectUri);
-    assert.equal(tokenRequests[0].body.get('client_id'), 'dynamic_agent_client');
-    assert.equal(tokenRequests[0].body.get('code_verifier'), verifier);
+
+    const completed = await controller.complete(actor as any, {
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${authorization.searchParams.get('state')}&client_id=issued-client`,
+    });
+    assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 2);
+    assert.equal(tokenRequests[1].url, 'https://auth.example/token');
+    assert.equal(tokenRequests[1].body.get('grant_type'), 'authorization_code');
+    assert.equal(tokenRequests[1].body.get('code'), 'auth-code');
+    assert.equal(tokenRequests[1].body.get('redirect_uri'), attempt.redirectUri);
+    assert.equal(tokenRequests[1].body.get('client_id'), 'dynamic_agent_client');
+    assert.equal(tokenRequests[1].body.get('code_verifier'), verifier);
     assert.deepEqual(completed, {
       id: 'connection-1', provider: 'https://auth.example', email: 'person@example.com',
       scopes: ['openid', 'offline_access', 'chatgpt.tokens.use.direct'],
@@ -156,7 +163,7 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
     const provider = new OpenAiResponsesProvider({ get: (key: string, fallback?: string) => key === 'OPENAI_MODEL' ? 'test-model' : fallback } as any, async (_url, init) => {
       const authorizationHeader = new Headers(init?.headers).get('authorization') ?? '';
       calls.push({ url: 'https://api.openai.com/v1/responses', authorization: authorizationHeader });
-      return new Response('data: {"type":"response.output_text.delta","delta":"ok"}\ndata: {"type":"response.completed","response":{"status":"completed"}}\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      return new Response('data: {"type":"response.output_text.delta","delta":"ok"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
     });
     const result = await provider.complete({ messages: [{ role: 'user', content: 'hello' }] }, auth);
     assert.deepEqual(result, { text: 'ok', toolCalls: [] });

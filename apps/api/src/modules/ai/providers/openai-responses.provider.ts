@@ -7,6 +7,7 @@ import {
   AiProviderStreamEvent,
   AiStreamingProvider,
   AiToolCall,
+  AiProviderError,
 } from '../ports/ai-provider.port';
 
 export type ResponsesFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -47,7 +48,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
         }
         continue;
       }
-      if (!response.ok) throw this.providerError(response);
+      if (!response.ok) throw await this.providerError(response);
       try {
         const text = '';
         const toolCalls = new Map<string, { name: string; arguments: string }>();
@@ -86,7 +87,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
         }
         continue;
       }
-      if (!response.ok) throw this.providerError(response);
+      if (!response.ok) throw await this.providerError(response);
       yield* this.readStream(response);
       return;
     }
@@ -153,8 +154,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
       if (line === '' && dataLines.length) {
         const pending = dataLines;
         dataLines = [];
-        const payloads = pending.length > 1 ? pending : [pending.join('\n')];
-        for (const payload of payloads) for (const event of processPayload(payload)) yield event;
+        for (const event of processPayload(pending.join('\n'))) yield event;
       }
     };
     while (true) {
@@ -169,8 +169,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
     if (dataLines.length) {
       const pending = dataLines;
       dataLines = [];
-      const payloads = pending.length > 1 ? pending : [pending.join('\n')];
-      for (const payload of payloads) for (const event of processPayload(payload)) yield event;
+      for (const event of processPayload(pending.join('\n'))) yield event;
     }
     if (!terminal) throw this.safeStreamError('AI response incomplete', requestId);
   }
@@ -186,9 +185,16 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
     return toolCalls;
   }
 
-  private providerError(response: Response): Error {
+  private async providerError(response: Response): Promise<Error> {
     const requestId = response.headers.get('x-request-id');
-    return new Error(`AI provider request failed${requestId ? ` (request ID: ${requestId})` : ''}`);
+    let code: string | undefined;
+    try {
+      const body = JSON.parse(await response.text());
+      code = typeof body?.error?.code === 'string' ? body.error.code : typeof body?.code === 'string' ? body.code : typeof body?.error === 'string' ? body.error : undefined;
+    } catch {
+      // Keep provider response parsing failures safe and non-fatal.
+    }
+    return new AiProviderError(`AI provider request failed${requestId ? ` (request ID: ${requestId})` : ''}`, { status: response.status, code, requestId: requestId ?? undefined });
   }
 
   private safeStreamError(message: string, requestId: string | null): Error {

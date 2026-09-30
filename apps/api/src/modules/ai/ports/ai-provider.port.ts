@@ -32,6 +32,19 @@ export interface AiProviderAuth {
   refresh?: () => Promise<AiProviderAuth>;
 }
 
+export interface AiProviderErrorMetadata {
+  status?: number;
+  code?: string;
+  requestId?: string;
+}
+
+export class AiProviderError extends Error {
+  constructor(message: string, readonly metadata: AiProviderErrorMetadata) {
+    super(message);
+    this.name = 'AiProviderError';
+  }
+}
+
 export type AiProviderStreamEvent =
   | { type: 'text.delta'; delta: string }
   | { type: 'tool_call.started'; id: string; name: string }

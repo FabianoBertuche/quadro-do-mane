@@ -29,7 +29,7 @@ test('posts a private Responses request with OAuth bearer auth and normalizes st
   let request: any;
   const provider = new OpenAiResponsesProvider(config as any, async (_url, init) => {
     request = { ...init, headers: Object.fromEntries(new Headers(init?.headers).entries()), body: JSON.parse(String(init?.body)) };
-    return response('data: {"type":"response.output_text.delta","delta":"Olá"}\ndata: {"type":"response.output_text.delta","delta":"!"}\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\ndata: [DONE]\n');
+    return response('data: {"type":"response.output_text.delta","delta":"Olá"}\n\ndata: {"type":"response.output_text.delta","delta":"!"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\ndata: [DONE]\n');
   });
 
   const result = await provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' });
@@ -48,7 +48,7 @@ test('normalizes streamed function-call arguments and completed output', async (
     'data: {"type":"response.function_call_arguments.delta","item_id":"call-1","delta":"{\\"title\\":\\"Planejar\\"}"}',
     'data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"create_task","arguments":"{\\"title\\":\\"Planejar\\"}"}]}}',
     '',
-  ].join('\n')));
+  ].join('\n\n')));
 
   const result = await provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' });
 
@@ -87,6 +87,35 @@ test('uses API-key fallback only when explicitly configured and includes request
   });
 });
 
+test('preserves provider status, error code, and request id as non-user-facing metadata', async () => {
+  const provider = new OpenAiResponsesProvider(config as any, async () => ({
+    ok: false,
+    status: 429,
+    headers: new Headers({ 'x-request-id': 'req-audit' }),
+    text: async () => JSON.stringify({ error: { code: 'rate_limit_exceeded', message: 'secret payload' } }),
+  } as any));
+
+  await assert.rejects(() => provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' }), (error: any) => {
+    assert.equal(error.message, 'AI provider request failed (request ID: req-audit)');
+    assert.deepEqual(error.metadata, { status: 429, code: 'rate_limit_exceeded', requestId: 'req-audit' });
+    assert.doesNotMatch(error.message, /secret|rate_limit/);
+    return true;
+  });
+});
+
+test('joins multiline SSE data fields into one event payload', async () => {
+  const provider = new OpenAiResponsesProvider(config as any, async () => response([
+    'data: {"type":"response.output_text.delta",',
+    'data: "delta":"joined"}',
+    '',
+    'data: {"type":"response.completed","response":{"status":"completed"}}',
+    '',
+  ].join('\n')));
+
+  const result = await provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' });
+  assert.equal(result.text, 'joined');
+});
+
 test('returns a safe incomplete-response error rather than pretending it completed', async () => {
   const provider = new OpenAiResponsesProvider(config as any, async () => response('data: {"type":"response.incomplete","response":{"status":"incomplete"}}\n'));
 
@@ -108,7 +137,7 @@ test('exposes normalized events through an async-iterable streaming path', async
     'data: {"type":"response.output_text.delta","delta":"Olá"}',
     'data: {"type":"response.completed","response":{"status":"completed"}}',
     '',
-  ].join('\n')));
+  ].join('\n\n')));
   const events: any[] = [];
 
   for await (const event of provider.stream(input, { accessToken: 'oauth-token', type: 'oauth' })) events.push(event);
@@ -132,7 +161,7 @@ test('merges function-call argument deltas with the arguments.done event', async
     'data: {"type":"response.function_call_arguments.done","item_id":"call-2","arguments":"{\\"title\\":\\"Done\\"}"}',
     'data: {"type":"response.completed","response":{"status":"completed"}}',
     '',
-  ].join('\n')));
+  ].join('\n\n')));
 
   const result = await provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' });
 
@@ -157,7 +186,7 @@ test('refreshes OAuth once before yielding streaming events after a 401', async 
   const provider = new OpenAiResponsesProvider(config as any, async (_url, init) => {
     authorizations.push(new Headers(init?.headers).get('authorization') ?? '');
     if (authorizations.length === 1) return { ok: false, status: 401, headers: new Headers({ 'x-request-id': 'stream-401' }), text: async () => '' } as any;
-    return response('data: {"type":"response.output_text.delta","delta":"retried"}\ndata: {"type":"response.completed","response":{"status":"completed"}}\n');
+    return response('data: {"type":"response.output_text.delta","delta":"retried"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n');
   });
 
   const events: any[] = [];

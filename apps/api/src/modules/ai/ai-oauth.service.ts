@@ -5,7 +5,7 @@ import { EncryptionService } from '../../common/crypto/encryption.service';
 import {
   buildAuthorizationUrl, codeChallenge, DEFAULT_AUTHORIZATION_ENDPOINT, DEFAULT_ISSUER,
   DEFAULT_JWKS_URI, DEFAULT_SCOPES, DEFAULT_TOKEN_ENDPOINT, discoverOpenIdConfiguration,
-  assertRequiredScope, exchangeToken, OpenIdConfiguration, parseCallbackUrl, randomSecret, revokeToken, resolveClientId, sha256, validateIdToken,
+  assertCallbackClientId, assertRequiredScope, exchangeToken, OpenIdConfiguration, parseCallbackUrl, randomSecret, revokeToken, resolveClientId, sha256, validateIdToken,
 } from './ai-oauth.protocol';
 import { AiProviderAuth } from './ports/ai-provider.port';
 
@@ -109,6 +109,7 @@ export class AiOAuthService {
       grant_type: 'authorization_code', code: parsed.code!, redirect_uri: attempt.redirectUri, client_id: attempt.clientId, code_verifier: verifier,
     });
     const clientId = resolveClientId(attempt.clientId, tokens);
+    assertCallbackClientId(parsed.clientId, clientId);
     const scopes = assertRequiredScope(tokens.scope);
     const claims = await validateIdToken(tokens.id_token, { issuer, audience: clientId, nonce, jwksUri: discovered.jwks_uri ?? this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
     if (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== clientId) throw new Error('OAuth ID token authorized-party mismatch');
@@ -186,7 +187,7 @@ export class AiOAuthService {
     const refreshToken = this.encryption.decrypt({ ciphertext: connection.refreshTokenCiphertext, iv: connection.refreshTokenIv, authTag: connection.refreshTokenAuthTag });
     try {
       const discovered = await discoverOpenIdConfiguration(connection.issuer).catch((): OpenIdConfiguration => ({}));
-      const tokens = await exchangeToken(discovered.token_endpoint ?? this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: connection.clientId });
+      const tokens = await exchangeToken(discovered.token_endpoint ?? this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: connection.clientId }, fetch, { requireRefreshToken: false, requireIdToken: false });
       const access = this.encryption.encrypt(tokens.access_token);
       const refresh = this.encryption.encrypt(tokens.refresh_token ?? refreshToken);
       await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false, refreshLeaseToken: leaseToken }, data: { accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag, refreshTokenCiphertext: refresh.ciphertext, refreshTokenIv: refresh.iv, refreshTokenAuthTag: refresh.authTag, expiresAt: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000), lastUsedAt: new Date() } });

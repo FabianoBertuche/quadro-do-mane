@@ -5,7 +5,7 @@ import { AiService } from './ai.service';
 import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
-import { AiProvider } from './ports/ai-provider.port';
+import { AiProvider, AiProviderError } from './ports/ai-provider.port';
 import { AiResponseMode } from './dto/send-ai-message.dto';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
@@ -17,6 +17,7 @@ function setup(provider: AiProvider, oauth?: any) {
   const messageQueries: any[] = [];
   const proposalQueries: any[] = [];
   const proposalUpdates: any[] = [];
+  const auditLog: any[] = [];
   const prisma = {
     aiConversation: {
       create: async ({ data }: any) => {
@@ -69,13 +70,33 @@ function setup(provider: AiProvider, oauth?: any) {
     provider,
     context,
     new AiToolRegistryService([]),
-    new AiAuditService({ log: async () => undefined } as any),
+    new AiAuditService({ log: async (entry: any) => { auditLog.push(entry); } } as any),
     {},
     undefined,
     oauth,
   );
-  return { service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates };
+  return { service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates, auditLog };
 }
+
+test('audits provider HTTP metadata while keeping the thrown error safe', async () => {
+  const { service, auditLog } = setup({ complete: async () => {
+    throw new AiProviderError('AI provider request failed', { status: 429, code: 'rate_limit_exceeded', requestId: 'req-audit' });
+  } });
+
+  await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }), (error: Error) => {
+    assert.equal(error.message, 'AI provider request failed');
+    return true;
+  });
+  assert.deepEqual({
+    provider: auditLog.at(-1).metadata.provider,
+    status: auditLog.at(-1).metadata.status,
+    providerStatus: auditLog.at(-1).metadata.providerStatus,
+    providerCode: auditLog.at(-1).metadata.providerCode,
+    providerRequestId: auditLog.at(-1).metadata.providerRequestId,
+  }, {
+    provider: 'AI_PROVIDER', status: 'failed', providerStatus: 429, providerCode: 'rate_limit_exceeded', providerRequestId: 'req-audit',
+  });
+});
 
 test('resolves provider credentials from the authenticated actor', async () => {
   let receivedAuth: any;
