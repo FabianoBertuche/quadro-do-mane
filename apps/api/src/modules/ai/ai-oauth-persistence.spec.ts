@@ -31,6 +31,7 @@ function modelLine(model: string, field: string): string {
 
 test('defines encrypted tenant-user ChatGPT OAuth connection persistence', () => {
   const connection = modelBlock('AiOAuthConnection');
+  const tenantUser = modelBlock('TenantUser');
 
   for (const field of [
     'accessTokenCiphertext',
@@ -66,10 +67,11 @@ test('defines encrypted tenant-user ChatGPT OAuth connection persistence', () =>
   );
   assert.match(
     connection,
-    /tenantUser\s+TenantUser\s+@relation\(fields: \[tenantUserId\], references: \[id\], onDelete: Cascade\)/,
+    /tenantUser\s+TenantUser\s+@relation\(fields: \[tenantId, tenantUserId\], references: \[tenantId, id\], onDelete: Cascade\)/,
   );
   assert.match(connection, /@@unique\(\[tenantUserId, issuer, subject, clientId\]\)/);
   assert.match(connection, /@@index\(\[tenantId, tenantUserId/);
+  assert.match(tenantUser, /@@unique\(\[tenantId, id\]\)/);
 });
 
 test('defines expiring one-time OAuth attempts without token storage', () => {
@@ -95,9 +97,10 @@ test('defines expiring one-time OAuth attempts without token storage', () => {
   );
   assert.match(
     attempt,
-    /tenantUser\s+TenantUser\s+@relation\(fields: \[tenantUserId\], references: \[id\], onDelete: Cascade\)/,
+    /tenantUser\s+TenantUser\s+@relation\(fields: \[tenantId, tenantUserId\], references: \[tenantId, id\], onDelete: Cascade\)/,
   );
-  assert.match(attempt, /@@index\(\[tenantId, tenantUserId, expiresAt\]\)/);
+  assert.equal(modelLine(attempt, 'consumedAt'), 'consumedAt       DateTime? @map("consumed_at")');
+  assert.match(attempt, /@@index\(\[tenantId, tenantUserId, consumedAt, expiresAt\]\)/);
   assert.doesNotMatch(attempt, /accessToken|refreshToken|idToken/);
 });
 
@@ -118,6 +121,14 @@ test('migration creates OAuth tables, encrypted columns, identity constraint, an
     migration,
     /ai_oauth_attempts_tenant_id_tenant_user_id_expires_at_idx/,
   );
+  assert.match(
+    migration,
+    /ai_oauth_attempts_tenant_id_tenant_user_id_consumed_at_expires_at_idx/,
+  );
+  assert.match(migration, /CREATE UNIQUE INDEX "tenant_users_tenant_id_id_key"/);
+  assert.match(
+    migration,
+    /FOREIGN KEY \("tenant_id", "tenant_user_id"\) REFERENCES "tenant_users"\("tenant_id", "id"\) ON DELETE CASCADE/,
+  );
   assert.match(migration, /REFERENCES "tenants"\("id"\) ON DELETE CASCADE/);
-  assert.match(migration, /REFERENCES "tenant_users"\("id"\) ON DELETE CASCADE/);
 });

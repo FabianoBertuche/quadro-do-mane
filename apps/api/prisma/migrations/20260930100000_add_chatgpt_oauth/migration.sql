@@ -53,12 +53,17 @@ CREATE UNIQUE INDEX "ai_oauth_attempts_state_hash_key"
     ON "ai_oauth_attempts"("state_hash");
 CREATE INDEX "ai_oauth_attempts_tenant_id_tenant_user_id_expires_at_idx"
     ON "ai_oauth_attempts"("tenant_id", "tenant_user_id", "expires_at");
+CREATE INDEX "ai_oauth_attempts_tenant_id_tenant_user_id_consumed_at_expires_at_idx"
+    ON "ai_oauth_attempts"("tenant_id", "tenant_user_id", "consumed_at", "expires_at");
+
+CREATE UNIQUE INDEX "tenant_users_tenant_id_id_key"
+    ON "tenant_users"("tenant_id", "id");
 
 ALTER TABLE "ai_oauth_connections" ADD CONSTRAINT "ai_oauth_connections_tenant_id_fkey"
     FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "ai_oauth_connections" ADD CONSTRAINT "ai_oauth_connections_tenant_user_id_fkey"
-    FOREIGN KEY ("tenant_user_id") REFERENCES "tenant_users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ai_oauth_connections" ADD CONSTRAINT "ai_oauth_connections_tenant_id_tenant_user_id_fkey"
+    FOREIGN KEY ("tenant_id", "tenant_user_id") REFERENCES "tenant_users"("tenant_id", "id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "ai_oauth_attempts" ADD CONSTRAINT "ai_oauth_attempts_tenant_id_fkey"
     FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "ai_oauth_attempts" ADD CONSTRAINT "ai_oauth_attempts_tenant_user_id_fkey"
-    FOREIGN KEY ("tenant_user_id") REFERENCES "tenant_users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ai_oauth_attempts" ADD CONSTRAINT "ai_oauth_attempts_tenant_id_tenant_user_id_fkey"
+    FOREIGN KEY ("tenant_id", "tenant_user_id") REFERENCES "tenant_users"("tenant_id", "id") ON DELETE CASCADE ON UPDATE CASCADE;

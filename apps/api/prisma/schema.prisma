@@ -153,6 +153,7 @@ model TenantUser {
   aiOAuthAttempts            AiOAuthAttempt[]
 
   @@unique([tenantId, userId])
+  @@unique([tenantId, id])
   @@map("tenant_users")
 }
 
@@ -1075,7 +1076,7 @@ model AiOAuthConnection {
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenantUser TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  tenantUser TenantUser @relation(fields: [tenantId, tenantUserId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([tenantUserId, issuer, subject, clientId])
   @@index([tenantId, tenantUserId, expiresAt])
@@ -1097,9 +1098,10 @@ model AiOAuthAttempt {
   createdAt        DateTime  @default(now()) @map("created_at")
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenantUser TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  tenantUser TenantUser @relation(fields: [tenantId, tenantUserId], references: [tenantId, id], onDelete: Cascade)
 
   @@index([tenantId, tenantUserId, expiresAt])
+  @@index([tenantId, tenantUserId, consumedAt, expiresAt])
   @@map("ai_oauth_attempts")
 }
 
