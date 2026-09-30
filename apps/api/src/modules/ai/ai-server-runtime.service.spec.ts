@@ -131,6 +131,26 @@ test('rejects model selection when the global connection changes after catalog f
   }
 });
 
+test('selects a model after provider auth updates last-used metadata for the same connection', async () => {
+  const connection = { id: 'connection-a', updatedAt: new Date('2030-01-01T00:00:00.000Z') };
+  const prisma = createPrisma(runtime(connection));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({ ok: true, json: async () => ({ data: [{ slug: 'model-a', display_name: 'Model A', visibility: 'list' }] }) }) as any) as any;
+  try {
+    const service = new AiServerRuntimeService(prisma as any, {
+      resolveProviderAuth: async () => {
+        connection.updatedAt = new Date('2030-01-01T00:01:00.000Z');
+        return { type: 'oauth', accessToken: 'secret-token' };
+      },
+    } as any);
+    assert.deepEqual(await service.selectModel('model-a'), {
+      connectionStatus: 'connected', provider: 'chatgpt', selectedModel: { slug: 'model-a', displayName: 'Model A' },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('returns redacted global runtime metadata', async () => {
   const prisma = createPrisma(runtime({ id: 'global-connection' }, 'gpt-5', 'GPT-5'));
   let resolveCalls = 0;

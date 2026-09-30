@@ -53,6 +53,25 @@ npm run build
 nest build exited 0
 ```
 
+## Post-Auth Catalog Version Fix
+
+- Catalog identity is now captured only after `resolveProviderAuth()` completes its `lastUsedAt` update and the runtime is reloaded.
+- Cached catalogs retain a pre-auth fast path when their current runtime key still matches, avoiding unnecessary credential usage updates.
+- A normal authenticated selection no longer falsely rejects because its own OAuth use updated the connection timestamp; disconnect/reconnect and credential-replacement changes after catalog identity capture still reject safely.
+
+Verification for this fix:
+
+```text
+node -r ts-node/register --test src/modules/ai/ai-server-runtime.service.spec.ts src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai-oauth.controller.spec.ts
+34 passed, 0 failed
+
+npm run build
+nest build exited 0
+
+git diff --check
+exited 0
+```
+
 Coverage includes global OAuth resolution without actor identity, expired global token refresh, bearer catalog request, `visibility=list` filtering and order, cache invalidation on connection change, unavailable/unknown-model errors, global encrypted-token persistence, disconnect, and runtime token redaction.
 
 ## Scope And Concerns

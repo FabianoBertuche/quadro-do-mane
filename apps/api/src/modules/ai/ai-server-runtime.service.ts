@@ -41,16 +41,22 @@ export class AiServerRuntimeService {
   }
 
   private async catalogForCurrentRuntime(): Promise<{ connectionKey: string; models: AiServerModel[] }> {
-    const runtime = await this.runtime();
+    let runtime = await this.runtime();
+    if (!runtime.oauthConnectionId) {
+      this.catalog = undefined;
+      throw new BadRequestException('Catálogo de modelos indisponível');
+    }
+    if (this.catalog?.connectionKey === this.connectionKey(runtime)) return this.catalog;
+
+    const auth = await this.oauth.resolveProviderAuth();
+    if (!auth) throw new BadRequestException('Catálogo de modelos indisponível');
+    runtime = await this.runtime();
     if (!runtime.oauthConnectionId) {
       this.catalog = undefined;
       throw new BadRequestException('Catálogo de modelos indisponível');
     }
     const connectionKey = this.connectionKey(runtime);
     if (this.catalog?.connectionKey === connectionKey) return this.catalog;
-
-    const auth = await this.oauth.resolveProviderAuth();
-    if (!auth) throw new BadRequestException('Catálogo de modelos indisponível');
     try {
       const models = await fetchOpenAiModels(auth.accessToken);
       this.catalog = { connectionKey, models };
