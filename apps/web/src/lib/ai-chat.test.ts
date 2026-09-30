@@ -5,6 +5,7 @@ import {
   cancelAction,
   confirmAction,
   createConversation,
+  getClarificationDetails,
   listConversations,
   listMessages,
   sendTextMessage,
@@ -26,6 +27,22 @@ test('lists global conversations through the authenticated API', async () => {
   }
 });
 
+test('requests additional conversation pages with explicit pagination', async () => {
+  const originalGet = api.get;
+  let request: { url: string; config?: unknown } | undefined;
+  api.get = (async (url: string, config?: unknown) => {
+    request = { url, config };
+    return { data: [{ id: 'conversation-21', contextProjectId: null }] };
+  }) as typeof api.get;
+
+  try {
+    assert.deepEqual(await listConversations(2), [{ id: 'conversation-21', contextProjectId: null }]);
+    assert.deepEqual(request, { url: '/ai/conversations', config: { params: { page: 2, take: 20 } } });
+  } finally {
+    api.get = originalGet;
+  }
+});
+
 test('creates a conversation with project context only when explicitly provided', async () => {
   const originalPost = api.post;
   const requests: Array<{ url: string; data?: unknown }> = [];
@@ -41,6 +58,18 @@ test('creates a conversation with project context only when explicitly provided'
       { url: '/ai/conversations', data: {} },
       { url: '/ai/conversations', data: { contextProjectId: 'project-1' } },
     ]);
+  } finally {
+    api.post = originalPost;
+  }
+});
+
+test('preserves conversation creation errors for the page to display', async () => {
+  const originalPost = api.post;
+  const failure = new Error('creation failed');
+  api.post = (async () => { throw failure; }) as typeof api.post;
+
+  try {
+    await assert.rejects(() => createConversation(), failure);
   } finally {
     api.post = originalPost;
   }
@@ -85,7 +114,7 @@ test('confirms and cancels proposals through their existing endpoints', async ()
 
   try {
     assert.deepEqual(await confirmAction('proposal-1'), { id: 'proposal-1', status: 'EXECUTED' });
-    await cancelAction('proposal-1');
+    assert.equal(await cancelAction('proposal-1'), undefined);
     assert.deepEqual(requests, [
       '/ai/action-proposals/proposal-1/confirm',
       '/ai/action-proposals/proposal-1/cancel',
@@ -93,4 +122,28 @@ test('confirms and cancels proposals through their existing endpoints', async ()
   } finally {
     api.post = originalPost;
   }
+});
+
+test('maps structured clarification details instead of dropping them', () => {
+  assert.deepEqual(
+    getClarificationDetails(JSON.stringify({
+      status: 'needsClarification',
+      result: { needsClarification: true, field: 'projectName', matches: ['Projeto Alpha', 'Projeto Alfa'] },
+    })),
+    {
+      field: 'projectName',
+      options: ['Projeto Alpha', 'Projeto Alfa'],
+      message: 'Escolha um valor para projectName.',
+    },
+  );
+});
+
+test('maps clarification messages and ambiguous names when the field is absent', () => {
+  assert.deepEqual(
+    getClarificationDetails(JSON.stringify({
+      status: 'needsClarification',
+      result: { options: ['Ana', 'Anabela'], message: 'Qual pessoa você quis dizer?' },
+    })),
+    { options: ['Ana', 'Anabela'], message: 'Qual pessoa você quis dizer?' },
+  );
 });

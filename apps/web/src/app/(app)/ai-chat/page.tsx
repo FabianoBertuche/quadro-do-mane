@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Plus, Send } from 'lucide-react';
 import { AiActionProposalCard } from '@/components/ai/AiActionProposalCard';
 import { AiChatMessage } from '@/components/ai/AiChatMessage';
@@ -24,16 +24,20 @@ export default function AiChatPage() {
   const [conversationId, setConversationId] = useState<string>();
   const [text, setText] = useState('');
 
-  const conversations = useQuery({
+  const conversations = useInfiniteQuery({
     queryKey: ['ai-conversations'],
-    queryFn: listConversations,
+    queryFn: ({ pageParam }) => listConversations(pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, pages) => lastPage.length === 20 ? pages.length + 1 : undefined,
     enabled: hydrated,
   });
+
+  const availableConversations = conversations.data?.pages.flat() || [];
 
   const conversation = useQuery({
     queryKey: ['ai-conversation', contextProjectId || 'global'],
     queryFn: async () => {
-      const available = conversations.data || [];
+      const available = availableConversations;
       const selected = contextProjectId
         ? available.find((item) => item.contextProjectId === contextProjectId)
         : available.find((item) => !item.contextProjectId);
@@ -80,11 +84,13 @@ export default function AiChatPage() {
     if (value && conversationId && !send.isPending) send.mutate(value);
   };
 
-  const startNewConversation = async () => {
-    const created = await createConversation(contextProjectId);
-    setConversationId(created.id);
-    queryClient.invalidateQueries({ queryKey: ['ai-conversations'] });
-  };
+  const newConversation = useMutation({
+    mutationFn: () => createConversation(contextProjectId),
+    onSuccess: (created) => {
+      setConversationId(created.id);
+      queryClient.invalidateQueries({ queryKey: ['ai-conversations'] });
+    },
+  });
 
   if (conversations.isLoading || conversation.isLoading) return <div className="animate-pulse h-96 rounded-2xl bg-muted" />;
   if (conversations.isError || conversation.isError) return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">Não foi possível carregar o assistente.</div>;
@@ -99,9 +105,10 @@ export default function AiChatPage() {
         </div>
         <div className="flex items-center gap-2">
           <select value={conversationId || ''} onChange={(event) => setConversationId(event.target.value)} className="max-w-[18rem] rounded-xl border border-border bg-card px-3 py-2 text-sm" aria-label="Selecionar conversa">
-            {(conversations.data || []).filter((item) => contextProjectId ? item.contextProjectId === contextProjectId : !item.contextProjectId).map((item) => <option key={item.id} value={item.id}>{item.contextProjectId ? `Projeto ${item.contextProjectId.slice(0, 8)}` : 'Conversa global'}</option>)}
+            {availableConversations.filter((item) => contextProjectId ? item.contextProjectId === contextProjectId : !item.contextProjectId).map((item) => <option key={item.id} value={item.id}>{item.contextProjectId ? `Projeto ${item.contextProjectId.slice(0, 8)}` : 'Conversa global'}</option>)}
           </select>
-          <button type="button" onClick={startNewConversation} className="rounded-xl border border-border p-2 hover:bg-muted" aria-label="Nova conversa"><Plus className="h-4 w-4" /></button>
+          <button type="button" onClick={() => newConversation.mutate()} disabled={newConversation.isPending} className="rounded-xl border border-border p-2 hover:bg-muted disabled:opacity-50" aria-label="Nova conversa"><Plus className="h-4 w-4" /></button>
+          {conversations.hasNextPage && <button type="button" onClick={() => conversations.fetchNextPage()} disabled={conversations.isFetchingNextPage} className="rounded-xl border border-border px-3 py-2 text-xs hover:bg-muted disabled:opacity-50">{conversations.isFetchingNextPage ? 'Carregando...' : 'Carregar mais'}</button>}
         </div>
       </header>
 
@@ -119,6 +126,7 @@ export default function AiChatPage() {
         </form>
         {send.isError && <p className="px-4 pb-3 text-sm text-red-600">Não foi possível enviar a mensagem. Tente novamente.</p>}
         {action.isError && <p className="px-4 pb-3 text-sm text-red-600">Não foi possível atualizar a proposta.</p>}
+        {newConversation.isError && <p className="px-4 pb-3 text-sm text-red-600">Não foi possível criar uma nova conversa. Tente novamente.</p>}
       </section>
     </div>
   );
