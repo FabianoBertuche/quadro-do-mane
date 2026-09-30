@@ -74,11 +74,23 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
   }
 
   async *stream(input: AiCompletionInput, auth?: AiProviderAuth): AsyncIterable<AiProviderStreamEvent> {
-    const resolvedAuth = auth ?? this.fallbackAuth();
+    let resolvedAuth = auth ?? this.fallbackAuth();
     if (!resolvedAuth) throw new Error('AI provider is not configured');
-    const response = await this.request(input, resolvedAuth).catch(() => { throw new Error('AI provider request failed'); });
-    if (!response.ok) throw this.providerError(response);
-    yield* this.readStream(response);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await this.request(input, resolvedAuth).catch(() => { throw new Error('AI provider request failed'); });
+      if (response.status === 401 && resolvedAuth.type === 'oauth' && resolvedAuth.refresh && attempt === 0) {
+        try {
+          resolvedAuth = await resolvedAuth.refresh();
+        } catch {
+          throw new Error('AI provider authentication failed');
+        }
+        continue;
+      }
+      if (!response.ok) throw this.providerError(response);
+      yield* this.readStream(response);
+      return;
+    }
+    throw new Error('AI provider request failed');
   }
 
   private fallbackAuth(): AiProviderAuth | undefined {

@@ -51,3 +51,19 @@ node -r ts-node/register --test src/modules/ai/providers/*.spec.ts src/modules/a
 npm run build
 exit 0
 ```
+
+## Streaming Retry Fix
+
+- Updated `OpenAiResponsesProvider.stream()` to resolve OAuth 401 responses with the same one-refresh/one-retry policy as `complete()` before yielding any events.
+- A second 401 is returned as a safe provider error; non-401 statuses are never retried.
+- Added streaming retry and non-401 no-retry regression tests.
+
+## Streaming Retry Verification
+
+```text
+node -r ts-node/register --test src/modules/ai/providers/*.spec.ts src/modules/ai/ai.service.spec.ts src/modules/ai/ai-security.spec.ts src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai.module.spec.ts
+58 tests passed, 0 failed
+
+npm run build
+exit 0
+```

@@ -152,6 +152,39 @@ test('does not retry a second OAuth 401', async () => {
   assert.equal(calls, 2);
 });
 
+test('refreshes OAuth once before yielding streaming events after a 401', async () => {
+  const authorizations: string[] = [];
+  const provider = new OpenAiResponsesProvider(config as any, async (_url, init) => {
+    authorizations.push(new Headers(init?.headers).get('authorization') ?? '');
+    if (authorizations.length === 1) return { ok: false, status: 401, headers: new Headers({ 'x-request-id': 'stream-401' }), text: async () => '' } as any;
+    return response('data: {"type":"response.output_text.delta","delta":"retried"}\ndata: {"type":"response.completed","response":{"status":"completed"}}\n');
+  });
+
+  const events: any[] = [];
+  for await (const event of provider.stream(input, {
+    accessToken: 'old-token', type: 'oauth',
+    refresh: async () => ({ accessToken: 'new-token', type: 'oauth' }),
+  })) events.push(event);
+
+  assert.deepEqual(authorizations, ['Bearer old-token', 'Bearer new-token']);
+  assert.deepEqual(events, [{ type: 'text.delta', delta: 'retried' }, { type: 'completed' }]);
+});
+
+test('does not retry streaming requests for non-401 statuses', async () => {
+  let calls = 0;
+  const provider = new OpenAiResponsesProvider(config as any, async () => {
+    calls += 1;
+    return { ok: false, status: 500, headers: new Headers({ 'x-request-id': 'stream-500' }), text: async () => '' } as any;
+  });
+
+  await assert.rejects(() => (async () => {
+    for await (const _event of provider.stream(input, {
+      accessToken: 'old-token', type: 'oauth', refresh: async () => ({ accessToken: 'new-token', type: 'oauth' }),
+    })) { /* expected to fail before yielding */ }
+  })(), /request ID: stream-500/);
+  assert.equal(calls, 1);
+});
+
 test('does not use an API-key fallback when AI is disabled', async () => {
   const disabledConfig = { get: (key: string, fallback?: string) => ({
     OPENAI_MODEL: 'test-model', OPENAI_API_KEY: 'api-key', AI_ENABLED: false,
