@@ -91,6 +91,7 @@ export function parseCallbackUrl(
   expectedState: string,
   redirectUri: string,
   expectedClientId?: string,
+  requireClientId = false,
 ): CallbackResult {
   const url = new URL(callbackUrl);
   if (url.origin + url.pathname !== new URL(redirectUri).origin + new URL(redirectUri).pathname) {
@@ -99,12 +100,12 @@ export function parseCallbackUrl(
   const state = url.searchParams.get('state') ?? undefined;
   if (!state || !safeEqual(state, expectedState)) return { state, error: new Error('OAuth state mismatch') };
   const callbackClientId = url.searchParams.get('client_id');
-  if (!callbackClientId) throw new Error('OAuth client id missing');
-  if (expectedClientId && callbackClientId !== expectedClientId) {
-    throw new Error('OAuth client id mismatch');
-  }
   const error = url.searchParams.get('error');
   if (error) return { state, clientId: callbackClientId ?? undefined, error: new Error(`OAuth authorization failed: ${error}`), errorDescription: url.searchParams.get('error_description') ?? undefined };
+  if (requireClientId && !callbackClientId) throw new Error('OAuth client id missing');
+  if (expectedClientId && callbackClientId && callbackClientId !== expectedClientId) {
+    throw new Error('OAuth client id mismatch');
+  }
   const code = url.searchParams.get('code');
   if (!code) throw new Error('OAuth callback did not contain an authorization code');
   return { code, state, clientId: callbackClientId ?? undefined };
@@ -127,10 +128,13 @@ export async function exchangeToken(
   fetcher: typeof fetch = fetch,
   options: { requireRefreshToken?: boolean; requireIdToken?: boolean } = {},
 ): Promise<Record<string, any>> {
+  const requestForm = form.grant_type === 'authorization_code' && !form.resource
+    ? { ...form, resource: DEFAULT_RESOURCE }
+    : form;
   const response = await fetcher(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-    body: new URLSearchParams(form),
+    body: new URLSearchParams(requestForm),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {

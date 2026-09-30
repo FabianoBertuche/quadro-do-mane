@@ -69,6 +69,54 @@ test('retains a dynamic callback client id for validation after token exchange',
   assert.throws(() => assertCallbackClientId(undefined, 'issued-client'), /OAuth client id missing/);
 });
 
+test('allows a returning callback without client id but requires it for dynamic registration', () => {
+  const returning = parseCallbackUrl(
+    'http://127.0.0.1:1455/auth/callback?code=code&state=state',
+    'state',
+    'http://127.0.0.1:1455/auth/callback',
+    'issued-client',
+  );
+  assert.equal(returning.code, 'code');
+  assert.equal(returning.clientId, undefined);
+  assert.throws(() => (parseCallbackUrl as any)(
+    'http://127.0.0.1:1455/auth/callback?code=code&state=state',
+    'state',
+    'http://127.0.0.1:1455/auth/callback',
+    undefined,
+    true,
+  ), /OAuth client id missing/);
+});
+
+test('returns provider callback errors before requiring a client id', () => {
+  const callback = (parseCallbackUrl as any)(
+    'http://127.0.0.1:1455/auth/callback?state=state&error=access_denied',
+    'state',
+    'http://127.0.0.1:1455/auth/callback',
+    undefined,
+    true,
+  );
+  assert.equal(callback.error?.message, 'OAuth authorization failed: access_denied');
+});
+
+test('includes the OpenAI resource in authorization-code token exchange', async () => {
+  let requestBody: URLSearchParams | undefined;
+  await exchangeToken('https://auth.example/token', {
+    grant_type: 'authorization_code',
+    code: 'code',
+    redirect_uri: 'http://127.0.0.1:1455/auth/callback',
+    client_id: 'client',
+    code_verifier: 'verifier',
+  }, async (_url, init) => {
+    requestBody = new URLSearchParams(String(init?.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: 'access', expires_in: 3600, refresh_token: 'refresh', id_token: 'id' }),
+    } as any;
+  });
+  assert.equal(requestBody?.get('resource'), 'https://api.openai.com/v1');
+});
+
 test('rejects incomplete token responses before callers encrypt token fields', async () => {
   await assert.rejects(() => exchangeToken('https://auth.example/token', {}, async () => ({
     ok: true,

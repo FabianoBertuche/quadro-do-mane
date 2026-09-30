@@ -95,7 +95,7 @@ export class AiOAuthService {
     const attempt = await this.prisma.aiOAuthAttempt.findFirst({ where: { tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, stateHash, consumedAt: null, expiresAt: { gt: now } } });
     if (!attempt) throw new Error('OAuth attempt is invalid or expired');
     const expectedState = state;
-    const parsed = parseCallbackUrl(callbackUrl, expectedState, attempt.redirectUri, attempt.clientId === 'dynamic_agent_client' ? undefined : attempt.clientId);
+    const parsed = parseCallbackUrl(callbackUrl, expectedState, attempt.redirectUri, attempt.clientId === 'dynamic_agent_client' ? undefined : attempt.clientId, attempt.clientId === 'dynamic_agent_client');
     if (parsed.error) throw parsed.error;
     const claimed = await this.prisma.aiOAuthAttempt.updateMany({ where: { id: attempt.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, consumedAt: null, expiresAt: { gt: now } }, data: { consumedAt: now } });
     if (claimed.count !== 1) throw new Error('OAuth attempt is already consumed');
@@ -109,7 +109,7 @@ export class AiOAuthService {
       grant_type: 'authorization_code', code: parsed.code!, redirect_uri: attempt.redirectUri, client_id: attempt.clientId, code_verifier: verifier,
     });
     const clientId = resolveClientId(attempt.clientId, tokens);
-    assertCallbackClientId(parsed.clientId, clientId);
+    if (parsed.clientId) assertCallbackClientId(parsed.clientId, clientId);
     const scopes = assertRequiredScope(tokens.scope);
     const claims = await validateIdToken(tokens.id_token, { issuer, audience: clientId, nonce, jwksUri: discovered.jwks_uri ?? this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
     if (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== clientId) throw new Error('OAuth ID token authorized-party mismatch');

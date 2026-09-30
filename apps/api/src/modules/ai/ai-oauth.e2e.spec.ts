@@ -82,7 +82,8 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
     const body = new URLSearchParams(String(init?.body));
     tokenRequests.push({ url, body });
     assert.equal(body.get('code'), 'auth-code');
-    const nonce = [...attempts.values()][0].nonceCiphertext.slice('encrypted:'.length);
+    const nonceAttempt = [...attempts.values()].find((attempt) => attempt.pkceVerifierCiphertext === `encrypted:${body.get('code_verifier')}`);
+    const nonce = nonceAttempt?.nonceCiphertext.slice('encrypted:'.length);
     const payload = Buffer.from(JSON.stringify({
       iss: 'https://auth.example', aud: 'issued-client', sub: 'openai-subject', nonce,
       email: 'person@example.com', name: 'Person', exp: Math.floor(Date.now() / 1000) + 3600,
@@ -143,6 +144,7 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
     assert.equal(tokenRequests[1].body.get('redirect_uri'), attempt.redirectUri);
     assert.equal(tokenRequests[1].body.get('client_id'), 'dynamic_agent_client');
     assert.equal(tokenRequests[1].body.get('code_verifier'), verifier);
+    assert.equal(tokenRequests[1].body.get('resource'), 'https://api.openai.com/v1');
     assert.deepEqual(completed, {
       id: 'connection-1', provider: 'https://auth.example', email: 'person@example.com',
       scopes: ['openid', 'offline_access', 'chatgpt.tokens.use.direct'],
@@ -156,12 +158,14 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
 
     const secondStarted = await controller.start(actor as any);
     const secondAuthorization = new URL(secondStarted.authorizationUrl);
-    await assert.rejects(() => controller.complete(actor as any, {
+    const returningCompleted = await controller.complete(actor as any, {
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${secondAuthorization.searchParams.get('state')}`,
-    }), /client id missing|Não foi possível concluir/);
-    assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 2);
+    });
+    assert.equal(returningCompleted.id, 'connection-1');
+    assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 3);
+    const thirdAuthorization = new URL((await controller.start(actor as any)).authorizationUrl);
     await assert.rejects(() => controller.complete(actor as any, {
-      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${secondAuthorization.searchParams.get('state')}&client_id=other-client`,
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${thirdAuthorization.searchParams.get('state')}&client_id=other-client`,
     }), /client id mismatch|Não foi possível concluir/);
 
     const listed = await controller.connections(actor as any);
