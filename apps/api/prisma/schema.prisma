@@ -94,6 +94,8 @@ model Tenant {
   aiMessages              AiMessage[]
   aiActionProposals       AiActionProposal[]
   aiRateLimitBuckets      AiRateLimitBucket[]
+  aiOAuthConnections      AiOAuthConnection[]
+  aiOAuthAttempts         AiOAuthAttempt[]
 
   @@map("tenants")
 }
@@ -147,6 +149,8 @@ model TenantUser {
   aiConversations            AiConversation[]
   aiActionProposals          AiActionProposal[]
   aiRateLimitBuckets         AiRateLimitBucket[]
+  aiOAuthConnections         AiOAuthConnection[]
+  aiOAuthAttempts            AiOAuthAttempt[]
 
   @@unique([tenantId, userId])
   @@map("tenant_users")
@@ -1041,6 +1045,62 @@ model AiActionProposal {
 
   @@index([tenantId, createdByTenantUserId, status])
   @@map("ai_action_proposals")
+}
+
+model AiOAuthConnection {
+  id                     String    @id @default(uuid())
+  tenantId               String    @map("tenant_id")
+  tenantUserId           String    @map("tenant_user_id")
+  issuer                 String
+  subject                String
+  clientId               String    @map("client_id")
+  accessTokenCiphertext  String    @map("access_token_ciphertext")
+  accessTokenIv          String    @map("access_token_iv")
+  accessTokenAuthTag     String    @map("access_token_auth_tag")
+  refreshTokenCiphertext String    @map("refresh_token_ciphertext")
+  refreshTokenIv         String    @map("refresh_token_iv")
+  refreshTokenAuthTag    String    @map("refresh_token_auth_tag")
+  idTokenCiphertext      String    @map("id_token_ciphertext")
+  idTokenIv              String    @map("id_token_iv")
+  idTokenAuthTag         String    @map("id_token_auth_tag")
+  email                  String?
+  displayName            String?   @map("display_name")
+  scopes                 String
+  expiresAt              DateTime  @map("expires_at")
+  extAgentHostId         String    @map("ext_agent_host_id")
+  isRevoked              Boolean   @default(false) @map("is_revoked")
+  revokedAt              DateTime? @map("revoked_at")
+  lastUsedAt             DateTime? @map("last_used_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantUserId, issuer, subject, clientId])
+  @@index([tenantId, tenantUserId, expiresAt])
+  @@map("ai_oauth_connections")
+}
+
+model AiOAuthAttempt {
+  id               String    @id @default(uuid())
+  tenantId         String    @map("tenant_id")
+  tenantUserId     String    @map("tenant_user_id")
+  stateHash        String    @unique @map("state_hash")
+  nonceHash        String    @map("nonce_hash")
+  pkceVerifierHash String    @map("pkce_verifier_hash")
+  redirectUri      String    @map("redirect_uri")
+  clientId         String    @map("client_id")
+  extAgentHostId   String    @map("ext_agent_host_id")
+  expiresAt        DateTime  @map("expires_at")
+  consumedAt       DateTime? @map("consumed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, tenantUserId, expiresAt])
+  @@map("ai_oauth_attempts")
 }
 
 model AiRateLimitBucket {
