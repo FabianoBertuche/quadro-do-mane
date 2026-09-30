@@ -71,6 +71,25 @@ test('invalidates a catalog cache when the global connection changes', async () 
   }
 });
 
+test('invalidates a catalog cache when the same global connection is updated', async () => {
+  const connection = { id: 'global-connection', updatedAt: new Date('2030-01-01T00:00:00.000Z') };
+  const prisma = createPrisma(runtime(connection));
+  let calls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({ ok: true, json: async () => ({ data: [{ slug: `gpt-${++calls}`, display_name: `GPT ${calls}`, visibility: 'list' }] }) }) as any) as any;
+  try {
+    const service = new AiServerRuntimeService(prisma as any, {
+      resolveProviderAuth: async () => ({ type: 'oauth', accessToken: 'secret-token' }),
+    } as any);
+    await service.listModels();
+    connection.updatedAt = new Date('2030-01-02T00:00:00.000Z');
+    assert.deepEqual(await service.listModels(), [{ slug: 'gpt-2', displayName: 'GPT 2' }]);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('rejects selection when the global catalog is unavailable or does not contain the submitted slug', async () => {
   const prisma = createPrisma(runtime({ id: 'global-connection' }));
   const originalFetch = globalThis.fetch;

@@ -211,6 +211,7 @@ test('completes from persisted encrypted PKCE and nonce material after service r
     },
   };
   const originalFetch = globalThis.fetch;
+  const auditEntries: any[] = [];
   globalThis.fetch = (async (url: string) => {
     if (url.endsWith('openid-configuration')) return { ok: true, json: async () => ({ token_endpoint: 'https://auth.example/token', jwks_uri: 'https://auth.example/jwks' }) } as any;
     if (url.endsWith('/jwks')) return { ok: true, json: async () => ({ keys: [{ kid: 'restart-key', ...publicKey.export({ format: 'jwk' }) }] }) } as any;
@@ -220,11 +221,14 @@ test('completes from persisted encrypted PKCE and nonce material after service r
     const service = new AiOAuthService(prisma as any, {
       decrypt: ({ ciphertext }: any) => ciphertext === 'nonce-verifier' ? verifier : nonce,
       encrypt: (value: string) => ({ ciphertext: `encrypted-${value}`, iv: 'iv', authTag: 'tag' }),
-    } as any, { get: (key: string) => key === 'CHATGPT_OAUTH_ISSUER' ? 'https://auth.example' : undefined } as any);
+    } as any, { get: (key: string) => key === 'CHATGPT_OAUTH_ISSUER' ? 'https://auth.example' : undefined } as any, {
+      record: async (entry: any) => auditEntries.push(entry),
+    } as any);
     const view = await service.completeAuthorization({ tenantId: 'tenant-a', tenantUserId: 'user-a' }, `http://127.0.0.1:1455/auth/callback?code=code&state=${state}&client_id=issued-client`);
     assert.equal(consumed, true);
     assert.equal(view.id, 'connection-id');
     assert.equal(view.email, 'person@example.com');
+    assert.deepEqual(auditEntries, [{ tenantId: 'tenant-a', actorTenantUserId: 'user-a', action: 'oauth.connected', targetId: 'connection-id', metadata: { provider: 'chatgpt', status: 'connected' } }]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -254,6 +258,7 @@ test('serializes refreshes with the persisted lease and rotates the refresh toke
     refreshLeaseToken: null, refreshLeaseExpiresAt: null,
   };
   const prisma = {
+    aiServerRuntime: { upsert: async () => ({ id: 'global', oauthConnectionId: 'connection-id', oauthConnection: connection }) },
     aiOAuthConnection: {
       findFirst: async ({ where }: any) => ({ ...connection, refreshLeaseToken: leaseHeld ? 'held' : null, refreshLeaseExpiresAt: leaseHeld ? new Date(Date.now() + 1000) : null, tenantId: where.tenantId, tenantUserId: where.tenantUserId }),
       updateMany: async ({ data }: any) => {
@@ -307,6 +312,7 @@ test('fences a slow refresh after its lease expires before it can overwrite newe
   const slowRemote = new Promise<void>((resolve) => { releaseSlowRemote = resolve; });
   let refreshCalls = 0;
   const prisma = {
+    aiServerRuntime: { upsert: async () => ({ id: 'global', oauthConnectionId: 'connection-id', oauthConnection: row }) },
     aiOAuthConnection: {
       findFirst: async () => ({ ...row }),
       updateMany: async ({ where, data }: any) => {
@@ -383,6 +389,95 @@ test('resolves and refreshes the expired global OAuth connection without an acto
   }
 });
 
+test('rejects refresh and disconnect requests for a legacy connection outside the global runtime', async () => {
+  let connectionMutations = 0;
+  const prisma = {
+    aiServerRuntime: { upsert: async () => ({ id: 'global', oauthConnectionId: 'global-connection', oauthConnection: null }) },
+    aiOAuthConnection: {
+      findFirst: async () => ({ id: 'legacy-connection', isRevoked: false }),
+      updateMany: async () => { connectionMutations += 1; return { count: 1 }; },
+    },
+  };
+  const service = new AiOAuthService(prisma as any, {} as any, {} as any);
+
+  await assert.rejects(() => service.refreshConnection('legacy-connection'), /OAuth connection not found/);
+  await assert.rejects(() => service.disconnectConnection('legacy-connection'), /OAuth connection not found/);
+  assert.equal(connectionMutations, 0);
+});
+
+test('serializes global credential attachment through the singleton runtime row lock', async () => {
+  let rowLockCalls = 0;
+  const runtime = { id: 'global', oauthConnectionId: null, oauthConnection: null };
+  const transaction = {
+    $queryRawUnsafe: async () => { rowLockCalls += 1; },
+    aiServerRuntime: {
+      findUnique: async () => runtime,
+      update: async ({ data }: any) => Object.assign(runtime, data),
+    },
+    aiOAuthConnection: { create: async ({ data }: any) => ({ ...data, id: 'global-connection' }) },
+  };
+  const prisma = {
+    aiServerRuntime: { upsert: async () => runtime },
+    $transaction: async (callback: any) => callback(transaction),
+  };
+  const service = new AiOAuthService(prisma as any, {
+    encrypt: (value: string) => ({ ciphertext: `enc:${value}`, iv: 'iv', authTag: 'tag' }),
+  } as any, {} as any);
+
+  await (service as any).persistTokens({ extAgentHostId: 'host' }, 'client', ['openid'], {
+    iss: 'https://auth.example', sub: 'subject', email: 'person@example.com', name: 'Person',
+  }, { access_token: 'access', refresh_token: 'refresh', id_token: 'id', expires_in: 3600 });
+
+  assert.equal(rowLockCalls, 1);
+  assert.equal(runtime.oauthConnectionId, 'global-connection');
+});
+
+test('serializes concurrent global credential attachments so only one connection is created', async () => {
+  const runtime: any = { id: 'global', oauthConnectionId: null, oauthConnection: null };
+  let created = 0;
+  let updated = 0;
+  let activeTransactions = 0;
+  let maxActiveTransactions = 0;
+  let queue = Promise.resolve();
+  const transaction = {
+    $queryRawUnsafe: async () => undefined,
+    aiServerRuntime: {
+      findUnique: async () => runtime,
+      update: async ({ data }: any) => Object.assign(runtime, data),
+    },
+    aiOAuthConnection: {
+      create: async ({ data }: any) => ({ ...data, id: `connection-${++created}` }),
+      update: async ({ data }: any) => { updated += 1; return { ...data, id: runtime.oauthConnectionId }; },
+    },
+  };
+  const prisma = {
+    aiServerRuntime: { upsert: async () => runtime },
+    $transaction: async (callback: any) => {
+      const previous = queue;
+      let release!: () => void;
+      queue = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      activeTransactions += 1;
+      maxActiveTransactions = Math.max(maxActiveTransactions, activeTransactions);
+      try { return await callback(transaction); } finally { activeTransactions -= 1; release(); }
+    },
+  };
+  const service = new AiOAuthService(prisma as any, {
+    encrypt: (value: string) => ({ ciphertext: `enc:${value}`, iv: 'iv', authTag: 'tag' }),
+  } as any, {} as any);
+  const claims = { iss: 'https://auth.example', sub: 'subject', email: 'person@example.com', name: 'Person' };
+  const tokens = { access_token: 'access', refresh_token: 'refresh', id_token: 'id', expires_in: 3600 };
+
+  await Promise.all([
+    (service as any).persistTokens({ extAgentHostId: 'host' }, 'client', ['openid'], claims, tokens),
+    (service as any).persistTokens({ extAgentHostId: 'host' }, 'client', ['openid'], claims, tokens),
+  ]);
+
+  assert.equal(created, 1);
+  assert.equal(updated, 1);
+  assert.equal(maxActiveTransactions, 1);
+});
+
 test('revokes remotely when available, then disconnects the global connection locally', async () => {
   let locallyRevoked = false;
   let revokeCalls = 0;
@@ -394,7 +489,13 @@ test('revokes remotely when available, then disconnects the global connection lo
       }),
       updateMany: async ({ where }: any) => { assert.equal(where.tenantId, undefined); assert.equal(where.tenantUserId, undefined); locallyRevoked = true; return { count: 1 }; },
     },
-    aiServerRuntime: { update: async () => undefined },
+    aiServerRuntime: {
+      upsert: async () => ({ id: 'global', oauthConnectionId: 'connection-id', oauthConnection: {
+        id: 'connection-id', issuer: 'https://auth.example', clientId: 'client', isRevoked: false,
+        refreshTokenCiphertext: 'refresh', refreshTokenIv: 'iv', refreshTokenAuthTag: 'tag',
+      } }),
+      update: async () => undefined,
+    },
   };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string) => {

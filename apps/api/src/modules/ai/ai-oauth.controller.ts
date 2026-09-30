@@ -43,13 +43,12 @@ export class AiOAuthController {
   }
 
   @Get('connections')
-  async connections(@CurrentUser() user: RequestUser) {
-    const connections = await this.prisma.aiOAuthConnection.findMany({
-      where: { tenantId: user.tenantId, tenantUserId: user.tenantUserId },
-      select: { id: true, issuer: true, email: true, scopes: true, expiresAt: true, isRevoked: true },
-      orderBy: { updatedAt: 'desc' },
+  async connections(@CurrentUser() _user: RequestUser) {
+    const runtime = await this.prisma.aiServerRuntime.findUnique({
+      where: { id: 'global' },
+      include: { oauthConnection: true },
     });
-    return connections.map((connection) => this.toMetadata(this.oauth.toConnectionView(connection)));
+    return runtime?.oauthConnection ? [this.toMetadata(this.oauth.toConnectionView(runtime.oauthConnection))] : [];
   }
 
   @Post(':id/refresh')

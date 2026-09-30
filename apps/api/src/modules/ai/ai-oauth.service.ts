@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
@@ -8,6 +8,7 @@ import {
   assertCallbackClientId, assertRequiredScope, exchangeToken, OpenIdConfiguration, parseCallbackUrl, randomSecret, revokeToken, resolveClientId, sha256, validateIdToken,
 } from './ai-oauth.protocol';
 import { AiProviderAuth } from './ports/ai-provider.port';
+import { AiAuditService } from './ai-audit.service';
 
 export interface AiOAuthActor { tenantId: string; tenantUserId: string }
 export interface AiOAuthConnectionView {
@@ -46,6 +47,7 @@ export class AiOAuthService {
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
     private readonly config: ConfigService,
+    @Optional() private readonly audit?: AiAuditService,
   ) {}
 
   async startAuthorization(actor: AiOAuthActor) {
@@ -116,6 +118,7 @@ export class AiOAuthService {
     const claims = await validateIdToken(tokens.id_token, { issuer, audience: resolvedClientId, nonce, jwksUri: discovered.jwks_uri ?? this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
     if (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== resolvedClientId) throw new Error('OAuth ID token authorized-party mismatch');
     const saved = await this.persistTokens(attempt, resolvedClientId, scopes, claims, tokens);
+    await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, action: 'oauth.connected', targetId: saved.id, metadata: { provider: 'chatgpt', status: 'connected' } });
     return this.toConnectionView(saved);
   }
 
@@ -124,7 +127,6 @@ export class AiOAuthService {
     const access = encrypt(tokens.access_token);
     const refresh = encrypt(tokens.refresh_token);
     const idToken = encrypt(tokens.id_token);
-    const runtime = await this.globalRuntime();
     const data = {
       issuer: claims.iss, subject: claims.sub, clientId,
       accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag,
@@ -132,18 +134,21 @@ export class AiOAuthService {
       idTokenCiphertext: idToken.ciphertext, idTokenIv: idToken.iv, idTokenAuthTag: idToken.authTag,
       email: claims.email ?? null, displayName: claims.name ?? null, scopes: scopes.join(' '), expiresAt: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000), extAgentHostId: attempt.extAgentHostId,
     };
-    const saved = runtime.oauthConnectionId
-      ? await this.prisma.aiOAuthConnection.update({ where: { id: runtime.oauthConnectionId }, data: { ...data, isRevoked: false, revokedAt: null } })
-      : await this.prisma.aiOAuthConnection.create({ data: { ...data, tenantId: null, tenantUserId: null } });
-    await this.prisma.aiServerRuntime.update({
-      where: { id: 'global' },
-      data: { oauthConnectionId: saved.id, selectedModelSlug: null, selectedModelDisplayName: null },
+    return this.withLockedRuntime(async (tx, runtime) => {
+      const saved = runtime.oauthConnectionId
+        ? await tx.aiOAuthConnection.update({ where: { id: runtime.oauthConnectionId }, data: { ...data, isRevoked: false, revokedAt: null } })
+        : await tx.aiOAuthConnection.create({ data: { ...data, tenantId: null, tenantUserId: null } });
+      await tx.aiServerRuntime.update({
+        where: { id: 'global' },
+        data: { oauthConnectionId: saved.id, selectedModelSlug: null, selectedModelDisplayName: null },
+      });
+      return saved;
     });
-    return saved;
   }
 
   async refreshConnection(actorOrConnectionId: AiOAuthActor | string, suppliedConnectionId?: string): Promise<void> {
     const connectionId = typeof actorOrConnectionId === 'string' ? actorOrConnectionId : suppliedConnectionId!;
+    await this.assertGlobalConnection(connectionId);
     const leaseToken = randomSecret(24);
     const leaseExpiresAt = new Date(Date.now() + 30_000);
     const claimed = await this.prisma.aiOAuthConnection.updateMany({ where: {
@@ -208,19 +213,44 @@ export class AiOAuthService {
 
   async disconnectConnection(actorOrConnectionId: AiOAuthActor | string, suppliedConnectionId?: string): Promise<void> {
     const connectionId = typeof actorOrConnectionId === 'string' ? actorOrConnectionId : suppliedConnectionId!;
-    const connection = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, isRevoked: false } });
-    if (!connection) return;
-    try {
-      const configuration = await discoverOpenIdConfiguration(connection.issuer);
-      if (configuration.revocation_endpoint) {
-        const refreshToken = this.encryption.decrypt({ ciphertext: connection.refreshTokenCiphertext, iv: connection.refreshTokenIv, authTag: connection.refreshTokenAuthTag });
-        await revokeToken(configuration.revocation_endpoint, refreshToken, connection.clientId);
+    const actor = typeof actorOrConnectionId === 'string' ? undefined : actorOrConnectionId;
+    await this.withLockedRuntime(async (tx, runtime) => {
+      if (runtime.oauthConnectionId !== connectionId || !runtime.oauthConnection || runtime.oauthConnection.isRevoked) {
+        throw new Error('OAuth connection not found');
       }
-    } catch {
-      // Local revocation is still enforced when discovery or provider revocation is unavailable.
-    }
-    await this.prisma.aiOAuthConnection.updateMany({ where: { id: connectionId, isRevoked: false }, data: { isRevoked: true, revokedAt: new Date() } });
-    await this.prisma.aiServerRuntime.update({ where: { id: 'global' }, data: { oauthConnectionId: null, selectedModelSlug: null, selectedModelDisplayName: null } });
+      try {
+        const configuration = await discoverOpenIdConfiguration(runtime.oauthConnection.issuer);
+        if (configuration.revocation_endpoint) {
+          const refreshToken = this.encryption.decrypt({ ciphertext: runtime.oauthConnection.refreshTokenCiphertext, iv: runtime.oauthConnection.refreshTokenIv, authTag: runtime.oauthConnection.refreshTokenAuthTag });
+          await revokeToken(configuration.revocation_endpoint, refreshToken, runtime.oauthConnection.clientId);
+        }
+      } catch {
+        // Local revocation is still enforced when discovery or provider revocation is unavailable.
+      }
+      await tx.aiOAuthConnection.updateMany({ where: { id: connectionId, isRevoked: false }, data: { isRevoked: true, revokedAt: new Date() } });
+      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: { oauthConnectionId: null, selectedModelSlug: null, selectedModelDisplayName: null } });
+    });
+    if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, action: 'oauth.disconnected', targetId: connectionId, metadata: { provider: 'chatgpt', status: 'disconnected' } });
+  }
+
+  private async assertGlobalConnection(connectionId: string): Promise<void> {
+    const runtime = await this.globalRuntime();
+    if (runtime.oauthConnectionId !== connectionId) throw new Error('OAuth connection not found');
+  }
+
+  private async withLockedRuntime<T>(callback: (tx: any, runtime: any) => Promise<T>): Promise<T> {
+    const execute = async (tx: any) => {
+      await tx.$queryRawUnsafe('SELECT "id" FROM "ai_server_runtime" WHERE "id" = $1 FOR UPDATE', 'global');
+      const runtime = await tx.aiServerRuntime.findUnique({ where: { id: 'global' }, include: { oauthConnection: true } });
+      if (!runtime) throw new Error('AI server runtime not found');
+      return callback(tx, runtime);
+    };
+    if (this.prisma.$transaction) return this.prisma.$transaction(execute);
+    return execute({
+      ...this.prisma,
+      $queryRawUnsafe: async () => undefined,
+      aiServerRuntime: { ...this.prisma.aiServerRuntime, findUnique: async () => this.globalRuntime() },
+    });
   }
 
   private globalRuntime() {

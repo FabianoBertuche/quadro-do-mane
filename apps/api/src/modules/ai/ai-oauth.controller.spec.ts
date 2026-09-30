@@ -59,15 +59,15 @@ test('complete rejects missing, non-string, and malformed callback URLs before s
   assert.equal(serviceCalls, 0);
 });
 
-test('connections query is scoped to the current tenant user and returns only metadata', async () => {
+test('connections returns only the redacted singleton global connection metadata', async () => {
   let query: any;
   const service = { toConnectionView: (connection: any) => ({ ...connection, scopes: ['openid'] }) };
-  const prisma = { aiOAuthConnection: { findMany: async (args: any) => { query = args; return [{ id: 'connection-1', issuer: 'https://auth.example', email: 'person@example.com', scopes: 'openid', expiresAt: new Date('2030-01-01'), isRevoked: false }]; } } };
+  const prisma = { aiServerRuntime: { findUnique: async (args: any) => { query = args; return { oauthConnection: { id: 'connection-1', issuer: 'https://auth.example', email: 'person@example.com', scopes: 'openid', expiresAt: new Date('2030-01-01'), isRevoked: false } }; } } };
   const controller = new AiOAuthController(service as any, prisma as any);
 
   const result = await controller.connections(actor as any);
 
-  assert.deepEqual(query.where, { tenantId: 'tenant-a', tenantUserId: 'user-a' });
+  assert.deepEqual(query, { where: { id: 'global' }, include: { oauthConnection: true } });
   assert.deepEqual(result, [{ id: 'connection-1', provider: 'https://auth.example', email: 'person@example.com', scopes: ['openid'], expiresAt: '2030-01-01T00:00:00.000Z', status: 'connected' }]);
   assert.equal(JSON.stringify(result).includes('accessToken'), false);
   assert.equal(JSON.stringify(result).includes('verifier'), false);

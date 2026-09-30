@@ -41,6 +41,27 @@ Coverage includes global OAuth resolution without actor identity, expired global
 
 ## Scope And Concerns
 
-- Controllers were intentionally unchanged, as assigned. The existing OAuth `connections` endpoint still queries actor-owned records; Task 4 must expose the redacted global runtime endpoint and/or update that route as specified in the overall plan.
+- The existing OAuth connections route now exposes only the singleton global connection as redacted metadata; Task 4 still owns the dedicated runtime endpoint.
 - The provider atomic chat-flow remains unchanged for Task 3. Its existing actor argument is tolerated by the now-global `resolveProviderAuth()` signature but provider model selection is not wired until that task.
 - Existing unrelated worktree modifications were not touched or included.
+
+## Review Remediation
+
+- Refresh and disconnect now require the supplied ID to equal the singleton runtime's `oauthConnectionId`. Legacy or personal connection IDs fail before any credential mutation and cannot clear runtime state.
+- `GET /ai/oauth/connections` now reads only `AiServerRuntime.global.oauthConnection` and returns its existing redacted metadata shape. It no longer queries actor-owned legacy OAuth rows.
+- Global credential attachment, model selection, and disconnect execute inside a Prisma transaction that locks the singleton row with `SELECT ... FOR UPDATE`. Concurrent authorization completions serialize: the first creates and attaches the credential; later completions update that same attached credential rather than attach a competing row.
+- OAuth connect/disconnect actions audit safe provider/status metadata through `AiAuditService`. Runtime model selection accepts the authenticated actor for the corresponding safe audit entry when invoked by its controller.
+- Added regression coverage for legacy-ID rejection, global listing, same-ID catalog cache invalidation on `updatedAt`, singleton row locking, concurrent attachment serialization, and safe connection audit metadata.
+
+Review verification:
+
+```text
+node -r ts-node/register --test src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai-oauth.controller.spec.ts src/modules/ai/ai-server-runtime.service.spec.ts
+32 passed, 0 failed
+
+npm run build
+nest build exited 0
+
+git diff --check
+exited 0
+```
