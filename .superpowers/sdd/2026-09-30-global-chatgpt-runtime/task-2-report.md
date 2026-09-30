@@ -119,3 +119,24 @@ nest build exited 0
 git diff --check
 exited 0
 ```
+
+## In-Flight Catalog Connection Switch Fix
+
+- Closed the remaining TOCTOU window in `catalogForCurrentRuntime()`: the connection key was validated only before `fetchOpenAiModels()`, so a disconnect/reconnect during the in-flight catalog request returned connection A's models and cached them even though connection B was already current.
+- The resolved-key comparison is now a shared `connectionChanged(auth, runtime)` predicate applied at both fences: before the catalog request and again after it returns. A switch during the request returns `A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.` before any cache write.
+- The cache write is fenced: the catalog is stored only after the post-fetch re-read confirms the auth's connection ID/version is still current, so it can never be cached under a known-stale key.
+- Provider fetch failures still surface `Catálogo de modelos indisponível`; the fetch was moved out of the cache-write try block so the new fence is not swallowed into the generic unavailable error.
+- Regression coverage switches from connection A to B inside the in-flight catalog request and asserts the call rejects, then asserts the next listing refetches under connection B and serves only B's models from cache.
+
+Verification for this fix:
+
+```text
+node -r ts-node/register --test src/modules/ai/ai-server-runtime.service.spec.ts src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai.module.spec.ts src/modules/ai/ai-oauth.controller.spec.ts src/modules/ai/ai.controller.spec.ts
+40 passed, 0 failed
+
+npm run build
+nest build exited 0
+
+git diff --check
+exited 0
+```

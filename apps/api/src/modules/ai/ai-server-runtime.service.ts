@@ -3,6 +3,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { fetchOpenAiModels } from './ai-oauth.protocol';
 import { AiOAuthService } from './ai-oauth.service';
 import { AiAuditService } from './ai-audit.service';
+import { AiProviderAuth } from './ports/ai-provider.port';
 
 export interface AiServerRuntimeView {
   connectionStatus: 'connected' | 'disconnected';
@@ -56,18 +57,22 @@ export class AiServerRuntimeService {
       throw new BadRequestException('Catálogo de modelos indisponível');
     }
     const connectionKey = this.connectionKey(runtime);
-    if (auth.connectionId && (auth.connectionId !== runtime.oauthConnectionId
-      || (auth.connectionUpdatedAt && auth.connectionUpdatedAt !== runtime.oauthConnection?.updatedAt?.toISOString?.()))) {
+    if (this.connectionChanged(auth, runtime)) {
       throw new BadRequestException('A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.');
     }
     if (this.catalog?.connectionKey === connectionKey) return this.catalog;
+    let models: AiServerModel[];
     try {
-      const models = await fetchOpenAiModels(auth.accessToken);
-      this.catalog = { connectionKey, models };
-      return this.catalog;
+      models = await fetchOpenAiModels(auth.accessToken);
     } catch {
       throw new BadRequestException('Catálogo de modelos indisponível');
     }
+    if (this.connectionChanged(auth, await this.runtime())) {
+      throw new BadRequestException('A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.');
+    }
+    const catalog = { connectionKey, models };
+    this.catalog = catalog;
+    return catalog;
   }
 
   async selectModel(slug: string, actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<AiServerRuntimeView> {
@@ -98,6 +103,12 @@ export class AiServerRuntimeService {
 
   private connectionKey(runtime: any): string {
     return `${runtime.oauthConnectionId}:${runtime.oauthConnection?.updatedAt?.toISOString?.() ?? ''}`;
+  }
+
+  private connectionChanged(auth: AiProviderAuth, runtime: any): boolean {
+    if (!auth.connectionId) return false;
+    return auth.connectionId !== runtime.oauthConnectionId
+      || (!!auth.connectionUpdatedAt && auth.connectionUpdatedAt !== runtime.oauthConnection?.updatedAt?.toISOString?.());
   }
 
   private async withLockedRuntime<T>(callback: (tx: any, runtime: any) => Promise<T>): Promise<T> {

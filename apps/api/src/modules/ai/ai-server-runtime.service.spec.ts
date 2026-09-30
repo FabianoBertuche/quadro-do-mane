@@ -173,6 +173,39 @@ test('rejects catalog selection when the runtime switches after auth resolves bu
   }
 });
 
+test('rejects and discards a catalog when the runtime connection switches while the catalog request is in flight', async () => {
+  const prisma = createPrisma(runtime({ id: 'connection-a', updatedAt: new Date('2030-01-01T00:00:00.000Z') }));
+  let resolved = { id: 'connection-a', updatedAt: '2030-01-01T00:00:00.000Z' };
+  let catalogRequests = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    catalogRequests += 1;
+    if (catalogRequests === 1) {
+      resolved = { id: 'connection-b', updatedAt: '2030-01-02T00:00:00.000Z' };
+      await prisma.aiServerRuntime.update({ data: {
+        oauthConnectionId: 'connection-b',
+        oauthConnection: { id: 'connection-b', updatedAt: new Date('2030-01-02T00:00:00.000Z') },
+      } });
+      return { ok: true, json: async () => ({ data: [{ slug: 'model-from-a', display_name: 'Model from A', visibility: 'list' }] }) } as any;
+    }
+    return { ok: true, json: async () => ({ data: [{ slug: 'model-from-b', display_name: 'Model from B', visibility: 'list' }] }) } as any;
+  }) as any;
+  try {
+    const service = new AiServerRuntimeService(prisma as any, {
+      resolveProviderAuth: async () => ({
+        type: 'oauth', accessToken: `token-${resolved.id}`, connectionId: resolved.id, connectionUpdatedAt: resolved.updatedAt,
+      }),
+    } as any);
+    await assert.rejects(() => service.listModels(), /conexão.*alterada/i);
+    assert.equal(catalogRequests, 1);
+    assert.deepEqual(await service.listModels(), [{ slug: 'model-from-b', displayName: 'Model from B' }]);
+    assert.deepEqual(await service.listModels(), [{ slug: 'model-from-b', displayName: 'Model from B' }]);
+    assert.equal(catalogRequests, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('returns redacted global runtime metadata', async () => {
   const prisma = createPrisma(runtime({ id: 'global-connection' }, 'gpt-5', 'GPT-5'));
   let resolveCalls = 0;
