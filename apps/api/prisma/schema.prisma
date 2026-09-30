@@ -1050,8 +1050,8 @@ model AiActionProposal {
 
 model AiOAuthConnection {
   id                     String    @id @default(uuid())
-  tenantId               String    @map("tenant_id")
-  tenantUserId           String    @map("tenant_user_id")
+  tenantId               String?   @map("tenant_id")
+  tenantUserId           String?   @map("tenant_user_id")
   issuer                 String
   subject                String
   clientId               String    @map("client_id")
@@ -1077,12 +1077,25 @@ model AiOAuthConnection {
   refreshLeaseToken      String?   @map("refresh_lease_token")
   refreshLeaseExpiresAt  DateTime? @map("refresh_lease_expires_at")
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenantUser TenantUser @relation(fields: [tenantId, tenantUserId], references: [tenantId, id], onDelete: Cascade)
+  tenant        Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUser    TenantUser?      @relation(fields: [tenantId, tenantUserId], references: [tenantId, id], onDelete: Cascade)
+  serverRuntime AiServerRuntime?
 
   @@unique([tenantId, tenantUserId, issuer, subject, clientId])
   @@index([tenantId, tenantUserId, expiresAt])
   @@map("ai_oauth_connections")
+}
+
+model AiServerRuntime {
+  id                       String   @id @default("global")
+  oauthConnectionId        String?  @unique @map("oauth_connection_id")
+  selectedModelSlug        String?  @map("selected_model_slug")
+  selectedModelDisplayName String?  @map("selected_model_display_name")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+  oauthConnection          AiOAuthConnection? @relation(fields: [oauthConnectionId], references: [id], onDelete: SetNull)
+
+  @@map("ai_server_runtime")
 }
 
 model AiOAuthAttempt {
