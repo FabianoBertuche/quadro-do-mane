@@ -163,6 +163,7 @@ test('uses the callback-issued dynamic client ID to complete ChatGPT OAuth and r
     });
     assert.equal(returningCompleted.id, 'connection-1');
     assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 3);
+    assert.equal(tokenRequests[2].body.get('client_id'), 'oaiapp_callback-issued-client');
     const thirdAuthorization = new URL((await controller.start(actor as any)).authorizationUrl);
     await assert.rejects(() => controller.complete(actor as any, {
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${thirdAuthorization.searchParams.get('state')}&client_id=other-client`,

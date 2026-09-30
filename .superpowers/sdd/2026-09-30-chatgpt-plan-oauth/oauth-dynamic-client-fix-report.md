@@ -70,3 +70,31 @@ npm run build:api
 ```
 
 Result: exit 0 (`nest build`).
+
+## Returning Client Regression
+
+Added an e2e assertion that the returning authorization-code exchange sends
+the retained `oaiapp_callback-issued-client` value at the token endpoint.
+
+Red evidence used the same assertion with the deliberately incorrect expected
+value `dynamic_agent_client`:
+
+```sh
+TS_NODE_PROJECT=apps/api/tsconfig.json TS_NODE_TRANSPILE_ONLY=1 node -r ts-node/register --test apps/api/src/modules/ai/ai-oauth.e2e.spec.ts
+```
+
+Result: exit 1 at `ai-oauth.e2e.spec.ts:166`, with actual
+`oaiapp_callback-issued-client` and expected `dynamic_agent_client`.
+
+The final assertion expects `oaiapp_callback-issued-client`; no production
+code change was required.
+
+Green verification:
+
+```sh
+TS_NODE_PROJECT=apps/api/tsconfig.json TS_NODE_TRANSPILE_ONLY=1 node -r ts-node/register --test apps/api/src/modules/ai/ai-oauth*.spec.ts
+npm run build:api
+```
+
+Results: OAuth suite exit 0, `tests 28`, `pass 28`, `fail 0`; API build exit
+0 (`nest build`).
