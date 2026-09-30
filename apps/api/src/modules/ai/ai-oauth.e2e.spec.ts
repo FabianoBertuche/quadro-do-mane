@@ -12,6 +12,11 @@ test('uses the callback-issued dynamic client ID to complete ChatGPT OAuth and r
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
   const attempts = new Map<string, any>();
   const connections = new Map<string, any>();
+  const runtimeRow: any = { id: 'global', oauthConnectionId: null, selectedModelSlug: null, selectedModelDisplayName: null };
+  const runtimeView = () => ({
+    ...runtimeRow,
+    oauthConnection: runtimeRow.oauthConnectionId ? connections.get(runtimeRow.oauthConnectionId) ?? null : null,
+  });
   const calls: Array<{ url: string; authorization?: string }> = [];
   const tokenRequests: Array<{ url: string; body: URLSearchParams }> = [];
   const encryption = {
@@ -35,16 +40,28 @@ test('uses the callback-issued dynamic client ID to complete ChatGPT OAuth and r
         return { count: 1 };
       },
     },
+    aiServerRuntime: {
+      upsert: async ({ create }: any) => { Object.assign(runtimeRow, create); return runtimeView(); },
+      findUnique: async () => runtimeView(),
+      update: async ({ data }: any) => { Object.assign(runtimeRow, data); return runtimeView(); },
+    },
     aiOAuthConnection: {
-      findFirst: async ({ where }: any) => [...connections.values()].find((connection) =>
-        connection.tenantId === where.tenantId && connection.tenantUserId === where.tenantUserId &&
-        (where.isRevoked === undefined || connection.isRevoked === where.isRevoked) &&
-        (where.id === undefined || connection.id === where.id)),
-      findMany: async ({ where }: any) => [...connections.values()].filter((connection) =>
-        connection.tenantId === where.tenantId && connection.tenantUserId === where.tenantUserId),
-      upsert: async ({ create }: any) => {
-        const connection = { ...create, id: 'connection-1', isRevoked: false, lastUsedAt: null };
+      findFirst: async ({ where }: any) => {
+        const connection = where.id === undefined ? undefined : connections.get(where.id);
+        if (!connection) return null;
+        if (where.isRevoked !== undefined && connection.isRevoked !== where.isRevoked) return null;
+        if (where.refreshLeaseToken !== undefined && connection.refreshLeaseToken !== where.refreshLeaseToken) return null;
+        return connection;
+      },
+      create: async ({ data }: any) => {
+        const connection = { ...data, id: 'connection-1', isRevoked: false, lastUsedAt: null };
         connections.set(connection.id, connection);
+        return connection;
+      },
+      update: async ({ where, data }: any) => {
+        const connection = connections.get(where.id);
+        if (!connection) throw new Error('OAuth connection not found');
+        Object.assign(connection, data);
         return connection;
       },
       updateMany: async ({ where, data }: any) => {
