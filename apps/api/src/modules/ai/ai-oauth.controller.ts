@@ -7,10 +7,7 @@ import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
 import { RequestUser } from '../../common/interfaces/request-context.interface';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiOAuthService } from './ai-oauth.service';
-
-interface CompleteOAuthDto {
-  callbackUrl: string;
-}
+import { CompleteAiOAuthDto } from './dto/complete-ai-oauth.dto';
 
 interface OAuthConnectionMetadata {
   id: string;
@@ -41,7 +38,7 @@ export class AiOAuthController {
   }
 
   @Post('complete')
-  async complete(@CurrentUser() user: RequestUser, @Body() dto: CompleteOAuthDto) {
+  async complete(@CurrentUser() user: RequestUser, @Body() dto: CompleteAiOAuthDto) {
     return this.toMetadata(await this.oauth.completeAuthorization(this.actor(user), dto.callbackUrl));
   }
 

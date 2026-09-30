@@ -20,7 +20,7 @@ Public connection responses contain only `id`, `provider`, `email`, `scopes`, `e
 
 ## Verification
 
-- Focused controller tests: `node -r ts-node/register --test src/modules/ai/ai-oauth.controller.spec.ts` (5 passed, 0 failed).
+- Focused controller tests: `node -r ts-node/register --test src/modules/ai/ai-oauth.controller.spec.ts` (6 passed, 0 failed).
 - API build: `npm run build` from `apps/api` (passed).
 - Initial TDD red run failed because the controller did not yet exist; the focused suite passed after implementation.
 
@@ -31,4 +31,7 @@ Changed only `ai-oauth.controller.ts`, `ai-oauth.controller.spec.ts`, `ai.module
 ## Concerns
 
 - The service’s connection view contains internal fields, so the controller intentionally projects it to the smaller public metadata contract.
-- `callbackUrl` is typed at compile time in the controller; runtime URL parsing and OAuth validation remain owned by `AiOAuthService` and the protocol.
+
+## Review Fix
+
+Replaced the compile-time-only callback body interface with `CompleteAiOAuthDto` using `@IsString()`, `@IsNotEmpty()`, and `@IsUrl({ require_protocol: true })`. With the global `ValidationPipe`, missing, non-string, and malformed callback URLs now produce HTTP 400 before `completeAuthorization` executes. Focused tests assert the reflected runtime DTO type, all three invalid payload cases, and zero service calls.

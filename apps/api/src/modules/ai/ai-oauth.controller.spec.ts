@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import 'reflect-metadata';
+import { ValidationPipe } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { PERMISSIONS_KEY } from '../../common/decorators/require-permissions.decorator';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
 import { AiOAuthController } from './ai-oauth.controller';
+import { CompleteAiOAuthDto } from './dto/complete-ai-oauth.dto';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
@@ -37,6 +39,24 @@ test('complete passes callback URL with the authenticated tenant user and redact
   assert.equal('accessToken' in result, false);
   assert.equal('subject' in result, false);
   assert.equal('clientId' in result, false);
+});
+
+test('complete rejects missing, non-string, and malformed callback URLs before service execution', async () => {
+  let serviceCalls = 0;
+  const pipe = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
+  const invalidPayloads = [{}, { callbackUrl: 42 }, { callbackUrl: 'not-a-url' }];
+  const metatype = (Reflect.getMetadata('design:paramtypes', AiOAuthController.prototype, 'complete') as unknown[])[1];
+  assert.equal(metatype, CompleteAiOAuthDto);
+  const controller = new AiOAuthController({ completeAuthorization: async () => { serviceCalls += 1; } } as any, {} as any);
+
+  for (const payload of invalidPayloads) {
+    await assert.rejects(
+      async () => controller.complete(actor as any, await pipe.transform(payload, { type: 'body', metatype })),
+      { status: 400 },
+    );
+  }
+
+  assert.equal(serviceCalls, 0);
 });
 
 test('connections query is scoped to the current tenant user and returns only metadata', async () => {
