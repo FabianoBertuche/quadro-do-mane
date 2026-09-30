@@ -453,3 +453,112 @@ Verify text question, project-context question, voice transcription, text respon
 git add apps/api/src/modules/ai docs/superpowers/specs/2026-09-29-ai-assistant-chat-design.md
 git commit -m "test: harden AI assistant security boundaries"
 ```
+
+## Etapa 1 Web e Correções Residuais
+
+### Task 8: Close final mobile/API review findings
+
+**Files:**
+- Modify: `apps/api/src/modules/ai/dto/send-ai-message.dto.ts`
+- Modify: `apps/mobile/src/components/ai/ActionProposalCard.tsx`
+- Modify: `apps/mobile/src/app/ai-chat.tsx`
+- Modify: `apps/mobile/src/lib/ai-chat.ts`
+- Test: existing AI API tests and `apps/mobile/src/lib/ai-chat.spec.ts`
+
+**Interfaces:**
+- `inputFormat` accepts only `TEXT` or `AUDIO`, with server-derived format preferred over client claims.
+- Clarification proposals remain visually `PENDING` and keep the clarification/confirmation controls available.
+- Global chat selection never falls back to a project-scoped conversation unless `contextProjectId` is explicitly supplied.
+
+- [ ] **Step 1: Write failing regression tests**
+
+Add API tests for invalid `inputFormat` and mobile helper tests for clarification status and global/project conversation selection.
+
+- [ ] **Step 2: Run RED**
+
+Run the focused API and mobile tests and confirm each new assertion fails against the current implementation.
+
+- [ ] **Step 3: Implement minimal fixes**
+
+Add enum validation/normalization in the DTO, preserve `PENDING` in `ActionProposalCard`, and separate global conversation lookup from project-context lookup in the mobile client.
+
+- [ ] **Step 4: Run GREEN**
+
+Run the focused API tests, `npx vitest run` from `apps/mobile`, and both typechecks.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/modules/ai apps/mobile/src/components/ai apps/mobile/src/app/ai-chat.tsx apps/mobile/src/lib/ai-chat.ts
+git commit -m "fix(ai): close residual chat review findings"
+```
+
+### Task 9: Implement web text and command chat
+
+**Files:**
+- Create: `apps/web/src/app/(app)/ai-chat/page.tsx`
+- Create: `apps/web/src/components/ai/AiChatMessage.tsx`
+- Create: `apps/web/src/components/ai/AiActionProposalCard.tsx`
+- Create: `apps/web/src/lib/ai-chat.ts`
+- Create: `apps/web/src/lib/ai-chat.test.ts`
+- Modify: `apps/web/src/components/layout/sidebar.tsx`
+- Modify: `apps/web/src/app/(app)/projects/[id]/page.tsx`
+
+**Interfaces:**
+- `listConversations(): Promise<AiConversation[]>`.
+- `createConversation(contextProjectId?: string): Promise<AiConversation>`.
+- `listMessages(conversationId: string): Promise<AiMessagePage>`.
+- `sendTextMessage(input: { conversationId: string; text: string; responseMode: 'TEXT' }): Promise<AiMessageResponse>`.
+- `confirmAction(proposalId: string): Promise<AiActionResult>` and `cancelAction(proposalId: string): Promise<void>`.
+
+- [ ] **Step 1: Write failing web client tests**
+
+Test API helper request shapes, strict response-mode values, global conversation selection, explicit project context, and proposal confirm/cancel state transitions. Use the existing Axios client boundary; do not call an AI provider from the browser.
+
+- [ ] **Step 2: Run RED**
+
+Run: `npx tsx --test src/lib/ai-chat.test.ts` from `apps/web` and confirm the missing client/helper failure.
+
+- [ ] **Step 3: Implement the typed web API client**
+
+Create the helper functions using `api`, map the server response envelope to stable client types, and keep global conversation lookup separate from project-scoped lookup.
+
+- [ ] **Step 4: Build the chat page**
+
+Render a conversation selector, message history, text composer, loading/error states, assistant/user message styling, clarification messages, and action cards with explicit Confirmar/Cancelar buttons. On success, invalidate or refetch messages and task/project queries where relevant.
+
+- [ ] **Step 5: Add navigation and project context entry**
+
+Add an `Assistente IA` sidebar link to `/ai-chat`. Add a project-detail link to `/ai-chat?contextProjectId=<id>`; never silently carry project context into a global conversation.
+
+- [ ] **Step 6: Run GREEN and web verification**
+
+Run `npx tsx --test src/lib/ai-chat.test.ts`, `npx tsc --noEmit`, and `npm run build --workspace=apps/web`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/web/src/app/'(app)'/ai-chat apps/web/src/components/ai apps/web/src/lib/ai-chat.ts apps/web/src/lib/ai-chat.test.ts apps/web/src/components/layout/sidebar.tsx apps/web/src/app/'(app)'/projects/'[id]'/page.tsx
+git commit -m "feat(web): add text AI assistant chat"
+```
+
+### Task 10: Verify web-first rollout
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-09-29-ai-assistant-chat-design.md` only for verified implementation deviations
+- Test: API, mobile, and web suites
+
+- [ ] **Step 1: Run complete automated verification**
+
+Run API AI tests, notification tests, API typecheck/build, mobile Vitest/typecheck, web helper tests, web typecheck/build, and `git diff --check`.
+
+- [ ] **Step 2: Manually verify web text flows**
+
+Verify global chat, project-context chat, conversation reuse, question with returned task data, ambiguous assignee clarification, task proposal confirmation, cancellation, permission denial, session refresh, and provider/API error display.
+
+- [ ] **Step 3: Commit verification-only changes**
+
+```bash
+git add docs/superpowers/specs/2026-09-29-ai-assistant-chat-design.md
+git commit -m "test: verify web-first AI chat rollout"
+```
