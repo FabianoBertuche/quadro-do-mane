@@ -6,6 +6,7 @@ import { AiModule } from './ai.module';
 import { AiService, AI_OAUTH_SERVICE, AI_PROVIDER, AI_SERVER_RUNTIME } from './ai.service';
 import { AiOAuthService } from './ai-oauth.service';
 import { AiServerRuntimeService } from './ai-server-runtime.service';
+import { AiServerRuntimeController } from './ai-server-runtime.controller';
 import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
 
 const config = (values: Record<string, unknown>) => ({ get: (key: string, fallback?: unknown) => values[key] ?? fallback }) as any;
@@ -30,6 +31,13 @@ test('exposes the global server runtime through an explicit Nest token', () => {
   const providers = Reflect.getMetadata('providers', AiModule) ?? [];
   const runtimeAlias = providers.find((provider: any) => provider?.provide === AI_SERVER_RUNTIME);
   assert.equal(runtimeAlias.useExisting, AiServerRuntimeService);
+});
+
+test('registers the runtime controller and exports the runtime service to the admin settings module', () => {
+  const controllers = Reflect.getMetadata('controllers', AiModule) ?? [];
+  assert.ok(controllers.includes(AiServerRuntimeController));
+  const exports = Reflect.getMetadata('exports', AiModule) ?? [];
+  assert.ok(exports.includes(AiServerRuntimeService));
 });
 
 test('always supplies the Responses provider while the API-key fallback is disabled', () => {

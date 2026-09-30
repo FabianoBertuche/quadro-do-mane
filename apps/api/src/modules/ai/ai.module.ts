@@ -7,6 +7,7 @@ import { AI_OAUTH_SERVICE, AI_PROVIDER, AI_RATE_LIMITER, AI_SERVER_RUNTIME, AiSe
 import { AiRateLimitService } from './ai-rate-limit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiController } from './ai.controller';
+import { AiServerRuntimeController } from './ai-server-runtime.controller';
 import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
@@ -29,7 +30,7 @@ import OpenAI from 'openai';
 
 @Module({
   imports: [ProjectsModule, TasksModule, UsersModule],
-  controllers: [AiController, AiAudioController, AiOAuthController],
+  controllers: [AiController, AiAudioController, AiOAuthController, AiServerRuntimeController],
   providers: [
     AiService,
     AiContextService,
@@ -89,6 +90,8 @@ import OpenAI from 'openai';
       useFactory: (config: ConfigService) => new OpenAiResponsesProvider(config),
     },
   ],
-  exports: [AiService],
+  // `AiServerRuntimeService` é exportado para o painel administrativo ler o
+  // estado global sem duplicar a resolução de conexão/credencial.
+  exports: [AiService, AiServerRuntimeService],
 })
 export class AiModule {}
