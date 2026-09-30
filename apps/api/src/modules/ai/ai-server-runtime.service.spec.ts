@@ -108,6 +108,29 @@ test('rejects selection when the global catalog is unavailable or does not conta
   }
 });
 
+test('rejects model selection when the global connection changes after catalog fetch', async () => {
+  const prisma = createPrisma(runtime({ id: 'connection-a', updatedAt: new Date('2030-01-01T00:00:00.000Z') }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    await prisma.aiServerRuntime.update({ data: {
+      oauthConnectionId: 'connection-b',
+      oauthConnection: { id: 'connection-b', updatedAt: new Date('2030-01-02T00:00:00.000Z') },
+    } });
+    return { ok: true, json: async () => ({ data: [{ slug: 'model-from-a', display_name: 'Model from A', visibility: 'list' }] }) } as any;
+  }) as any;
+  try {
+    const service = new AiServerRuntimeService(prisma as any, {
+      resolveProviderAuth: async () => ({ type: 'oauth', accessToken: 'secret-token' }),
+    } as any);
+    await assert.rejects(() => service.selectModel('model-from-a'), /conexão.*alterada/i);
+    assert.deepEqual(await service.getRuntime(), {
+      connectionStatus: 'connected', provider: 'chatgpt', selectedModel: null,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('returns redacted global runtime metadata', async () => {
   const prisma = createPrisma(runtime({ id: 'global-connection' }, 'gpt-5', 'GPT-5'));
   let resolveCalls = 0;

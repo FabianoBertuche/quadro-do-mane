@@ -37,6 +37,22 @@ git diff --check
 exited 0
 ```
 
+## Stale Catalog Race Fix
+
+- Model selection now retains the runtime connection ID and connection `updatedAt` value that produced its catalog entry.
+- After acquiring the singleton row lock, selection reloads the runtime and compares that connection key before writing. A disconnect/reconnect or credential update during catalog fetch returns the safe retry message `A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.` and leaves selected-model metadata unchanged.
+- Regression coverage simulates the connection switch inside the model-catalog request before selection acquires the lock.
+
+Verification for this fix:
+
+```text
+node -r ts-node/register --test src/modules/ai/ai-server-runtime.service.spec.ts src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai-oauth.controller.spec.ts
+33 passed, 0 failed
+
+npm run build
+nest build exited 0
+```
+
 Coverage includes global OAuth resolution without actor identity, expired global token refresh, bearer catalog request, `visibility=list` filtering and order, cache invalidation on connection change, unavailable/unknown-model errors, global encrypted-token persistence, disconnect, and runtime token redaction.
 
 ## Scope And Concerns

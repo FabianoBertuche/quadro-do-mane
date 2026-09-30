@@ -37,30 +37,37 @@ export class AiServerRuntimeService {
   }
 
   async listModels(): Promise<AiServerModel[]> {
+    return (await this.catalogForCurrentRuntime()).models;
+  }
+
+  private async catalogForCurrentRuntime(): Promise<{ connectionKey: string; models: AiServerModel[] }> {
     const runtime = await this.runtime();
     if (!runtime.oauthConnectionId) {
       this.catalog = undefined;
       throw new BadRequestException('Catálogo de modelos indisponível');
     }
-    const connectionKey = `${runtime.oauthConnectionId}:${runtime.oauthConnection?.updatedAt?.toISOString?.() ?? ''}`;
-    if (this.catalog?.connectionKey === connectionKey) return this.catalog.models;
+    const connectionKey = this.connectionKey(runtime);
+    if (this.catalog?.connectionKey === connectionKey) return this.catalog;
 
     const auth = await this.oauth.resolveProviderAuth();
     if (!auth) throw new BadRequestException('Catálogo de modelos indisponível');
     try {
       const models = await fetchOpenAiModels(auth.accessToken);
       this.catalog = { connectionKey, models };
-      return models;
+      return this.catalog;
     } catch {
       throw new BadRequestException('Catálogo de modelos indisponível');
     }
   }
 
   async selectModel(slug: string, actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<AiServerRuntimeView> {
-    const models = await this.listModels();
-    const model = models.find((candidate) => candidate.slug === slug);
+    const catalog = await this.catalogForCurrentRuntime();
+    const model = catalog.models.find((candidate) => candidate.slug === slug);
     if (!model) throw new BadRequestException('Modelo selecionado não está disponível');
-    await this.withLockedRuntime(async (tx) => {
+    await this.withLockedRuntime(async (tx, runtime) => {
+      if (this.connectionKey(runtime) !== catalog.connectionKey) {
+        throw new BadRequestException('A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.');
+      }
       await tx.aiServerRuntime.update({
         where: { id: 'global' },
         data: { selectedModelSlug: model.slug, selectedModelDisplayName: model.displayName },
@@ -79,12 +86,22 @@ export class AiServerRuntimeService {
     });
   }
 
-  private async withLockedRuntime<T>(callback: (tx: any) => Promise<T>): Promise<T> {
+  private connectionKey(runtime: any): string {
+    return `${runtime.oauthConnectionId}:${runtime.oauthConnection?.updatedAt?.toISOString?.() ?? ''}`;
+  }
+
+  private async withLockedRuntime<T>(callback: (tx: any, runtime: any) => Promise<T>): Promise<T> {
     const execute = async (tx: any) => {
       await tx.$queryRawUnsafe('SELECT "id" FROM "ai_server_runtime" WHERE "id" = $1 FOR UPDATE', 'global');
-      return callback(tx);
+      const runtime = await tx.aiServerRuntime.findUnique({ where: { id: 'global' }, include: { oauthConnection: true } });
+      if (!runtime) throw new Error('AI server runtime not found');
+      return callback(tx, runtime);
     };
     if (this.prisma.$transaction) return this.prisma.$transaction(execute);
-    return execute({ ...this.prisma, $queryRawUnsafe: async () => undefined });
+    return execute({
+      ...this.prisma,
+      $queryRawUnsafe: async () => undefined,
+      aiServerRuntime: { ...this.prisma.aiServerRuntime, findUnique: async () => this.runtime() },
+    });
   }
 }
