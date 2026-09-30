@@ -52,7 +52,8 @@ export class AiOAuthService {
     const issuer = this.config.get<string>('CHATGPT_OAUTH_ISSUER') ?? DEFAULT_ISSUER;
     const callbackPort = this.config.get<number>('CHATGPT_OAUTH_CALLBACK_PORT') ?? 1455;
     const redirectUri = `http://127.0.0.1:${callbackPort}/auth/callback`;
-    const existing = await this.prisma.aiOAuthConnection.findFirst({ where: { tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, issuer, isRevoked: false }, orderBy: { updatedAt: 'desc' } });
+    const runtime = await this.globalRuntime();
+    const existing = runtime.oauthConnection;
     const clientId = existing?.clientId ?? 'dynamic_agent_client';
     const state = randomSecret();
     const nonce = randomSecret();
@@ -114,76 +115,83 @@ export class AiOAuthService {
     const scopes = assertRequiredScope(tokens.scope);
     const claims = await validateIdToken(tokens.id_token, { issuer, audience: resolvedClientId, nonce, jwksUri: discovered.jwks_uri ?? this.config.get<string>('CHATGPT_OAUTH_JWKS_URI') ?? DEFAULT_JWKS_URI });
     if (Array.isArray(claims.aud) && claims.aud.length > 1 && claims.azp !== resolvedClientId) throw new Error('OAuth ID token authorized-party mismatch');
-    const saved = await this.persistTokens(actor, attempt, resolvedClientId, scopes, claims, tokens);
+    const saved = await this.persistTokens(attempt, resolvedClientId, scopes, claims, tokens);
     return this.toConnectionView(saved);
   }
 
-  private async persistTokens(actor: AiOAuthActor, attempt: any, clientId: string, scopes: string[], claims: any, tokens: any) {
+  private async persistTokens(attempt: any, clientId: string, scopes: string[], claims: any, tokens: any) {
     const encrypt = (value: string) => this.encryption.encrypt(value);
     const access = encrypt(tokens.access_token);
     const refresh = encrypt(tokens.refresh_token);
     const idToken = encrypt(tokens.id_token);
-    return this.prisma.aiOAuthConnection.upsert({ where: { tenantId_tenantUserId_issuer_subject_clientId: { tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, issuer: claims.iss, subject: claims.sub, clientId } }, create: {
-      tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, issuer: claims.iss, subject: claims.sub, clientId,
+    const runtime = await this.globalRuntime();
+    const data = {
+      issuer: claims.iss, subject: claims.sub, clientId,
       accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag,
       refreshTokenCiphertext: refresh.ciphertext, refreshTokenIv: refresh.iv, refreshTokenAuthTag: refresh.authTag,
       idTokenCiphertext: idToken.ciphertext, idTokenIv: idToken.iv, idTokenAuthTag: idToken.authTag,
       email: claims.email ?? null, displayName: claims.name ?? null, scopes: scopes.join(' '), expiresAt: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000), extAgentHostId: attempt.extAgentHostId,
-    }, update: {
-      accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag, refreshTokenCiphertext: refresh.ciphertext, refreshTokenIv: refresh.iv, refreshTokenAuthTag: refresh.authTag, idTokenCiphertext: idToken.ciphertext, idTokenIv: idToken.iv, idTokenAuthTag: idToken.authTag, scopes: scopes.join(' '), expiresAt: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000), isRevoked: false, revokedAt: null,
-    } });
+    };
+    const saved = runtime.oauthConnectionId
+      ? await this.prisma.aiOAuthConnection.update({ where: { id: runtime.oauthConnectionId }, data: { ...data, isRevoked: false, revokedAt: null } })
+      : await this.prisma.aiOAuthConnection.create({ data: { ...data, tenantId: null, tenantUserId: null } });
+    await this.prisma.aiServerRuntime.update({
+      where: { id: 'global' },
+      data: { oauthConnectionId: saved.id, selectedModelSlug: null, selectedModelDisplayName: null },
+    });
+    return saved;
   }
 
-  async refreshConnection(actor: AiOAuthActor, connectionId: string): Promise<void> {
+  async refreshConnection(actorOrConnectionId: AiOAuthActor | string, suppliedConnectionId?: string): Promise<void> {
+    const connectionId = typeof actorOrConnectionId === 'string' ? actorOrConnectionId : suppliedConnectionId!;
     const leaseToken = randomSecret(24);
     const leaseExpiresAt = new Date(Date.now() + 30_000);
     const claimed = await this.prisma.aiOAuthConnection.updateMany({ where: {
-      id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false,
+      id: connectionId, isRevoked: false,
       OR: [{ refreshLeaseToken: null }, { refreshLeaseExpiresAt: null }, { refreshLeaseExpiresAt: { lt: new Date() } }],
     }, data: { refreshLeaseToken: leaseToken, refreshLeaseExpiresAt: leaseExpiresAt } });
     if (!claimed.count) {
       await new Promise((resolve) => setTimeout(resolve, 50));
-      const current = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false } });
+      const current = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, isRevoked: false } });
       if (!current) throw new Error('OAuth connection not found');
       if (current.refreshLeaseToken && current.refreshLeaseExpiresAt && current.refreshLeaseExpiresAt > new Date()) return;
-      return this.refreshConnection(actor, connectionId);
+      return this.refreshConnection(connectionId);
     }
     try {
-      await this.doRefresh(actor, connectionId, leaseToken);
+      await this.doRefresh(connectionId, leaseToken);
     } finally {
       await this.prisma.aiOAuthConnection.updateMany({ where: { id: connectionId, refreshLeaseToken: leaseToken }, data: { refreshLeaseToken: null, refreshLeaseExpiresAt: null } });
     }
   }
 
-  async resolveProviderAuth(actor: AiOAuthActor): Promise<AiProviderAuth | undefined> {
-    let connection = await this.prisma.aiOAuthConnection.findFirst({
-      where: { tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false },
-      orderBy: { updatedAt: 'desc' },
-    });
+  async resolveProviderAuth(_actor?: AiOAuthActor): Promise<AiProviderAuth | undefined> {
+    const runtime = await this.globalRuntime();
+    let connection = runtime.oauthConnection;
+    if (connection?.isRevoked) connection = null;
     if (!connection) return undefined;
     if (new Date(connection.expiresAt) <= new Date()) {
-      await this.refreshConnection(actor, connection.id);
+      await this.refreshConnection(connection.id);
       connection = await this.prisma.aiOAuthConnection.findFirst({
-        where: { id: connection.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false },
+        where: { id: connection.id, isRevoked: false },
       });
       if (!connection) return undefined;
     }
     const accessToken = this.encryption.decrypt({ ciphertext: connection.accessTokenCiphertext, iv: connection.accessTokenIv, authTag: connection.accessTokenAuthTag });
-    await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false }, data: { lastUsedAt: new Date() } });
+    await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, isRevoked: false }, data: { lastUsedAt: new Date() } });
     return {
       type: 'oauth',
       accessToken,
       refresh: async () => {
-        await this.refreshConnection(actor, connection!.id);
-        const refreshed = await this.resolveProviderAuth(actor);
+        await this.refreshConnection(connection!.id);
+        const refreshed = await this.resolveProviderAuth();
         if (!refreshed) throw new Error('OAuth connection refresh failed');
         return refreshed;
       },
     };
   }
 
-  private async doRefresh(actor: AiOAuthActor, connectionId: string, leaseToken: string): Promise<void> {
-    const connection = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false, refreshLeaseToken: leaseToken } });
+  private async doRefresh(connectionId: string, leaseToken: string): Promise<void> {
+    const connection = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, isRevoked: false, refreshLeaseToken: leaseToken } });
     if (!connection) throw new Error('OAuth connection not found');
     const refreshToken = this.encryption.decrypt({ ciphertext: connection.refreshTokenCiphertext, iv: connection.refreshTokenIv, authTag: connection.refreshTokenAuthTag });
     try {
@@ -191,15 +199,16 @@ export class AiOAuthService {
       const tokens = await exchangeToken(discovered.token_endpoint ?? this.config.get<string>('CHATGPT_OAUTH_TOKEN_ENDPOINT') ?? DEFAULT_TOKEN_ENDPOINT, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: connection.clientId }, fetch, { requireRefreshToken: false, requireIdToken: false });
       const access = this.encryption.encrypt(tokens.access_token);
       const refresh = this.encryption.encrypt(tokens.refresh_token ?? refreshToken);
-      await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false, refreshLeaseToken: leaseToken }, data: { accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag, refreshTokenCiphertext: refresh.ciphertext, refreshTokenIv: refresh.iv, refreshTokenAuthTag: refresh.authTag, expiresAt: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000), lastUsedAt: new Date() } });
+      await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, isRevoked: false, refreshLeaseToken: leaseToken }, data: { accessTokenCiphertext: access.ciphertext, accessTokenIv: access.iv, accessTokenAuthTag: access.authTag, refreshTokenCiphertext: refresh.ciphertext, refreshTokenIv: refresh.iv, refreshTokenAuthTag: refresh.authTag, expiresAt: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000), lastUsedAt: new Date() } });
     } catch (error) {
-      if (/invalid_grant|401|403/.test(String(error))) await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false, refreshLeaseToken: leaseToken }, data: { isRevoked: true, revokedAt: new Date() } });
+      if (/invalid_grant|401|403/.test(String(error))) await this.prisma.aiOAuthConnection.updateMany({ where: { id: connection.id, isRevoked: false, refreshLeaseToken: leaseToken }, data: { isRevoked: true, revokedAt: new Date() } });
       throw new Error('OAuth connection refresh failed');
     }
   }
 
-  async disconnectConnection(actor: AiOAuthActor, connectionId: string): Promise<void> {
-    const connection = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false } });
+  async disconnectConnection(actorOrConnectionId: AiOAuthActor | string, suppliedConnectionId?: string): Promise<void> {
+    const connectionId = typeof actorOrConnectionId === 'string' ? actorOrConnectionId : suppliedConnectionId!;
+    const connection = await this.prisma.aiOAuthConnection.findFirst({ where: { id: connectionId, isRevoked: false } });
     if (!connection) return;
     try {
       const configuration = await discoverOpenIdConfiguration(connection.issuer);
@@ -210,7 +219,17 @@ export class AiOAuthService {
     } catch {
       // Local revocation is still enforced when discovery or provider revocation is unavailable.
     }
-    await this.prisma.aiOAuthConnection.updateMany({ where: { id: connectionId, tenantId: actor.tenantId, tenantUserId: actor.tenantUserId, isRevoked: false }, data: { isRevoked: true, revokedAt: new Date() } });
+    await this.prisma.aiOAuthConnection.updateMany({ where: { id: connectionId, isRevoked: false }, data: { isRevoked: true, revokedAt: new Date() } });
+    await this.prisma.aiServerRuntime.update({ where: { id: 'global' }, data: { oauthConnectionId: null, selectedModelSlug: null, selectedModelDisplayName: null } });
+  }
+
+  private globalRuntime() {
+    return this.prisma.aiServerRuntime.upsert({
+      where: { id: 'global' },
+      create: { id: 'global' },
+      update: {},
+      include: { oauthConnection: true },
+    });
   }
 
   toConnectionView(connection: any): AiOAuthConnectionView {

@@ -169,6 +169,7 @@ test('persists encrypted PKCE and nonce material and uses a configured callback 
   let attempt: any;
   const prisma = {
     aiOAuthConnection: { findFirst: async () => null },
+    aiServerRuntime: { upsert: async () => ({ id: 'global', oauthConnectionId: null, oauthConnection: null }) },
     aiOAuthAttempt: { create: async ({ data }: any) => { attempt = { ...data, id: 'attempt-id' }; return attempt; } },
   };
   const service = new AiOAuthService(prisma as any, { encrypt: (value: string) => ({ ciphertext: `cipher:${value}`, iv: 'iv', authTag: 'tag' }) } as any, {
@@ -202,7 +203,11 @@ test('completes from persisted encrypted PKCE and nonce material after service r
       updateMany: async () => { consumed = true; return { count: 1 }; },
     },
     aiOAuthConnection: {
-      upsert: async ({ create }: any) => ({ ...create, id: 'connection-id', lastUsedAt: null }),
+      create: async ({ data }: any) => ({ ...data, id: 'connection-id', lastUsedAt: null }),
+    },
+    aiServerRuntime: {
+      upsert: async () => ({ id: 'global', oauthConnectionId: null, oauthConnection: null }),
+      update: async () => undefined,
     },
   };
   const originalFetch = globalThis.fetch;
@@ -348,17 +353,48 @@ test('fences a slow refresh after its lease expires before it can overwrite newe
   }
 });
 
-test('revokes remotely when available, then marks only the owned connection locally', async () => {
+test('resolves and refreshes the expired global OAuth connection without an actor', async () => {
+  let row: any = {
+    id: 'global-connection', issuer: 'https://auth.example', clientId: 'client', isRevoked: false,
+    accessTokenCiphertext: 'enc:old-access', accessTokenIv: 'iv', accessTokenAuthTag: 'tag',
+    refreshTokenCiphertext: 'enc:refresh', refreshTokenIv: 'iv', refreshTokenAuthTag: 'tag',
+    expiresAt: new Date(Date.now() - 1_000), refreshLeaseToken: null, refreshLeaseExpiresAt: null,
+  };
+  const prisma = {
+    aiServerRuntime: { upsert: async () => ({ id: 'global', oauthConnectionId: row.id, oauthConnection: row }) },
+    aiOAuthConnection: {
+      findFirst: async () => row,
+      updateMany: async ({ data }: any) => { row = { ...row, ...data }; return { count: 1 }; },
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => url.endsWith('openid-configuration')
+    ? { ok: true, json: async () => ({ token_endpoint: 'https://auth.example/token' }) }
+    : { ok: true, json: async () => ({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600 }) }) as any;
+  try {
+    const service = new AiOAuthService(prisma as any, {
+      decrypt: ({ ciphertext }: any) => ciphertext.replace('enc:', ''),
+      encrypt: (value: string) => ({ ciphertext: `enc:${value}`, iv: 'iv', authTag: 'tag' }),
+    } as any, { get: () => undefined } as any);
+    assert.equal((await service.resolveProviderAuth())?.accessToken, 'new-access');
+    assert.equal(row.accessTokenCiphertext, 'enc:new-access');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('revokes remotely when available, then disconnects the global connection locally', async () => {
   let locallyRevoked = false;
   let revokeCalls = 0;
   const prisma = {
     aiOAuthConnection: {
-      findFirst: async ({ where }: any) => where.tenantId === 'tenant-a' && where.tenantUserId === 'user-a' ? {
+      findFirst: async () => ({
         id: 'connection-id', issuer: 'https://auth.example', clientId: 'client', isRevoked: false,
         refreshTokenCiphertext: 'refresh', refreshTokenIv: 'iv', refreshTokenAuthTag: 'tag',
-      } : null,
-      updateMany: async ({ where }: any) => { assert.equal(where.tenantId, 'tenant-a'); assert.equal(where.tenantUserId, 'user-a'); locallyRevoked = true; return { count: 1 }; },
+      }),
+      updateMany: async ({ where }: any) => { assert.equal(where.tenantId, undefined); assert.equal(where.tenantUserId, undefined); locallyRevoked = true; return { count: 1 }; },
     },
+    aiServerRuntime: { update: async () => undefined },
   };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string) => {

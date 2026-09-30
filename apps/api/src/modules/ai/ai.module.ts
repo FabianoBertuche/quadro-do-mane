@@ -21,6 +21,7 @@ import { AiAudioController } from './ai-audio.controller';
 import { AiAudioService, SPEECH_TO_TEXT_PROVIDER, TEXT_TO_SPEECH_PROVIDER } from './ai-audio.service';
 import { AiOAuthController } from './ai-oauth.controller';
 import { AiOAuthService } from './ai-oauth.service';
+import { AiServerRuntimeService } from './ai-server-runtime.service';
 import { TemporaryAudioService } from './media/temporary-audio.service';
 import { TemporaryAudioCleanupScheduler } from './media/temporary-audio-cleanup.scheduler';
 import { OpenAiSpeechToTextProvider } from './providers/openai-speech-to-text.provider';
@@ -40,6 +41,7 @@ import OpenAI from 'openai';
     MoveTaskTool,
     AiAudioService,
     AiOAuthService,
+    AiServerRuntimeService,
     { provide: AI_OAUTH_SERVICE, useExisting: AiOAuthService },
     {
       provide: TemporaryAudioService,

@@ -86,6 +86,22 @@ export function buildAuthorizationUrl(options: AuthorizationUrlOptions): string 
   return url.toString();
 }
 
+export async function fetchOpenAiModels(
+  accessToken: string,
+  fetcher: typeof fetch = fetch,
+): Promise<Array<{ slug: string; displayName: string }>> {
+  const response = await fetcher(`${DEFAULT_RESOURCE}/models`, {
+    headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(`OpenAI model catalog unavailable (${response.status})`);
+  const body = await response.json().catch(() => ({}));
+  if (!Array.isArray(body?.data)) throw new Error('OpenAI model catalog response is invalid');
+  return body.data.flatMap((model: any) => model?.visibility === 'list'
+    && typeof model.slug === 'string' && typeof model.display_name === 'string'
+    ? [{ slug: model.slug, displayName: model.display_name }]
+    : []);
+}
+
 export function parseCallbackUrl(
   callbackUrl: string,
   expectedState: string,
