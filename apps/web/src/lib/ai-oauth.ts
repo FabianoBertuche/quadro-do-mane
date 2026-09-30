@@ -16,6 +16,14 @@ export interface ChatGptConnection {
   status: AiOAuthConnectionStatus;
 }
 
+export function isCurrentAiOAuthRequest(generation: number, currentGeneration: number) {
+  return generation === currentGeneration;
+}
+
+export function getChatGptReconnectAction(status: AiOAuthConnectionStatus): 'authorize' | 'refresh' {
+  return status === 'revoked' ? 'authorize' : 'refresh';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -76,11 +84,13 @@ export async function disconnectChatGptConnection(connectionId: string): Promise
 }
 
 export function getAiOAuthErrorMessage(error: unknown): string {
+  const directCode = isRecord(error) && typeof error.code === 'string' ? error.code : undefined;
   const response = isRecord(error) && isRecord(error.response) ? error.response : undefined;
   const data = response && isRecord(response.data) ? response.data : undefined;
-  const code = data?.code;
-  if (code === 'oauth_denied') return 'A autorização foi cancelada. Você pode tentar novamente.';
-  if (code === 'oauth_expired') return 'A autorização expirou. Inicie a conexão novamente.';
-  if (code === 'oauth_scope_insufficient') return 'A autorização não incluiu as permissões necessárias. Tente novamente e aceite todas as permissões.';
+  const code = directCode ?? (typeof data?.code === 'string' ? data.code : undefined);
+  if (code === 'AI_OAUTH_DENIED' || code === 'oauth_denied') return 'A autorização foi cancelada. Você pode tentar novamente.';
+  if (code === 'AI_OAUTH_EXPIRED' || code === 'oauth_expired') return 'A autorização expirou. Inicie a conexão novamente.';
+  if (code === 'AI_OAUTH_SCOPE_INSUFFICIENT' || code === 'oauth_scope_insufficient') return 'A autorização não incluiu as permissões necessárias. Tente novamente e aceite todas as permissões.';
+  if (code === 'AI_OAUTH_CLIPBOARD_FAILED') return 'Não foi possível copiar a URL. Use Abrir autorização para continuar.';
   return 'Não foi possível concluir a conexão com o ChatGPT. Tente novamente.';
 }

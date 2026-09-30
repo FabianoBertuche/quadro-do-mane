@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EncryptionService } from '../../common/crypto/encryption.service';
@@ -13,6 +13,29 @@ export interface AiOAuthActor { tenantId: string; tenantUserId: string }
 export interface AiOAuthConnectionView {
   id: string; issuer: string; subject: string; clientId: string; email: string | null;
   displayName: string | null; scopes: string[]; expiresAt: string; isRevoked: boolean; lastUsedAt: string | null;
+}
+
+export type AiOAuthErrorCode = 'AI_OAUTH_DENIED' | 'AI_OAUTH_EXPIRED' | 'AI_OAUTH_SCOPE_INSUFFICIENT' | 'AI_OAUTH_FAILED';
+
+export class AiOAuthException extends BadRequestException {
+  constructor(code: AiOAuthErrorCode, message: string) {
+    super({ code, message });
+  }
+}
+
+export function toAiOAuthException(error: unknown): AiOAuthException {
+  if (error instanceof AiOAuthException) return error;
+  const message = String(error instanceof Error ? error.message : error);
+  if (/access_denied|authorization denied|authorization was denied/i.test(message)) {
+    return new AiOAuthException('AI_OAUTH_DENIED', 'A autorização foi cancelada. Você pode tentar novamente.');
+  }
+  if (/attempt is invalid or expired|attempt is already consumed|authorization.*expired/i.test(message)) {
+    return new AiOAuthException('AI_OAUTH_EXPIRED', 'A autorização expirou. Inicie a conexão novamente.');
+  }
+  if (/required scope missing|scope.*insufficient/i.test(message)) {
+    return new AiOAuthException('AI_OAUTH_SCOPE_INSUFFICIENT', 'A autorização não incluiu as permissões necessárias.');
+  }
+  return new AiOAuthException('AI_OAUTH_FAILED', 'Não foi possível concluir a autorização. Tente novamente.');
 }
 
 const ATTEMPT_TTL_MS = 10 * 60 * 1000;
@@ -56,6 +79,14 @@ export class AiOAuthService {
   }
 
   async completeAuthorization(actor: AiOAuthActor, callbackUrl: string): Promise<AiOAuthConnectionView> {
+    try {
+      return await this.completeAuthorizationInternal(actor, callbackUrl);
+    } catch (error) {
+      throw toAiOAuthException(error);
+    }
+  }
+
+  private async completeAuthorizationInternal(actor: AiOAuthActor, callbackUrl: string): Promise<AiOAuthConnectionView> {
     const callback = new URL(callbackUrl);
     const state = callback.searchParams.get('state');
     if (!state) throw new Error('OAuth state mismatch');
