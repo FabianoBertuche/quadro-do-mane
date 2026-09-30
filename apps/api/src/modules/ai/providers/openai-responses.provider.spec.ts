@@ -102,3 +102,61 @@ test('sanitizes transport failures', async () => {
     return true;
   });
 });
+
+test('exposes normalized events through an async-iterable streaming path', async () => {
+  const provider = new OpenAiResponsesProvider(config as any, async () => response([
+    'data: {"type":"response.output_text.delta","delta":"Olá"}',
+    'data: {"type":"response.completed","response":{"status":"completed"}}',
+    '',
+  ].join('\n')));
+  const events: any[] = [];
+
+  for await (const event of provider.stream(input, { accessToken: 'oauth-token', type: 'oauth' })) events.push(event);
+
+  assert.deepEqual(events, [
+    { type: 'text.delta', delta: 'Olá' },
+    { type: 'completed' },
+  ]);
+});
+
+test('rejects an interrupted stream without a terminal response event', async () => {
+  const provider = new OpenAiResponsesProvider(config as any, async () => response('data: {"type":"response.output_text.delta","delta":"partial"}\n'));
+
+  await assert.rejects(() => provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' }), /AI response incomplete/);
+});
+
+test('merges function-call argument deltas with the arguments.done event', async () => {
+  const provider = new OpenAiResponsesProvider(config as any, async () => response([
+    'data: {"type":"response.output_item.added","item":{"type":"function_call","id":"call-2","name":"create_task"}}',
+    'data: {"type":"response.function_call_arguments.delta","item_id":"call-2","delta":"{\\"title\\":"}',
+    'data: {"type":"response.function_call_arguments.done","item_id":"call-2","arguments":"{\\"title\\":\\"Done\\"}"}',
+    'data: {"type":"response.completed","response":{"status":"completed"}}',
+    '',
+  ].join('\n')));
+
+  const result = await provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' });
+
+  assert.deepEqual(result.toolCalls, [{ name: 'create_task', arguments: { title: 'Done' } }]);
+});
+
+test('does not retry a second OAuth 401', async () => {
+  let calls = 0;
+  const provider = new OpenAiResponsesProvider(config as any, async () => {
+    calls += 1;
+    return { ok: false, status: 401, headers: new Headers({ 'x-request-id': 'second-401' }), text: async () => '' } as any;
+  });
+
+  await assert.rejects(() => provider.complete(input, {
+    accessToken: 'old-token', type: 'oauth', refresh: async () => ({ accessToken: 'new-token', type: 'oauth' }),
+  }), /request ID: second-401/);
+  assert.equal(calls, 2);
+});
+
+test('does not use an API-key fallback when AI is disabled', async () => {
+  const disabledConfig = { get: (key: string, fallback?: string) => ({
+    OPENAI_MODEL: 'test-model', OPENAI_API_KEY: 'api-key', AI_ENABLED: false,
+  } as Record<string, any>)[key] ?? fallback };
+  const provider = new OpenAiResponsesProvider(disabledConfig as any, async () => response(''));
+
+  await assert.rejects(() => provider.complete(input), /AI provider is not configured/);
+});

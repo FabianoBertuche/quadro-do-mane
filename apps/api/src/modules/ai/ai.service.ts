@@ -11,6 +11,7 @@ import type { AiOAuthService } from './ai-oauth.service';
 
 export const AI_PROVIDER = 'AI_PROVIDER';
 export const AI_RATE_LIMITER = 'AI_RATE_LIMITER';
+export const AI_OAUTH_SERVICE = 'AI_OAUTH_SERVICE';
 export interface AiActor { tenantId: string; tenantUserId: string; userId?: string }
 
 export interface AiSecurityLimits {
@@ -44,7 +45,7 @@ export class AiService {
     private readonly audit: AiAuditService,
     @Optional() limits: Partial<AiSecurityLimits> = {},
     @Optional() @Inject(AI_RATE_LIMITER) private readonly rateLimiter?: AiRateLimiter,
-    @Optional() private readonly oauth?: AiOAuthService,
+    @Optional() @Inject(AI_OAUTH_SERVICE) private readonly oauth?: AiOAuthService,
   ) {
     this.limits = { ...DEFAULT_AI_SECURITY_LIMITS, ...limits };
   }

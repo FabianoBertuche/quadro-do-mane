@@ -33,3 +33,21 @@ exit 0
 
 - The existing `AiProvider` contract returns one normalized completion, so the native SSE response is buffered and normalized before returning; no controller/UI streaming contract was introduced.
 - The legacy `OpenAiProvider` remains for compatibility with its existing focused tests and is no longer selected by `AiModule` for text AI requests.
+
+## Review Fixes
+
+- Added the `AI_OAUTH_SERVICE` token and `useExisting: AiOAuthService` module alias. `AiService` now injects that token explicitly, avoiding erased type-only dependency metadata; the module metadata test catches missing or undefined runtime wiring.
+- Added `AiStreamingProvider.stream()` as an async iterable of normalized text/tool/completion events. `complete()` consumes the same incremental parser and retains the existing `Promise<AiCompletionResult>` contract.
+- Streams now require `response.completed` with status `completed`, or terminate with an explicit safe failed/incomplete error. EOF, malformed JSON, and interrupted partial streams are rejected.
+- Added `response.function_call_arguments.done` parsing and merging with argument deltas and completed output.
+- Added regression coverage for disabled API-key fallback and the second OAuth 401, which is not retried.
+
+## Review-Fix Verification
+
+```text
+node -r ts-node/register --test src/modules/ai/providers/*.spec.ts src/modules/ai/ai.service.spec.ts src/modules/ai/ai-security.spec.ts src/modules/ai/ai-oauth.service.spec.ts src/modules/ai/ai.module.spec.ts
+56 tests passed, 0 failed
+
+npm run build
+exit 0
+```

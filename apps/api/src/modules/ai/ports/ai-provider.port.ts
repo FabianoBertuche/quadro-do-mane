@@ -32,6 +32,17 @@ export interface AiProviderAuth {
   refresh?: () => Promise<AiProviderAuth>;
 }
 
+export type AiProviderStreamEvent =
+  | { type: 'text.delta'; delta: string }
+  | { type: 'tool_call.started'; id: string; name: string }
+  | { type: 'tool_call.delta'; id: string; delta: string }
+  | { type: 'tool_call.done'; id: string; arguments: string }
+  | { type: 'completed' };
+
+export interface AiStreamingProvider {
+  stream(input: AiCompletionInput, auth?: AiProviderAuth): AsyncIterable<AiProviderStreamEvent>;
+}
+
 export interface AiProvider {
   complete(input: AiCompletionInput, auth?: AiProviderAuth): Promise<AiCompletionResult>;
 }
