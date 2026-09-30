@@ -218,6 +218,66 @@ test('serializes refreshes with the persisted lease and rotates the refresh toke
   }
 });
 
+test('fences a slow refresh after its lease expires before it can overwrite newer tokens', async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  let row: any = {
+    id: 'connection-id', tenantId: 'tenant-a', tenantUserId: 'user-a', issuer: 'https://auth.example', clientId: 'client',
+    refreshTokenCiphertext: 'enc:old-refresh', refreshTokenIv: 'iv', refreshTokenAuthTag: 'tag', isRevoked: false,
+    refreshLeaseToken: null, refreshLeaseExpiresAt: null, accessTokenCiphertext: 'enc:old-access',
+  };
+  let remoteStarted!: () => void;
+  const remoteStartedPromise = new Promise<void>((resolve) => { remoteStarted = resolve; });
+  let releaseSlowRemote!: () => void;
+  const slowRemote = new Promise<void>((resolve) => { releaseSlowRemote = resolve; });
+  let refreshCalls = 0;
+  const prisma = {
+    aiOAuthConnection: {
+      findFirst: async () => ({ ...row }),
+      updateMany: async ({ where, data }: any) => {
+        if (data.refreshLeaseToken) {
+          if (row.refreshLeaseToken && row.refreshLeaseExpiresAt > new Date(now)) return { count: 0 };
+          row = { ...row, ...data };
+          return { count: 1 };
+        }
+        if (where.refreshLeaseToken && row.refreshLeaseToken !== where.refreshLeaseToken) return { count: 0 };
+        row = { ...row, ...data };
+        return { count: 1 };
+      },
+    },
+  };
+  const originalFetch = globalThis.fetch;
+  Date.now = () => now;
+  globalThis.fetch = (async (url: string) => {
+    if (url.endsWith('openid-configuration')) return { ok: true, json: async () => ({ token_endpoint: 'https://auth.example/token' }) } as any;
+    refreshCalls += 1;
+    if (refreshCalls === 1) {
+      remoteStarted();
+      await slowRemote;
+      return { ok: true, json: async () => ({ access_token: 'stale-access', refresh_token: 'stale-refresh', expires_in: 3600 }) } as any;
+    }
+    return { ok: true, json: async () => ({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600 }) } as any;
+  }) as any;
+  try {
+    const service = new AiOAuthService(prisma as any, {
+      decrypt: ({ ciphertext }: any) => ciphertext.replace('enc:', ''),
+      encrypt: (value: string) => ({ ciphertext: `enc:${value}`, iv: 'iv', authTag: 'tag' }),
+    } as any, { get: () => undefined } as any);
+    const slowRefresh = service.refreshConnection({ tenantId: 'tenant-a', tenantUserId: 'user-a' }, 'connection-id');
+    await remoteStartedPromise;
+    now += 31_000;
+    await service.refreshConnection({ tenantId: 'tenant-a', tenantUserId: 'user-a' }, 'connection-id');
+    releaseSlowRemote();
+    await slowRefresh;
+    assert.equal(refreshCalls, 2);
+    assert.equal(row.accessTokenCiphertext, 'enc:new-access');
+    assert.equal(row.refreshTokenCiphertext, 'enc:new-refresh');
+  } finally {
+    Date.now = realNow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('revokes remotely when available, then marks only the owned connection locally', async () => {
   let locallyRevoked = false;
   let revokeCalls = 0;
