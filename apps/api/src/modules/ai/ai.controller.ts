@@ -6,7 +6,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
-import { SendAiMessageDto } from './dto/send-ai-message.dto';
+import { AiResponseMode, SendAiMessageDto } from './dto/send-ai-message.dto';
 import { ConfirmAiActionDto } from './dto/confirm-ai-action.dto';
 import { ListAiConversationsDto } from './dto/list-ai-conversations.dto';
 

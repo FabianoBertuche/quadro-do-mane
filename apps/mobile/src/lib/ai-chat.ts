@@ -60,6 +60,10 @@ export function resolveProposalStatus(resultStatus: string | undefined, fallback
   return resultStatus ?? fallbackStatus;
 }
 
+export function hasProposalControls(status: string): boolean {
+  return status === 'PENDING';
+}
+
 export function createConversation(contextProjectId?: string): Promise<AiConversation> {
   return api.post('/ai/conversations', contextProjectId ? { contextProjectId } : {}).then((response) => response.data);
 }

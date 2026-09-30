@@ -192,3 +192,14 @@ test('text input is persisted as TEXT even when response mode is AUDIO', async (
   assert.equal(result.message.format, 'TEXT');
   assert.equal(created.length, 0);
 });
+
+test('text endpoint ignores a client AUDIO input format claim', async () => {
+  const { service } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, {
+    text: 'oi',
+    responseMode: AiResponseMode.TEXT,
+    inputFormat: AiResponseMode.AUDIO,
+  });
+
+  assert.equal(result.message.format, 'TEXT');
+});

@@ -10,7 +10,7 @@ import {
   type AiResponseMode,
 } from './ai-chat-state';
 vi.mock('./api', () => ({ api: {} }));
-import { resolveProposalStatus, selectConversation, type AiConversation } from './ai-chat';
+import { hasProposalControls, resolveProposalStatus, selectConversation, type AiConversation } from './ai-chat';
 
 describe('AI chat recording machine', () => {
   it('starts on press and submits on release', () => {
@@ -91,6 +91,11 @@ describe('AI chat recording machine', () => {
 describe('AI chat response mode and proposals', () => {
   it('keeps clarification proposals pending after confirmation', () => {
     expect(resolveProposalStatus('PENDING', 'EXECUTED')).toBe('PENDING');
+  });
+
+  it('keeps confirmation and cancellation controls visible for clarification proposals', () => {
+    expect(hasProposalControls('PENDING')).toBe(true);
+    expect(hasProposalControls('EXECUTED')).toBe(false);
   });
 
   it('does not reuse a project conversation for global chat', () => {

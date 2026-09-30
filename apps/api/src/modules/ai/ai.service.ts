@@ -5,7 +5,7 @@ import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
 import { AiTool } from './tools/ai-tool.port';
-import { SendAiMessageDto } from './dto/send-ai-message.dto';
+import { AiResponseMode, SendAiMessageDto } from './dto/send-ai-message.dto';
 import type { AiRateLimiter } from './ai-rate-limit.service';
 
 export const AI_PROVIDER = 'AI_PROVIDER';
@@ -79,13 +79,13 @@ export class AiService {
     return { messages, pendingProposals: proposals };
   }
 
-  async sendMessage(actor: AiActor & { conversationId: string; rateLimitReserved?: boolean }, dto: SendAiMessageDto) {
+  async sendMessage(actor: AiActor & { conversationId: string; rateLimitReserved?: boolean }, dto: SendAiMessageDto, inputFormat: AiResponseMode = AiResponseMode.TEXT) {
     const conversation = await this.requireConversation(actor, actor.conversationId);
     const text = dto.text?.trim();
     if (!text) throw new BadRequestException('A mensagem de texto é obrigatória');
     if (text.length > this.limits.maxMessageLength) throw new BadRequestException('A mensagem excede o limite permitido');
     if (!actor.rateLimitReserved) await this.reserveRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
-    const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: dto.inputFormat ?? 'TEXT', content: text } });
+    const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
     const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: this.limits.maxHistoryMessages });
     const completionInput: AiCompletionInput = {

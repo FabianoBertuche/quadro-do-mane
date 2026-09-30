@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import Feather from '@expo/vector-icons/Feather';
 import { colors } from '@/theme/colors';
 import { apiErrorMessage } from '@/lib/api';
-import { cancelAction, confirmAction, resolveProposalStatus, type AiActionProposal, type AiActionResult } from '@/lib/ai-chat';
+import { cancelAction, confirmAction, hasProposalControls, resolveProposalStatus, type AiActionProposal, type AiActionResult } from '@/lib/ai-chat';
 
 export function ActionProposalCard({ proposal, onChanged }: { proposal: AiActionProposal; onChanged?: (result?: AiActionResult) => void }) {
   const [status, setStatus] = useState(proposal.status);
@@ -31,7 +31,7 @@ export function ActionProposalCard({ proposal, onChanged }: { proposal: AiAction
         <Text style={styles.label}>Ação sugerida</Text>
       </View>
       <Text style={styles.summary}>{proposal.summary}</Text>
-      {status === 'PENDING' ? (
+      {hasProposalControls(status) ? (
         <View style={styles.actions}>
           <Pressable disabled={busy} onPress={() => void run(() => confirmAction(proposal.id), 'EXECUTED')} style={styles.confirm}>
             {busy ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={styles.confirmText}>Confirmar</Text>}

@@ -75,6 +75,7 @@ export class AiAudioService {
     const response = await this.ai.sendMessage(
       { ...input.actor, conversationId: input.conversationId, rateLimitReserved: true },
       { text: transcription.text.trim(), responseMode: input.responseMode, inputFormat: AiResponseMode.AUDIO },
+      AiResponseMode.AUDIO,
     );
     if (input.responseMode !== AiResponseMode.AUDIO) return response;
 
