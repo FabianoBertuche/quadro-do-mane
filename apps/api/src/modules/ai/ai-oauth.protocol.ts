@@ -99,7 +99,8 @@ export function parseCallbackUrl(
   const state = url.searchParams.get('state') ?? undefined;
   if (!state || !safeEqual(state, expectedState)) return { state, error: new Error('OAuth state mismatch') };
   const callbackClientId = url.searchParams.get('client_id');
-  if (expectedClientId && callbackClientId && callbackClientId !== expectedClientId) {
+  if (!callbackClientId) throw new Error('OAuth client id missing');
+  if (expectedClientId && callbackClientId !== expectedClientId) {
     throw new Error('OAuth client id mismatch');
   }
   const error = url.searchParams.get('error');
@@ -110,7 +111,8 @@ export function parseCallbackUrl(
 }
 
 export function assertCallbackClientId(callbackClientId: string | undefined, expectedClientId: string): void {
-  if (callbackClientId && callbackClientId !== expectedClientId) throw new Error('OAuth client id mismatch');
+  if (!callbackClientId) throw new Error('OAuth client id missing');
+  if (callbackClientId !== expectedClientId) throw new Error('OAuth client id mismatch');
 }
 
 function safeEqual(left: string, right: string): boolean {

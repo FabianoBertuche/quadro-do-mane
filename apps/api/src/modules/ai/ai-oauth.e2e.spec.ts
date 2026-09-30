@@ -119,6 +119,13 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=wrong`,
     }), /OAuth state mismatch|A autorização expirou|Não foi possível concluir/);
 
+    const dynamicMissingStart = await controller.start(actor as any);
+    await assert.rejects(() => controller.complete(actor as any, {
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${new URL(dynamicMissingStart.authorizationUrl).searchParams.get('state')}`,
+    }), /client id missing|Não foi possível concluir/);
+    assert.equal(connections.size, 0);
+    assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks);
+
     const dynamicMismatchStart = await controller.start(actor as any);
     await assert.rejects(() => controller.complete(actor as any, {
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${new URL(dynamicMismatchStart.authorizationUrl).searchParams.get('state')}&client_id=wrong-client`,
@@ -149,6 +156,10 @@ test('completes ChatGPT OAuth and resolves the stored token for an OpenAI reques
 
     const secondStarted = await controller.start(actor as any);
     const secondAuthorization = new URL(secondStarted.authorizationUrl);
+    await assert.rejects(() => controller.complete(actor as any, {
+      callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${secondAuthorization.searchParams.get('state')}`,
+    }), /client id missing|Não foi possível concluir/);
+    assert.equal(tokenRequests.length, tokenCallsBeforeRejectedCallbacks + 2);
     await assert.rejects(() => controller.complete(actor as any, {
       callbackUrl: `http://127.0.0.1:1455/auth/callback?code=auth-code&state=${secondAuthorization.searchParams.get('state')}&client_id=other-client`,
     }), /client id mismatch|Não foi possível concluir/);

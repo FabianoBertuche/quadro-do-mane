@@ -66,6 +66,7 @@ test('retains a dynamic callback client id for validation after token exchange',
   assert.equal(callback.clientId, 'issued-client');
   assert.doesNotThrow(() => assertCallbackClientId(callback.clientId, 'issued-client'));
   assert.throws(() => assertCallbackClientId('other-client', 'issued-client'), /OAuth client id mismatch/);
+  assert.throws(() => assertCallbackClientId(undefined, 'issued-client'), /OAuth client id missing/);
 });
 
 test('rejects incomplete token responses before callers encrypt token fields', async () => {
@@ -167,7 +168,7 @@ test('completes from persisted encrypted PKCE and nonce material after service r
       decrypt: ({ ciphertext }: any) => ciphertext === 'nonce-verifier' ? verifier : nonce,
       encrypt: (value: string) => ({ ciphertext: `encrypted-${value}`, iv: 'iv', authTag: 'tag' }),
     } as any, { get: (key: string) => key === 'CHATGPT_OAUTH_ISSUER' ? 'https://auth.example' : undefined } as any);
-    const view = await service.completeAuthorization({ tenantId: 'tenant-a', tenantUserId: 'user-a' }, `http://127.0.0.1:1455/auth/callback?code=code&state=${state}`);
+    const view = await service.completeAuthorization({ tenantId: 'tenant-a', tenantUserId: 'user-a' }, `http://127.0.0.1:1455/auth/callback?code=code&state=${state}&client_id=issued-client`);
     assert.equal(consumed, true);
     assert.equal(view.id, 'connection-id');
     assert.equal(view.email, 'person@example.com');

@@ -21,3 +21,12 @@ Date: 2026-09-30
 ## Concerns
 
 - No known remaining concerns for the requested findings.
+
+## Final Callback Binding Fix
+
+- Callback `client_id` is now mandatory for both dynamic first registration and returning connections.
+- Returning callbacks must match the retained client ID before token exchange.
+- Dynamic callbacks must match the issued client ID after token exchange and before persistence.
+- Added missing-ID regressions for both paths while retaining valid dynamic and returning coverage.
+
+Additional verification: focused OAuth tests passed with 15 tests.
