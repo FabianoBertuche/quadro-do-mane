@@ -14,6 +14,7 @@ export interface AiToolDefinition {
 export interface AiCompletionInput {
   messages: AiMessage[];
   tools?: AiToolDefinition[];
+  model?: string;
 }
 
 export interface AiToolCall {

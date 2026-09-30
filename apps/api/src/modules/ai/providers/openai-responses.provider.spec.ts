@@ -7,6 +7,8 @@ const input = {
   tools: [{ name: 'create_task', description: 'Create a task', parameters: { type: 'object' } }],
 };
 
+const runtimeInput = { ...input, model: 'gpt-5-codex' };
+
 const config = {
   get: (key: string, fallback?: string) => ({
     OPENAI_MODEL: 'test-model',
@@ -221,4 +223,89 @@ test('does not use an API-key fallback when AI is disabled', async () => {
   const provider = new OpenAiResponsesProvider(disabledConfig as any, async () => response(''));
 
   await assert.rejects(() => provider.complete(input), /AI provider is not configured/);
+});
+
+test('sends the globally selected runtime model instead of the configured default model', async () => {
+  let request: any;
+  const provider = new OpenAiResponsesProvider(config as any, async (_url, init) => {
+    request = JSON.parse(String(init?.body));
+    return response('data: {"type":"response.completed","response":{"status":"completed"}}\n');
+  });
+
+  await provider.complete(runtimeInput, { accessToken: 'oauth-token', type: 'oauth' });
+
+  assert.equal(request.model, 'gpt-5-codex');
+  assert.doesNotMatch(JSON.stringify(request), /test-model/);
+});
+
+test('sends the globally selected runtime model for streaming requests too', async () => {
+  let request: any;
+  const provider = new OpenAiResponsesProvider(config as any, async (_url, init) => {
+    request = JSON.parse(String(init?.body));
+    return response('data: {"type":"response.output_text.delta","delta":"ok"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n');
+  });
+
+  const events: any[] = [];
+  for await (const event of provider.stream(runtimeInput, { accessToken: 'oauth-token', type: 'oauth' })) events.push(event);
+
+  assert.equal(request.model, 'gpt-5-codex');
+  assert.equal(request.store, false);
+  assert.deepEqual(events, [{ type: 'text.delta', delta: 'ok' }, { type: 'completed' }]);
+});
+
+test('falls back to the configured model when no runtime model is supplied', async () => {
+  let request: any;
+  const provider = new OpenAiResponsesProvider(config as any, async (_url, init) => {
+    request = JSON.parse(String(init?.body));
+    return response('data: {"type":"response.completed","response":{"status":"completed"}}\n');
+  });
+
+  await provider.complete({ ...input, model: '   ' }, { accessToken: 'oauth-token', type: 'oauth' });
+
+  assert.equal(request.model, 'test-model');
+});
+
+test('serves OAuth completions while the API-key fallback is disabled', async () => {
+  let authorization = '';
+  const disabledConfig = { get: (key: string, fallback?: string) => ({
+    OPENAI_MODEL: 'test-model', OPENAI_API_KEY: 'api-key', AI_ENABLED: false,
+  } as Record<string, any>)[key] ?? fallback };
+  const provider = new OpenAiResponsesProvider(disabledConfig as any, async (_url, init) => {
+    authorization = new Headers(init?.headers).get('authorization') ?? '';
+    return response('data: {"type":"response.output_text.delta","delta":"oauth"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n');
+  });
+
+  const result = await provider.complete(runtimeInput, { accessToken: 'oauth-token', type: 'oauth' });
+
+  assert.equal(authorization, 'Bearer oauth-token');
+  assert.equal(result.text, 'oauth');
+});
+
+test('returns a recoverable error when no OAuth connection and no API key are configured', async () => {
+  const unconfigured = { get: (key: string, fallback?: string) => ({
+    OPENAI_MODEL: 'test-model', AI_ENABLED: true,
+  } as Record<string, any>)[key] ?? fallback };
+  let requests = 0;
+  const provider = new OpenAiResponsesProvider(unconfigured as any, async () => { requests += 1; return response(''); });
+
+  await assert.rejects(() => provider.complete(input), (error: any) => {
+    assert.equal(error.message, 'AI provider is not configured');
+    assert.equal(error.getStatus(), 503);
+    return true;
+  });
+  assert.equal(requests, 0);
+});
+
+test('returns a recoverable error when AI is disabled and no OAuth connection exists', async () => {
+  const disabledConfig = { get: (key: string, fallback?: string) => ({
+    OPENAI_MODEL: 'test-model', OPENAI_API_KEY: 'api-key', AI_ENABLED: false,
+  } as Record<string, any>)[key] ?? fallback };
+  let requests = 0;
+  const provider = new OpenAiResponsesProvider(disabledConfig as any, async () => { requests += 1; return response(''); });
+
+  await assert.rejects(() => provider.complete(input), (error: any) => {
+    assert.equal(error.getStatus(), 503);
+    return true;
+  });
+  assert.equal(requests, 0);
 });

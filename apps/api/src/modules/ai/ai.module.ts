@@ -2,9 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
-import { FakeAiProvider } from './providers/fake-ai.provider';
 import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
-import { AI_OAUTH_SERVICE, AI_PROVIDER, AI_RATE_LIMITER, AiService, DEFAULT_AI_SECURITY_LIMITS } from './ai.service';
+import { AI_OAUTH_SERVICE, AI_PROVIDER, AI_RATE_LIMITER, AI_SERVER_RUNTIME, AiService, DEFAULT_AI_SECURITY_LIMITS } from './ai.service';
 import { AiRateLimitService } from './ai-rate-limit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiController } from './ai.controller';
@@ -43,6 +42,7 @@ import OpenAI from 'openai';
     AiOAuthService,
     AiServerRuntimeService,
     { provide: AI_OAUTH_SERVICE, useExisting: AiOAuthService },
+    { provide: AI_SERVER_RUNTIME, useExisting: AiServerRuntimeService },
     {
       provide: TemporaryAudioService,
       inject: [ConfigService],
@@ -86,7 +86,7 @@ import OpenAI from 'openai';
     {
       provide: AI_PROVIDER,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => config.get<boolean>('AI_ENABLED') ? new OpenAiResponsesProvider(config) : new FakeAiProvider(),
+      useFactory: (config: ConfigService) => new OpenAiResponsesProvider(config),
     },
   ],
   exports: [AiService],

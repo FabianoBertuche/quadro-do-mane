@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   AiCompletionInput,
@@ -15,7 +16,7 @@ export type ResponsesFetch = (url: string, init?: RequestInit) => Promise<Respon
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider {
-  private readonly model: string;
+  private readonly configuredModel: string;
   private readonly apiKey?: string;
   private readonly enabled: boolean;
 
@@ -23,7 +24,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
     private readonly config: ConfigService,
     private readonly fetcher: ResponsesFetch = (url, init) => fetch(url, init),
   ) {
-    this.model = config.get<string>('OPENAI_MODEL', 'gpt-4o-mini');
+    this.configuredModel = config.get<string>('OPENAI_MODEL', 'gpt-4o-mini');
     this.apiKey = config.get<string>('OPENAI_API_KEY');
     this.enabled = config.get<boolean>('AI_ENABLED') === true || config.get<string>('AI_ENABLED') === 'true';
   }
@@ -31,7 +32,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
   async complete(input: AiCompletionInput, auth?: AiProviderAuth): Promise<AiCompletionResult> {
     const fallback = this.fallbackAuth();
     let resolvedAuth: AiProviderAuth | undefined = auth ?? fallback;
-    if (!resolvedAuth) throw new Error('AI provider is not configured');
+    if (!resolvedAuth) throw this.unconfiguredError();
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let response: Response;
@@ -76,7 +77,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
 
   async *stream(input: AiCompletionInput, auth?: AiProviderAuth): AsyncIterable<AiProviderStreamEvent> {
     let resolvedAuth = auth ?? this.fallbackAuth();
-    if (!resolvedAuth) throw new Error('AI provider is not configured');
+    if (!resolvedAuth) throw this.unconfiguredError();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = await this.request(input, resolvedAuth).catch(() => { throw new Error('AI provider request failed'); });
       if (response.status === 401 && resolvedAuth.type === 'oauth' && resolvedAuth.refresh && attempt === 0) {
@@ -98,12 +99,16 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
     return this.enabled && this.apiKey ? { type: 'api-key', accessToken: this.apiKey } : undefined;
   }
 
+  private unconfiguredError(): Error {
+    return new ServiceUnavailableException('AI provider is not configured');
+  }
+
   private request(input: AiCompletionInput, auth: AiProviderAuth) {
     return this.fetcher(RESPONSES_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${auth.accessToken}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: this.model,
+        model: input.model?.trim() || this.configuredModel,
         input: input.messages,
         tools: input.tools?.map((tool) => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters })),
         stream: true,

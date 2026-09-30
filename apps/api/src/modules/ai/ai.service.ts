@@ -8,10 +8,12 @@ import { AiTool } from './tools/ai-tool.port';
 import { AiResponseMode, SendAiMessageDto } from './dto/send-ai-message.dto';
 import type { AiRateLimiter } from './ai-rate-limit.service';
 import type { AiOAuthService } from './ai-oauth.service';
+import type { AiServerRuntimeService } from './ai-server-runtime.service';
 
 export const AI_PROVIDER = 'AI_PROVIDER';
 export const AI_RATE_LIMITER = 'AI_RATE_LIMITER';
 export const AI_OAUTH_SERVICE = 'AI_OAUTH_SERVICE';
+export const AI_SERVER_RUNTIME = 'AI_SERVER_RUNTIME';
 export interface AiActor { tenantId: string; tenantUserId: string; userId?: string }
 
 export interface AiSecurityLimits {
@@ -46,6 +48,7 @@ export class AiService {
     @Optional() limits: Partial<AiSecurityLimits> = {},
     @Optional() @Inject(AI_RATE_LIMITER) private readonly rateLimiter?: AiRateLimiter,
     @Optional() @Inject(AI_OAUTH_SERVICE) private readonly oauth?: AiOAuthService,
+    @Optional() @Inject(AI_SERVER_RUNTIME) private readonly runtime?: AiServerRuntimeService,
   ) {
     this.limits = { ...DEFAULT_AI_SECURITY_LIMITS, ...limits };
   }
@@ -88,21 +91,21 @@ export class AiService {
     if (!text) throw new BadRequestException('A mensagem de texto é obrigatória');
     if (text.length > this.limits.maxMessageLength) throw new BadRequestException('A mensagem excede o limite permitido');
     if (!actor.rateLimitReserved) await this.reserveRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
-    const userMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
     const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: this.limits.maxHistoryMessages });
+    const model = await this.selectedModel();
     const completionInput: AiCompletionInput = {
       messages: [
         { role: 'system', content: `Use somente este contexto acessível: ${context.summary}` },
         ...history.reverse().map((message: any) => ({ role: message.role, content: message.content ?? '' })),
+        { role: 'user', content: text },
       ],
       tools: this.registry.list().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
+      ...(model ? { model } : {}),
     };
     let completion: Awaited<ReturnType<AiProvider['complete']>>;
     try {
-      completion = await this.provider.complete(completionInput, this.oauth
-        ? await this.oauth.resolveProviderAuth({ tenantId: actor.tenantId, tenantUserId: actor.tenantUserId })
-        : undefined);
+      completion = await this.provider.complete(completionInput, this.oauth ? await this.oauth.resolveProviderAuth() : undefined);
     } catch (error) {
       const metadata = error instanceof AiProviderError ? {
         providerStatus: error.metadata.status,
@@ -112,19 +115,40 @@ export class AiService {
       await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'provider.failed', targetId: conversation.id, metadata: { provider: 'AI_PROVIDER', status: 'failed', ...metadata } });
       throw error;
     }
-    const assistantMessage = await this.prisma.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount: completion.toolCalls.length }) } });
     const tools = completion.toolCalls.map((toolCall) => {
       const tool = this.registry.get(toolCall.name);
       if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
       this.validateToolArgs(tool, toolCall.arguments);
       return { tool, args: toolCall.arguments };
     });
-    const proposals: any[] = [];
-    for (const { tool, args } of tools) {
-      proposals.push(await this.prisma.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(args), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } }));
-    }
+    const { userMessage, assistantMessage, proposals } = await this.persistAtomically(async (tx) => {
+      const createdUserMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
+      const createdAssistantMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount: completion.toolCalls.length }) } });
+      const createdProposals: any[] = [];
+      for (const { tool, args } of tools) {
+        createdProposals.push(await tx.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(args), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } }));
+      }
+      return { userMessage: createdUserMessage, assistantMessage: createdAssistantMessage, proposals: createdProposals };
+    });
     await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount: proposals.length } });
     return { message: userMessage, assistantMessage, proposals, proposal: proposals[0] };
+  }
+
+  private async selectedModel(): Promise<string | undefined> {
+    if (!this.runtime) return undefined;
+    try {
+      const runtime = await this.runtime.getRuntime();
+      return runtime.selectedModel?.slug || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async persistAtomically<T>(work: (tx: PrismaService) => Promise<T>): Promise<T> {
+    if (typeof (this.prisma as { $transaction?: unknown }).$transaction === 'function') {
+      return this.prisma.$transaction((tx: PrismaService) => work(tx));
+    }
+    return work(this.prisma);
   }
 
   async confirmProposal(actor: AiActor, proposalId: string) {

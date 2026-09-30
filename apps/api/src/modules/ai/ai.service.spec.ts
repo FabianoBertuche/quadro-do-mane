@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ForbiddenException, GoneException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, GoneException } from '@nestjs/common';
 import { AiService } from './ai.service';
 import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
@@ -10,7 +10,7 @@ import { AiResponseMode } from './dto/send-ai-message.dto';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
-function setup(provider: AiProvider, oauth?: any) {
+function setup(provider: AiProvider, oauth?: any, runtime?: any) {
   const created: any[] = [];
   const updated: any[] = [];
   const conversationQueries: any[] = [];
@@ -18,7 +18,13 @@ function setup(provider: AiProvider, oauth?: any) {
   const proposalQueries: any[] = [];
   const proposalUpdates: any[] = [];
   const auditLog: any[] = [];
+  const writes: any[] = [];
+  const transactions: any[] = [];
   const prisma = {
+    $transaction: async (callback: (tx: any) => Promise<any>) => {
+      transactions.push(true);
+      return callback(prisma);
+    },
     aiConversation: {
       create: async ({ data }: any) => {
         const conversation = { id: 'conversation-1', ...data };
@@ -35,7 +41,10 @@ function setup(provider: AiProvider, oauth?: any) {
       update: async ({ data }: any) => data,
     },
     aiMessage: {
-      create: async ({ data }: any) => ({ id: `message-${created.length}`, ...data }),
+      create: async ({ data }: any) => {
+        writes.push({ kind: 'message', ...data });
+        return { id: `message-${created.length}`, ...data };
+      },
       findMany: async ({ where }: any) => {
         messageQueries.push(where);
         return [];
@@ -43,7 +52,10 @@ function setup(provider: AiProvider, oauth?: any) {
       count: async () => 0,
     },
     aiActionProposal: {
-      create: async ({ data }: any) => ({ id: 'proposal-1', ...data }),
+      create: async ({ data }: any) => {
+        writes.push({ kind: 'proposal', ...data });
+        return { id: 'proposal-1', ...data };
+      },
       findFirst: async ({ where }: any) => where.id === 'proposal-1'
         ? { id: 'proposal-1', tenantId: 'tenant-a', createdByTenantUserId: 'user-a', status: 'PENDING', expiresAt: new Date(Date.now() + 60_000), toolName: 'demo', argumentsJson: '{}', conversationId: 'conversation-1' }
         : null,
@@ -74,8 +86,9 @@ function setup(provider: AiProvider, oauth?: any) {
     {},
     undefined,
     oauth,
+    runtime,
   );
-  return { service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates, auditLog };
+  return { service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates, auditLog, writes, transactions };
 }
 
 test('audits provider HTTP metadata while keeping the thrown error safe', async () => {
@@ -98,17 +111,19 @@ test('audits provider HTTP metadata while keeping the thrown error safe', async 
   });
 });
 
-test('resolves provider credentials from the authenticated actor', async () => {
+test('resolves the global provider credential independently of the authenticated actor', async () => {
   let receivedAuth: any;
+  let receivedActor: any = 'unset';
   const provider = { complete: async (_input: any, auth: any) => { receivedAuth = auth; return { text: 'ok', toolCalls: [] }; } };
-  const { service } = setup(provider, { resolveProviderAuth: async (receivedActor: any) => {
-    assert.deepEqual(receivedActor, actor);
-    return { type: 'oauth', accessToken: 'actor-token' };
+  const { service } = setup(provider, { resolveProviderAuth: async (requestedActor: any) => {
+    receivedActor = requestedActor;
+    return { type: 'oauth', accessToken: 'global-token' };
   } });
 
   await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
 
-  assert.deepEqual(receivedAuth, { type: 'oauth', accessToken: 'actor-token' });
+  assert.equal(receivedActor, undefined);
+  assert.deepEqual(receivedAuth, { type: 'oauth', accessToken: 'global-token' });
 });
 
 test('conversation reads are owned by the authenticated tenant user', async () => {
@@ -239,4 +254,106 @@ test('text endpoint ignores a client AUDIO input format claim', async () => {
   });
 
   assert.equal(result.message.format, 'TEXT');
+});
+
+test('completes with the globally selected runtime model', async () => {
+  let receivedInput: any;
+  const { service } = setup({ complete: async (input: any) => { receivedInput = input; return { text: 'ok', toolCalls: [] }; } },
+    undefined,
+    { getRuntime: async () => ({ connectionStatus: 'connected', provider: 'chatgpt', selectedModel: { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' } }) });
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
+
+  assert.equal(receivedInput.model, 'gpt-5-codex');
+  assert.ok(receivedInput.messages.some((message: any) => message.role === 'user' && message.content === 'oi'));
+});
+
+test('omits the model when the global runtime has no selected model', async () => {
+  let receivedInput: any;
+  const { service } = setup({ complete: async (input: any) => { receivedInput = input; return { text: 'ok', toolCalls: [] }; } },
+    undefined,
+    { getRuntime: async () => ({ connectionStatus: 'disconnected', provider: 'chatgpt', selectedModel: null }) });
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
+
+  assert.equal(receivedInput.model, undefined);
+});
+
+test('persists nothing when the provider fails', async () => {
+  const { service, writes, transactions } = setup({ complete: async () => { throw new AiProviderError('AI provider request failed', { status: 500 }); } });
+
+  await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }));
+
+  assert.deepEqual(writes, []);
+  assert.deepEqual(transactions, []);
+});
+
+test('persists nothing when the provider returns an unknown tool call', async () => {
+  const { service, writes, transactions } = setup({ complete: async () => ({ text: 'ok', toolCalls: [{ name: 'not_registered', arguments: {} }] }) });
+
+  await assert.rejects(
+    () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }),
+    /Ferramenta não disponível: not_registered/,
+  );
+
+  assert.deepEqual(writes, []);
+  assert.deepEqual(transactions, []);
+});
+
+test('persists nothing when a normalized tool call fails argument validation', async () => {
+  const { service, writes, transactions } = setup({ complete: async () => ({ text: 'ok', toolCalls: [
+    { name: 'first', arguments: { value: 1 } },
+    { name: 'second', arguments: { value: 'invalid' } },
+  ] }) });
+  (service as any).registry = new AiToolRegistryService(['first', 'second'].map((name) => ({
+    name,
+    parameters: { type: 'object' },
+    validate: (args: any) => { if (name === 'second' && typeof args.value !== 'number') throw new BadRequestException('Argumentos inválidos'); },
+    authorize: async () => undefined,
+    execute: async () => undefined,
+  })));
+
+  await assert.rejects(
+    () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }),
+    BadRequestException,
+  );
+
+  assert.deepEqual(writes, []);
+  assert.deepEqual(transactions, []);
+});
+
+test('persists nothing when a normalized tool call has malformed arguments', async () => {
+  const { service, writes } = setup({ complete: async () => ({ text: 'ok', toolCalls: [{ name: 'demo', arguments: [] as any }] }) });
+  (service as any).registry = new AiToolRegistryService([{ name: 'demo', parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => undefined }]);
+
+  await assert.rejects(
+    () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }),
+    BadRequestException,
+  );
+
+  assert.deepEqual(writes, []);
+});
+
+test('commits the user message, assistant message, and proposals in a single transaction', async () => {
+  const { service, writes, transactions } = setup({ complete: async () => ({ text: 'Posso criar?', toolCalls: [
+    { name: 'first', arguments: { value: 1 } },
+    { name: 'second', arguments: { value: 2 } },
+  ] }) });
+  (service as any).registry = new AiToolRegistryService(['first', 'second'].map((name) => ({
+    name, parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => undefined,
+  })));
+
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'faça duas coisas', responseMode: AiResponseMode.TEXT });
+
+  assert.equal(transactions.length, 1);
+  assert.deepEqual(writes.map((write) => [write.kind, write.role ?? write.status]), [
+    ['message', 'user'],
+    ['message', 'assistant'],
+    ['proposal', 'PENDING'],
+    ['proposal', 'PENDING'],
+  ]);
+  assert.equal(writes[0].content, 'faça duas coisas');
+  assert.equal(writes[1].content, 'Posso criar?');
+  assert.deepEqual(JSON.parse(writes[1].providerMetaJson), { toolCallCount: 2 });
+  assert.deepEqual(result.proposals.map((proposal: any) => proposal.toolName), ['first', 'second']);
 });
