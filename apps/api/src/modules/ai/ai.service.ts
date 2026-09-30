@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, NotFoundException, Optional } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiCompletionInput, AiProvider, AiProviderError } from './ports/ai-provider.port';
 import { AiContextService } from './ai-context.service';
@@ -29,6 +29,8 @@ const positiveInt = (key: string, fallback: number) => {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 };
 
+const safeError = (err: unknown) => (err instanceof Error ? err.name : 'erro desconhecido');
+
 export const DEFAULT_AI_SECURITY_LIMITS: AiSecurityLimits = {
   maxMessageLength: positiveInt('AI_MESSAGE_MAX_LENGTH', 4000),
   maxHistoryMessages: positiveInt('AI_HISTORY_MAX_MESSAGES', 20),
@@ -54,6 +56,7 @@ export class AiService {
   }
 
   private readonly limits: AiSecurityLimits;
+  private readonly logger = new Logger(AiService.name);
 
   async createConversation(actor: AiActor, input: { contextProjectId?: string } = {}) {
     if (input.contextProjectId) {
@@ -92,7 +95,7 @@ export class AiService {
     if (text.length > this.limits.maxMessageLength) throw new BadRequestException('A mensagem excede o limite permitido');
     if (!actor.rateLimitReserved) await this.reserveRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
-    const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: this.limits.maxHistoryMessages });
+    const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: Math.max(this.limits.maxHistoryMessages - 1, 0) });
     const model = await this.selectedModel();
     const completionInput: AiCompletionInput = {
       messages: [
@@ -139,8 +142,9 @@ export class AiService {
     try {
       const runtime = await this.runtime.getRuntime();
       return runtime.selectedModel?.slug || undefined;
-    } catch {
-      return undefined;
+    } catch (error) {
+      this.logger.error(`Falha ao ler o runtime global de IA: ${safeError(error)}`);
+      throw error;
     }
   }
 

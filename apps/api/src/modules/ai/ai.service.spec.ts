@@ -10,7 +10,12 @@ import { AiResponseMode } from './dto/send-ai-message.dto';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
-function setup(provider: AiProvider, oauth?: any, runtime?: any) {
+interface SetupOptions {
+  limits?: { maxHistoryMessages?: number };
+  failProposalWriteAt?: number;
+}
+
+function setup(provider: AiProvider, oauth?: any, runtime?: any, options: SetupOptions = {}) {
   const created: any[] = [];
   const updated: any[] = [];
   const conversationQueries: any[] = [];
@@ -18,12 +23,48 @@ function setup(provider: AiProvider, oauth?: any, runtime?: any) {
   const proposalQueries: any[] = [];
   const proposalUpdates: any[] = [];
   const auditLog: any[] = [];
-  const writes: any[] = [];
-  const transactions: any[] = [];
+  const transactions: { outcome: 'committed' | 'rolled_back' }[] = [];
+  const txWrites: any[] = [];
+  const outsideWrites: any[] = [];
+  const txClients: any[] = [];
+  const rows: { message: any[]; proposal: any[] } = { message: [], proposal: [] };
+  let proposalWrites = 0;
+  const createMessage = async ({ data }: any) => {
+    const row = { id: `message-${rows.message.length + 1}`, ...data };
+    rows.message.push(row);
+    return row;
+  };
+  const createProposal = async ({ data }: any) => {
+    proposalWrites += 1;
+    if (options.failProposalWriteAt === proposalWrites) throw new Error('falha ao gravar a proposta');
+    const row = { id: `proposal-${rows.proposal.length + 1}`, ...data };
+    rows.proposal.push(row);
+    return row;
+  };
+  const recording = (kind: string, log: any[], create: (args: any) => Promise<any>) => async (args: any) => {
+    log.push({ kind, ...args.data });
+    return create(args);
+  };
   const prisma = {
     $transaction: async (callback: (tx: any) => Promise<any>) => {
-      transactions.push(true);
-      return callback(prisma);
+      const snapshot = { message: rows.message.length, proposal: rows.proposal.length, txWrites: txWrites.length };
+      const tx = {
+        ...prisma,
+        aiMessage: { ...prisma.aiMessage, create: recording('message', txWrites, createMessage) },
+        aiActionProposal: { ...prisma.aiActionProposal, create: recording('proposal', txWrites, createProposal) },
+      };
+      txClients.push(tx);
+      try {
+        const result = await callback(tx);
+        transactions.push({ outcome: 'committed' });
+        return result;
+      } catch (error) {
+        rows.message.length = snapshot.message;
+        rows.proposal.length = snapshot.proposal;
+        txWrites.length = snapshot.txWrites;
+        transactions.push({ outcome: 'rolled_back' });
+        throw error;
+      }
     },
     aiConversation: {
       create: async ({ data }: any) => {
@@ -41,21 +82,19 @@ function setup(provider: AiProvider, oauth?: any, runtime?: any) {
       update: async ({ data }: any) => data,
     },
     aiMessage: {
-      create: async ({ data }: any) => {
-        writes.push({ kind: 'message', ...data });
-        return { id: `message-${created.length}`, ...data };
-      },
-      findMany: async ({ where }: any) => {
-        messageQueries.push(where);
-        return [];
+      create: recording('message', outsideWrites, createMessage),
+      findMany: async ({ where, take }: any) => {
+        messageQueries.push({ ...where, take });
+        return Array.from({ length: take ?? 0 }, (_unused, index) => ({
+          id: `history-${index}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          content: `historico-${index}`,
+        }));
       },
       count: async () => 0,
     },
     aiActionProposal: {
-      create: async ({ data }: any) => {
-        writes.push({ kind: 'proposal', ...data });
-        return { id: 'proposal-1', ...data };
-      },
+      create: recording('proposal', outsideWrites, createProposal),
       findFirst: async ({ where }: any) => where.id === 'proposal-1'
         ? { id: 'proposal-1', tenantId: 'tenant-a', createdByTenantUserId: 'user-a', status: 'PENDING', expiresAt: new Date(Date.now() + 60_000), toolName: 'demo', argumentsJson: '{}', conversationId: 'conversation-1' }
         : null,
@@ -83,12 +122,16 @@ function setup(provider: AiProvider, oauth?: any, runtime?: any) {
     context,
     new AiToolRegistryService([]),
     new AiAuditService({ log: async (entry: any) => { auditLog.push(entry); } } as any),
-    {},
+    options.limits ?? {},
     undefined,
     oauth,
     runtime,
   );
-  return { service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates, auditLog, writes, transactions };
+  return {
+    service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates,
+    auditLog, transactions, txWrites, outsideWrites, txClients, rows,
+    persistedRows: () => [...rows.message, ...rows.proposal],
+  };
 }
 
 test('audits provider HTTP metadata while keeping the thrown error safe', async () => {
@@ -138,7 +181,7 @@ test('text response is persisted and provider tool calls become confirmation pro
   const provider = {
     complete: async () => ({ text: 'Posso criar?', toolCalls: [{ name: 'create_task', arguments: { title: 'Nova tarefa' } }] }),
   };
-  const { service, prisma } = setup(provider);
+  const { service, txWrites, outsideWrites } = setup(provider);
   (service as any).registry = new AiToolRegistryService([{
     name: 'create_task', description: 'Cria tarefa', parameters: { type: 'object' },
     authorize: async () => undefined,
@@ -147,7 +190,8 @@ test('text response is persisted and provider tool calls become confirmation pro
   const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'crie uma tarefa', responseMode: AiResponseMode.TEXT });
   assert.equal(result.assistantMessage.content, 'Posso criar?');
   assert.equal(result.proposal.toolName, 'create_task');
-  assert.equal((prisma as any).aiActionProposal.create ? true : false, true);
+  assert.deepEqual(txWrites.map((write) => write.kind), ['message', 'message', 'proposal']);
+  assert.deepEqual(outsideWrites, []);
 });
 
 test('expired proposals cannot be confirmed and confirmation revalidates tenant ownership', async () => {
@@ -188,18 +232,15 @@ test('sendMessage creates proposals for every tool call and never executes tools
       { name: 'second', arguments: { value: 2 } },
     ] }),
   };
-  const { service, prisma } = setup(provider);
+  const { service, rows, outsideWrites } = setup(provider);
   (service as any).registry = new AiToolRegistryService(['first', 'second'].map((name) => ({
     name, parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => { executions += 1; },
   })));
-  const proposals: any[] = [];
-  (prisma as any).aiActionProposal.create = async ({ data }: any) => {
-    proposals.push(data);
-    return { id: `proposal-${proposals.length}`, ...data };
-  };
   const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'faça duas coisas', responseMode: AiResponseMode.TEXT });
   assert.equal(executions, 0);
-  assert.equal(proposals.length, 2);
+  assert.equal(rows.proposal.length, 2);
+  assert.deepEqual(rows.proposal.map((proposal) => proposal.toolName), ['first', 'second']);
+  assert.deepEqual(outsideWrites, []);
   assert.equal((result as any).proposals.length, 2);
 });
 
@@ -279,29 +320,67 @@ test('omits the model when the global runtime has no selected model', async () =
   assert.equal(receivedInput.model, undefined);
 });
 
+test('surfaces a global runtime read failure instead of silently using the default model', async () => {
+  let providerCalls = 0;
+  const { service, txWrites, outsideWrites, transactions, persistedRows } = setup({ complete: async () => {
+    providerCalls += 1;
+    return { text: 'ok', toolCalls: [] };
+  } }, undefined, { getRuntime: async () => { throw new Error('runtime indisponível'); } });
+
+  await assert.rejects(
+    () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }),
+    /runtime indisponível/,
+  );
+
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(txWrites, []);
+  assert.deepEqual(outsideWrites, []);
+  assert.deepEqual(persistedRows(), []);
+  assert.deepEqual(transactions, []);
+});
+
+test('keeps the completion history window within the configured maximum', async () => {
+  let receivedInput: any;
+  const { service, messageQueries } = setup({ complete: async (input: any) => { receivedInput = input; return { text: 'ok', toolCalls: [] }; } },
+    undefined,
+    undefined,
+    { limits: { maxHistoryMessages: 4 } });
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
+
+  assert.equal(messageQueries.at(-1).take, 3);
+  const turns = receivedInput.messages.filter((message: any) => message.role !== 'system');
+  assert.equal(turns.length, 4);
+  assert.equal(turns.at(-1).content, 'oi');
+});
+
 test('persists nothing when the provider fails', async () => {
-  const { service, writes, transactions } = setup({ complete: async () => { throw new AiProviderError('AI provider request failed', { status: 500 }); } });
+  const { service, txWrites, outsideWrites, transactions, persistedRows } = setup({ complete: async () => { throw new AiProviderError('AI provider request failed', { status: 500 }); } });
 
   await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }));
 
-  assert.deepEqual(writes, []);
+  assert.deepEqual(txWrites, []);
+  assert.deepEqual(outsideWrites, []);
+  assert.deepEqual(persistedRows(), []);
   assert.deepEqual(transactions, []);
 });
 
 test('persists nothing when the provider returns an unknown tool call', async () => {
-  const { service, writes, transactions } = setup({ complete: async () => ({ text: 'ok', toolCalls: [{ name: 'not_registered', arguments: {} }] }) });
+  const { service, txWrites, outsideWrites, transactions, persistedRows } = setup({ complete: async () => ({ text: 'ok', toolCalls: [{ name: 'not_registered', arguments: {} }] }) });
 
   await assert.rejects(
     () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }),
     /Ferramenta não disponível: not_registered/,
   );
 
-  assert.deepEqual(writes, []);
+  assert.deepEqual(txWrites, []);
+  assert.deepEqual(outsideWrites, []);
+  assert.deepEqual(persistedRows(), []);
   assert.deepEqual(transactions, []);
 });
 
 test('persists nothing when a normalized tool call fails argument validation', async () => {
-  const { service, writes, transactions } = setup({ complete: async () => ({ text: 'ok', toolCalls: [
+  const { service, txWrites, outsideWrites, transactions, persistedRows } = setup({ complete: async () => ({ text: 'ok', toolCalls: [
     { name: 'first', arguments: { value: 1 } },
     { name: 'second', arguments: { value: 'invalid' } },
   ] }) });
@@ -318,12 +397,14 @@ test('persists nothing when a normalized tool call fails argument validation', a
     BadRequestException,
   );
 
-  assert.deepEqual(writes, []);
+  assert.deepEqual(txWrites, []);
+  assert.deepEqual(outsideWrites, []);
+  assert.deepEqual(persistedRows(), []);
   assert.deepEqual(transactions, []);
 });
 
 test('persists nothing when a normalized tool call has malformed arguments', async () => {
-  const { service, writes } = setup({ complete: async () => ({ text: 'ok', toolCalls: [{ name: 'demo', arguments: [] as any }] }) });
+  const { service, txWrites, outsideWrites, persistedRows } = setup({ complete: async () => ({ text: 'ok', toolCalls: [{ name: 'demo', arguments: [] as any }] }) });
   (service as any).registry = new AiToolRegistryService([{ name: 'demo', parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => undefined }]);
 
   await assert.rejects(
@@ -331,11 +412,13 @@ test('persists nothing when a normalized tool call has malformed arguments', asy
     BadRequestException,
   );
 
-  assert.deepEqual(writes, []);
+  assert.deepEqual(txWrites, []);
+  assert.deepEqual(outsideWrites, []);
+  assert.deepEqual(persistedRows(), []);
 });
 
-test('commits the user message, assistant message, and proposals in a single transaction', async () => {
-  const { service, writes, transactions } = setup({ complete: async () => ({ text: 'Posso criar?', toolCalls: [
+test('commits every chat write through the transaction client in a single transaction', async () => {
+  const { service, prisma, txClients, txWrites, outsideWrites, transactions } = setup({ complete: async () => ({ text: 'Posso criar?', toolCalls: [
     { name: 'first', arguments: { value: 1 } },
     { name: 'second', arguments: { value: 2 } },
   ] }) });
@@ -345,15 +428,39 @@ test('commits the user message, assistant message, and proposals in a single tra
 
   const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'faça duas coisas', responseMode: AiResponseMode.TEXT });
 
-  assert.equal(transactions.length, 1);
-  assert.deepEqual(writes.map((write) => [write.kind, write.role ?? write.status]), [
+  assert.deepEqual(transactions, [{ outcome: 'committed' }]);
+  assert.notEqual(txClients[0].aiMessage.create, (prisma as any).aiMessage.create);
+  assert.notEqual(txClients[0].aiActionProposal.create, (prisma as any).aiActionProposal.create);
+  assert.deepEqual(outsideWrites, []);
+  assert.deepEqual(txWrites.map((write) => [write.kind, write.role ?? write.status]), [
     ['message', 'user'],
     ['message', 'assistant'],
     ['proposal', 'PENDING'],
     ['proposal', 'PENDING'],
   ]);
-  assert.equal(writes[0].content, 'faça duas coisas');
-  assert.equal(writes[1].content, 'Posso criar?');
-  assert.deepEqual(JSON.parse(writes[1].providerMetaJson), { toolCallCount: 2 });
+  assert.equal(txWrites[0].content, 'faça duas coisas');
+  assert.equal(txWrites[1].content, 'Posso criar?');
+  assert.deepEqual(JSON.parse(txWrites[1].providerMetaJson), { toolCallCount: 2 });
   assert.deepEqual(result.proposals.map((proposal: any) => proposal.toolName), ['first', 'second']);
+});
+
+test('restores the pre-write state when a write fails inside the transaction', async () => {
+  const { service, prisma, txWrites, outsideWrites, transactions, persistedRows } = setup({ complete: async () => ({ text: 'Posso criar?', toolCalls: [
+    { name: 'first', arguments: { value: 1 } },
+    { name: 'second', arguments: { value: 2 } },
+  ] }) }, undefined, undefined, { failProposalWriteAt: 2 });
+  (service as any).registry = new AiToolRegistryService(['first', 'second'].map((name) => ({
+    name, parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => undefined,
+  })));
+  const previous = await (prisma as any).aiMessage.create({ data: { tenantId: 'tenant-a', conversationId: 'conversation-1', role: 'user', content: 'mensagem anterior' } });
+
+  await assert.rejects(
+    () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'faça duas coisas', responseMode: AiResponseMode.TEXT }),
+    /falha ao gravar a proposta/,
+  );
+
+  assert.deepEqual(transactions, [{ outcome: 'rolled_back' }]);
+  assert.deepEqual(txWrites, []);
+  assert.deepEqual(persistedRows(), [previous]);
+  assert.deepEqual(outsideWrites.map((write) => write.content), ['mensagem anterior']);
 });

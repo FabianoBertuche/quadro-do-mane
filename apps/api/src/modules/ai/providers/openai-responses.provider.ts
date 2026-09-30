@@ -99,7 +99,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
     return this.enabled && this.apiKey ? { type: 'api-key', accessToken: this.apiKey } : undefined;
   }
 
-  private unconfiguredError(): Error {
+  private unconfiguredError(): ServiceUnavailableException {
     return new ServiceUnavailableException('AI provider is not configured');
   }
 

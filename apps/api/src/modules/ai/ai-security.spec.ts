@@ -30,7 +30,11 @@ function setup(overrides: { limits?: Partial<AiSecurityLimits>; conversation?: u
       create: async ({ data }: any) => ({ id: `message-${calls.length}`, ...data }),
       findMany: async ({ take }: any) => {
         history.push(take);
-        return [];
+        return Array.from({ length: take ?? 0 }, (_unused, index) => ({
+          id: `history-${index}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          content: `historico-${index}`,
+        }));
       },
     },
     aiActionProposal: {
@@ -76,10 +80,18 @@ test('rejects oversized messages before persistence or provider calls', async ()
 });
 
 test('bounds provider history using the configured limit', async () => {
-  const { service, history } = setup({ limits: { maxHistoryMessages: 3 } });
+  let receivedInput: any;
+  const { service, history } = setup({
+    limits: { maxHistoryMessages: 3 },
+    provider: { complete: async (input: any) => { receivedInput = input; return { text: 'ok', toolCalls: [] }; } },
+  });
 
   await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'question', responseMode: AiResponseMode.TEXT });
-  assert.equal(history.at(-1), 3);
+
+  assert.equal(history.at(-1), 2);
+  const turns = receivedInput.messages.filter((message: any) => message.role !== 'system');
+  assert.equal(turns.length, 3);
+  assert.equal(turns.at(-1).content, 'question');
 });
 
 test('rejects requests after the per-user and per-tenant rate limits', async () => {
