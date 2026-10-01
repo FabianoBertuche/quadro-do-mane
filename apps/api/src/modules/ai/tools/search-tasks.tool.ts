@@ -33,7 +33,10 @@ export class SearchTasksTool implements AiTool {
       const assignee = resolveOne(await this.users.findAll(input.tenantId), args.assigneeName, 'assigneeName');
       if (clarification(assignee)) return assignee;
       filters.assigneeTenantUserId = assignee.id;
-    } else if (args.assigneeTenantUserId) await this.users.findOne(input.tenantId, args.assigneeTenantUserId);
+    } else if (args.assigneeTenantUserId) {
+      const assignee = await this.users.findOne(input.tenantId, args.assigneeTenantUserId);
+      filters.assigneeTenantUserId = resolveId(assignee ? [assignee] : [], args.assigneeTenantUserId, 'assigneeTenantUserId').id;
+    }
     delete filters.projectName; delete filters.statusName; delete filters.priorityName; delete filters.assigneeName;
     const rows = await this.tasks.findByFilters(input.tenantId, filters);
     return rows.slice(0, 50).map((task: any) => ({

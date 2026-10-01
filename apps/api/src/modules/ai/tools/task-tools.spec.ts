@@ -6,6 +6,7 @@ import { MoveTaskTool } from './move-task.tool';
 import { SearchTasksTool } from './search-tasks.tool';
 import { UpdateTaskTool } from './update-task.tool';
 import { AiToolRegistryService } from './ai-tool-registry.service';
+import { resolveReadOne } from './task-tool.schemas';
 
 const input = (args: unknown, actorTenantUserId = 'actor-1') => ({
   tenantId: 'tenant-1', actorTenantUserId, args,
@@ -182,6 +183,22 @@ test('search_tasks applies actor project visibility to global searches', async (
   assert.deepEqual(filters.projectIds, ['visible-project']);
 });
 
+test('search_tasks rejects an unknown assignee ID after tenant-scoped lookup and before querying tasks', async () => {
+  const s = services();
+  const userLookups: any[] = [];
+  let queried = false;
+  s.users.findOne = (async (tenantId: string, tenantUserId: string) => {
+    userLookups.push([tenantId, tenantUserId]);
+    return tenantUserId === 'actor-1' ? user() : null;
+  }) as any;
+  s.tasks.findByFilters = (async () => { queried = true; return []; }) as any;
+  const tool = new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any);
+
+  await assert.rejects(() => tool.execute(input({ assigneeTenantUserId: 'missing-user' })), ForbiddenException);
+  assert.deepEqual(userLookups.at(-1), ['tenant-1', 'missing-user']);
+  assert.equal(queried, false);
+});
+
 test('create_task returns clarification when the required project is missing', async () => {
   const s = services();
   let writes = 0;
@@ -225,15 +242,18 @@ test('create_task rejects an unresolved collaborator instead of retaining an unk
   await assert.rejects(() => tool.execute(input({ title: 'Nova', projectId: 'project-1', assigneeTenantUserId: 'missing-user' })), ForbiddenException);
 });
 
-test('task clarification matches may carry descriptors', () => {
-  const s = services();
-  s.projects.findAll = (async () => [
+test('task clarification matches carry shared ID and name descriptors', () => {
+  const result = resolveReadOne([
     { id: 'project-1', name: 'Projeto' },
     { id: 'project-2', name: 'Projeto' },
-  ]) as any;
-  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+  ], 'Projeto', 'projectName');
 
-  return tool.execute(input({ title: 'Nova', projectName: 'Projeto' })).then((result: any) => {
-    assert.deepEqual(result.matches, ['project-1', 'project-2']);
+  assert.deepEqual(result, {
+    needsClarification: true,
+    field: 'projectName',
+    matches: [
+      { id: 'project-1', name: 'Projeto' },
+      { id: 'project-2', name: 'Projeto' },
+    ],
   });
 });

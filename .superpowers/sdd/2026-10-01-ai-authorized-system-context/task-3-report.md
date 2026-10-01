@@ -21,3 +21,8 @@ Implemented global task visibility, strict write-target resolution, structured c
 ## Concerns
 
 - Existing unrelated worktree changes were preserved and excluded from this commit.
+
+## Review Follow-up
+
+- `search_tasks` now rejects unknown `assigneeTenantUserId` values after a tenant-scoped lookup and before querying tasks.
+- Added regression coverage for tenant-scoped lookup, safe rejection, and the shared `{ id, name }` clarification descriptor shape.
