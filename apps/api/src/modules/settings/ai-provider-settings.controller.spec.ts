@@ -34,9 +34,11 @@ test('provider status is read at GET /api/settings/ai/providers', () => {
 test('lists the ChatGPT provider with live global connection status and no credential or action fields', async () => {
   const controller = new AiProviderSettingsController({
     getRuntime: async () => ({
-      connectionStatus: 'connected', provider: 'chatgpt',
-      selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' },
-      accessToken: 'secret-token', oauthConnectionId: 'connection-1',
+      primaryProvider: 'chatgpt', failoverProvider: null,
+      providers: {
+        chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' }, accessToken: 'secret-token', oauthConnectionId: 'connection-1' },
+        ollama: { connectionStatus: 'disconnected', selectedModel: null },
+      },
     }),
   } as any);
 
@@ -54,7 +56,13 @@ test('lists the ChatGPT provider with live global connection status and no crede
 
 test('ChatGPT provider reads as disconnected when no global connection exists', async () => {
   const controller = new AiProviderSettingsController({
-    getRuntime: async () => ({ connectionStatus: 'disconnected', provider: 'chatgpt', selectedModel: null }),
+    getRuntime: async () => ({
+      primaryProvider: 'chatgpt', failoverProvider: null,
+      providers: {
+        chatgpt: { connectionStatus: 'disconnected', selectedModel: null },
+        ollama: { connectionStatus: 'disconnected', selectedModel: null },
+      },
+    }),
   } as any);
 
   const [chatgpt, ...comingSoon] = (await controller.providers()).providers;

@@ -55,10 +55,10 @@ export class AiProviderSettingsController {
   async providers(): Promise<{ providers: Array<ActiveAiProvider | ComingSoonAiProvider> }> {
     const runtime = await this.runtime.getRuntime();
     const chatgpt: ActiveAiProvider = {
-      id: runtime.provider,
+      id: 'chatgpt',
       name: 'ChatGPT',
       status: 'active',
-      connectionStatus: runtime.connectionStatus,
+      connectionStatus: runtime.providers.chatgpt.connectionStatus,
       connectable: false,
     };
     return { providers: [chatgpt, ...COMING_SOON_AI_PROVIDERS] };
