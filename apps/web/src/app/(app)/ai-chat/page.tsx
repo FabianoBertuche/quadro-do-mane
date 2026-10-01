@@ -1,13 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Plus, Send } from 'lucide-react';
 import { AiActionProposalCard } from '@/components/ai/AiActionProposalCard';
 import { AiChatMessage } from '@/components/ai/AiChatMessage';
-import { AiOAuthConnectionCard } from '@/components/ai/AiOAuthConnectionCard';
-import { AiModelCombobox } from '@/components/ai/AiModelCombobox';
 import {
   cancelAction,
   confirmAction,
@@ -15,8 +13,10 @@ import {
   listConversations,
   listMessages,
   sendTextMessage,
+  mergeAiMessageResponse,
+  createOptimisticAiMessage,
+  type AiMessage,
 } from '@/lib/ai-chat';
-import { getAiRuntime, getAiRuntimeErrorMessage, selectAiRuntimeModel } from '@/lib/ai-runtime';
 import { useAuthStore } from '@/lib/auth';
 
 export default function AiChatPage() {
@@ -26,16 +26,8 @@ export default function AiChatPage() {
   const hydrated = useAuthStore((state) => state.hydrated);
   const [conversationId, setConversationId] = useState<string>();
   const [text, setText] = useState('');
-
-  const runtime = useQuery({
-    queryKey: ['ai-runtime'],
-    queryFn: getAiRuntime,
-    enabled: hydrated,
-  });
-  const selectModel = useMutation({
-    mutationFn: selectAiRuntimeModel,
-    onSuccess: (updated) => queryClient.setQueryData(['ai-runtime'], updated),
-  });
+  const [optimisticMessage, setOptimisticMessage] = useState<AiMessage | null>(null);
+  const messagesPanelRef = useRef<HTMLDivElement>(null);
 
   const conversations = useInfiniteQuery({
     queryKey: ['ai-conversations'],
@@ -69,32 +61,45 @@ export default function AiChatPage() {
     enabled: !!conversationId,
   });
 
-  const refreshAfterAction = () => {
-    queryClient.invalidateQueries({ queryKey: ['ai-messages', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['ai-conversations'] });
+  const refreshAfterAction = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['ai-messages', conversationId] });
+    await queryClient.invalidateQueries({ queryKey: ['ai-conversations'] });
     if (contextProjectId) {
-      queryClient.invalidateQueries({ queryKey: ['project', contextProjectId] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      await queryClient.invalidateQueries({ queryKey: ['project', contextProjectId] });
+      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     }
   };
 
   const send = useMutation({
     mutationFn: (value: string) => sendTextMessage({ conversationId: conversationId as string, text: value, responseMode: 'TEXT' }),
-    onSuccess: () => {
+    onSuccess: async (response) => {
       setText('');
-      refreshAfterAction();
+      queryClient.setQueryData(['ai-messages', conversationId], (current: Awaited<ReturnType<typeof listMessages>> | undefined) =>
+        current ? mergeAiMessageResponse(current, response) : current,
+      );
+      await refreshAfterAction();
+      setOptimisticMessage(null);
     },
+    onError: () => setOptimisticMessage((message) => message ? { ...message, localStatus: 'failed' } : message),
   });
+
+  useEffect(() => {
+    const panel = messagesPanelRef.current;
+    if (panel) panel.scrollTop = panel.scrollHeight;
+  }, [messages.data?.messages.length, optimisticMessage?.id, send.isPending]);
 
   const action = useMutation<Awaited<ReturnType<typeof confirmAction>> | void, Error, { id: string; confirm: boolean }>({
     mutationFn: ({ id, confirm }: { id: string; confirm: boolean }) => (confirm ? confirmAction(id) : cancelAction(id)),
-    onSuccess: refreshAfterAction,
+    onSuccess: () => { void refreshAfterAction(); },
   });
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const value = text.trim();
-    if (value && conversationId && !send.isPending) send.mutate(value);
+    if (value && conversationId && !send.isPending) {
+      setOptimisticMessage(createOptimisticAiMessage(value, `optimistic-${Date.now()}`));
+      send.mutate(value);
+    }
   };
 
   const newConversation = useMutation({
@@ -125,31 +130,25 @@ export default function AiChatPage() {
         </div>
       </header>
 
-      <section className="rounded-2xl border border-border bg-card p-4" aria-labelledby="ai-runtime-title">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 id="ai-runtime-title" className="font-semibold">Runtime global</h2>
-            <p className="mt-1 text-sm text-muted-foreground">O modelo escolhido aqui será usado por todos os usuários deste tenant.</p>
-          </div>
-          <span className={`rounded-full px-2.5 py-1 text-xs ${runtime.data?.connectionStatus === 'connected' ? 'bg-emerald-500/10 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
-            {runtime.data?.connectionStatus === 'connected' ? 'ChatGPT conectado' : 'ChatGPT desconectado'}
-          </span>
-        </div>
-        {runtime.isLoading && <p className="mt-3 text-sm text-muted-foreground">Carregando modelos...</p>}
-        {runtime.data && <div className="mt-4"><AiModelCombobox models={runtime.data.models} value={runtime.data.selectedModel?.slug} disabled={selectModel.isPending} onSelect={(slug) => selectModel.mutate(slug)} /></div>}
-        {runtime.data && !runtime.data.models.length && <p className="mt-3 text-sm text-muted-foreground">Conecte o ChatGPT para carregar o catálogo de modelos. O histórico continua disponível.</p>}
-        {runtime.isError && <p role="alert" className="mt-3 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-800">{getAiRuntimeErrorMessage(runtime.error)}</p>}
-        {selectModel.isError && <p role="alert" className="mt-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-700">{getAiRuntimeErrorMessage(selectModel.error)}</p>}
-      </section>
-
-      <AiOAuthConnectionCard />
-
       <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border bg-card">
-        <div className="flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
+        <div ref={messagesPanelRef} className="flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
           {messages.isLoading && <p className="text-sm text-muted-foreground">Carregando mensagens...</p>}
           {messages.isError && <p className="text-sm text-red-600">Não foi possível carregar as mensagens.</p>}
           {!messages.isLoading && !messages.isError && !page?.messages.length && <p className="py-16 text-center text-sm text-muted-foreground">Comece uma conversa com a assistente.</p>}
           {page?.messages.map((message) => <AiChatMessage key={message.id} message={message} />)}
+          {optimisticMessage && <AiChatMessage message={optimisticMessage} />}
+          {send.isPending && (
+            <div className="flex justify-start" role="status" aria-live="polite">
+              <div className="rounded-2xl rounded-bl-md bg-muted px-4 py-3 text-sm text-muted-foreground">
+                <span className="mr-2 inline-flex gap-1 align-middle" aria-hidden="true">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.2s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.1s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />
+                </span>
+                Pensando e executando sua solicitação...
+              </div>
+            </div>
+          )}
           {page?.pendingProposals.map((proposal) => <AiActionProposalCard key={proposal.id} proposal={proposal} busy={action.isPending} onConfirm={() => action.mutate({ id: proposal.id, confirm: true })} onCancel={() => action.mutate({ id: proposal.id, confirm: false })} />)}
         </div>
         <form onSubmit={submit} className="flex items-end gap-2 border-t border-border p-3">
