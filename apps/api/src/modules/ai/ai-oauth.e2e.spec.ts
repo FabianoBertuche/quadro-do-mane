@@ -20,7 +20,7 @@ test('uses the callback-issued dynamic client ID to complete ChatGPT OAuth and r
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
   const attempts = new Map<string, any>();
   const connections = new Map<string, any>();
-  const runtimeRow: any = { id: 'global', oauthConnectionId: null, selectedModelSlug: null, selectedModelDisplayName: null };
+  const runtimeRow: any = { id: 'global', oauthConnectionId: null, chatgptModelSlug: null, chatgptModelDisplayName: null };
   const runtimeView = () => ({
     ...runtimeRow,
     oauthConnection: runtimeRow.oauthConnectionId ? connections.get(runtimeRow.oauthConnectionId) ?? null : null,
@@ -217,8 +217,8 @@ test('uses the callback-issued dynamic client ID to complete ChatGPT OAuth and r
 test('carries one global OAuth runtime through catalog selection and chat without partial rows', async () => {
   const connection = { id: 'global-connection', updatedAt: new Date('2030-01-01T00:00:00.000Z') };
   const runtimeRow: any = {
-    id: 'global', oauthConnectionId: connection.id, selectedModelSlug: null,
-    selectedModelDisplayName: null, oauthConnection: connection,
+    id: 'global', oauthConnectionId: connection.id, chatgptModelSlug: null,
+    chatgptModelDisplayName: null, oauthConnection: connection,
   };
   const messages: any[] = [];
   const proposals: any[] = [];
@@ -289,13 +289,16 @@ test('carries one global OAuth runtime through catalog selection and chat withou
 
   try {
     const runtime = new AiServerRuntimeService(prisma, oauth as any);
-    assert.deepEqual(await runtime.listModels(), [
+    assert.deepEqual(await runtime.listModels('chatgpt'), [
       { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' },
       { slug: 'gpt-4.1', displayName: 'GPT 4.1' },
     ]);
-    assert.deepEqual(await runtime.selectModel('gpt-5-codex'), {
-      connectionStatus: 'connected', provider: 'chatgpt',
-      selectedModel: { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' },
+    assert.deepEqual(await runtime.selectModel('chatgpt', 'gpt-5-codex'), {
+      primaryProvider: 'chatgpt', failoverProvider: null,
+      providers: {
+        chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' } },
+        ollama: { connectionStatus: 'disconnected', selectedModel: null },
+      },
     });
 
     const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
@@ -389,7 +392,14 @@ test('executes an authorized global read without a proposal and preserves the ac
       return providerInputs.length === 1
         ? { text: 'vou consultar', toolCalls: [{ name: 'search_projects', arguments: {} }] }
         : { text: 'Você pode ver o projeto Visible project.', toolCalls: [] };
-    } },
+    }, buildToolContinuation: (input: any, completion: any, results: any[]) => ({
+      ...input,
+      messages: [
+        ...input.messages,
+        { role: 'assistant', content: completion.text },
+        ...results.map(({ call, result }) => ({ role: 'tool', toolCallId: call.id, content: JSON.stringify(result) })),
+      ],
+    }) },
     new AiContextService({ project: { findFirst: async () => null }, task: { findMany: async () => [] } } as any),
     new AiToolRegistryService([readTool]),
     new AiAuditService({ log: async () => undefined } as any),
@@ -400,6 +410,7 @@ test('executes an authorized global read without a proposal and preserves the ac
   assert.deepEqual((result as any).toolResults, [{ toolName: 'search_projects', result: [{ id: 'project-a', name: 'Visible project', status: 'ACTIVE', owner: undefined, team: undefined, progressPercent: undefined, totalTasks: undefined }] }]);
   assert.equal(providerInputs.length, 2);
   assert.equal(result.assistantMessage?.content, 'Você pode ver o projeto Visible project.');
+  assert.deepEqual(JSON.parse(writes[1].providerMetaJson), { toolCallCount: 1 });
   assert.match(providerInputs[1].messages.at(-1).content, /Visible project/);
   const serializedInputs = JSON.stringify(providerInputs);
   assert.match(serializedInputs, /Maria/);

@@ -1,19 +1,29 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { EncryptionService } from '../../common/crypto/encryption.service';
 import { fetchOpenAiModels } from './ai-oauth.protocol';
 import { AiOAuthService } from './ai-oauth.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiProviderAuth } from './ports/ai-provider.port';
+import { OLLAMA_CLOUD_MODELS } from './providers/ollama-models';
 
-export interface AiServerRuntimeView {
-  connectionStatus: 'connected' | 'disconnected';
-  provider: 'chatgpt';
-  selectedModel: { slug: string; displayName: string } | null;
-}
+export type AiProviderName = 'chatgpt' | 'ollama';
+export const AI_PROVIDER_NAMES: readonly AiProviderName[] = ['chatgpt', 'ollama'];
 
 export interface AiServerModel {
   slug: string;
   displayName: string;
+}
+
+export interface AiServerProviderView {
+  connectionStatus: 'connected' | 'disconnected';
+  selectedModel: AiServerModel | null;
+}
+
+export interface AiServerRuntimeView {
+  primaryProvider: AiProviderName;
+  failoverProvider: AiProviderName | null;
+  providers: Record<AiProviderName, AiServerProviderView>;
 }
 
 @Injectable()
@@ -24,21 +34,111 @@ export class AiServerRuntimeService {
     private readonly prisma: PrismaService,
     private readonly oauth: AiOAuthService,
     private readonly audit?: AiAuditService,
+    private readonly encryption?: EncryptionService,
   ) {}
 
   async getRuntime(): Promise<AiServerRuntimeView> {
     const runtime = await this.runtime();
     return {
-      connectionStatus: runtime.oauthConnectionId ? 'connected' : 'disconnected',
-      provider: 'chatgpt',
-      selectedModel: runtime.selectedModelSlug && runtime.selectedModelDisplayName
-        ? { slug: runtime.selectedModelSlug, displayName: runtime.selectedModelDisplayName }
-        : null,
+      primaryProvider: runtime.primaryProvider === 'ollama' ? 'ollama' : 'chatgpt',
+      failoverProvider: runtime.failoverProvider === 'ollama' ? 'ollama' : runtime.failoverProvider === 'chatgpt' ? 'chatgpt' : null,
+      providers: {
+        chatgpt: {
+          connectionStatus: runtime.oauthConnectionId ? 'connected' : 'disconnected',
+          selectedModel: runtime.chatgptModelSlug && runtime.chatgptModelDisplayName
+            ? { slug: runtime.chatgptModelSlug, displayName: runtime.chatgptModelDisplayName }
+            : null,
+        },
+        ollama: {
+          connectionStatus: runtime.ollamaApiKeyCiphertext ? 'connected' : 'disconnected',
+          selectedModel: runtime.ollamaModelSlug && runtime.ollamaModelDisplayName
+            ? { slug: runtime.ollamaModelSlug, displayName: runtime.ollamaModelDisplayName }
+            : null,
+        },
+      },
     };
   }
 
-  async listModels(): Promise<AiServerModel[]> {
-    return (await this.catalogForCurrentRuntime()).models;
+  async listModels(provider: AiProviderName): Promise<AiServerModel[]> {
+    return (await this.catalogFor(provider)).models;
+  }
+
+  async selectModel(provider: AiProviderName, slug: string, actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<AiServerRuntimeView> {
+    const catalog = await this.catalogFor(provider);
+    const model = catalog.models.find((candidate) => candidate.slug === slug);
+    if (!model) throw new BadRequestException('Modelo selecionado não está disponível');
+    const columns = provider === 'chatgpt'
+      ? { chatgptModelSlug: model.slug, chatgptModelDisplayName: model.displayName }
+      : { ollamaModelSlug: model.slug, ollamaModelDisplayName: model.displayName };
+    await this.withLockedRuntime(async (tx, runtime) => {
+      if (provider === 'chatgpt' && this.connectionKey(runtime) !== catalog.connectionKey) {
+        throw new BadRequestException('A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.');
+      }
+      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: columns });
+    });
+    if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'runtime.model_selected', targetId: 'global', metadata: { provider, modelSlug: model.slug } });
+    return this.getRuntime();
+  }
+
+  async setPrimaryProvider(provider: AiProviderName, actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<AiServerRuntimeView> {
+    this.assertProvider(provider);
+    const current = await this.runtime();
+    if (current.failoverProvider === provider) throw new BadRequestException('O provedor principal e o substituto devem ser diferentes');
+    await this.withLockedRuntime(async (tx) => {
+      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: { primaryProvider: provider } });
+    });
+    if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'runtime.primary_provider', targetId: 'global', metadata: { provider } });
+    return this.getRuntime();
+  }
+
+  async setFailoverProvider(provider: AiProviderName | null, actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<AiServerRuntimeView> {
+    if (provider !== null) this.assertProvider(provider);
+    const current = await this.runtime();
+    if (provider && provider === current.primaryProvider) throw new BadRequestException('O provedor substituto deve ser diferente do principal');
+    await this.withLockedRuntime(async (tx) => {
+      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: { failoverProvider: provider } });
+    });
+    if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'runtime.failover_provider', targetId: 'global', metadata: { provider: provider ?? null } });
+    return this.getRuntime();
+  }
+
+  async saveOllamaKey(apiKey: string, actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<void> {
+    if (!this.encryption) throw new Error('EncryptionService is not configured');
+    const { ciphertext, iv, authTag } = this.encryption.encrypt(apiKey);
+    await this.withLockedRuntime(async (tx) => {
+      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: { ollamaApiKeyCiphertext: ciphertext, ollamaApiKeyIv: iv, ollamaApiKeyAuthTag: authTag } });
+    });
+    if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'runtime.ollama_key', targetId: 'global', metadata: { provider: 'ollama', status: 'saved' } });
+  }
+
+  async removeOllamaKey(actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<void> {
+    await this.withLockedRuntime(async (tx) => {
+      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: { ollamaApiKeyCiphertext: null, ollamaApiKeyIv: null, ollamaApiKeyAuthTag: null, ollamaModelSlug: null, ollamaModelDisplayName: null } });
+    });
+    if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'runtime.ollama_key', targetId: 'global', metadata: { provider: 'ollama', status: 'removed' } });
+  }
+
+  async getOllamaApiKey(): Promise<string | null> {
+    const row = await this.runtime();
+    if (!this.encryption) return null;
+    if (!row.ollamaApiKeyCiphertext || !row.ollamaApiKeyIv || !row.ollamaApiKeyAuthTag) return null;
+    return this.encryption.decrypt({ ciphertext: row.ollamaApiKeyCiphertext, iv: row.ollamaApiKeyIv, authTag: row.ollamaApiKeyAuthTag });
+  }
+
+  private async catalogFor(provider: AiProviderName): Promise<{ connectionKey: string; models: AiServerModel[] }> {
+    if (provider === 'ollama') return { connectionKey: 'ollama', models: [...OLLAMA_CLOUD_MODELS] };
+    try {
+      return await this.catalogForCurrentRuntime();
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('Catálogo de modelos indisponível');
+    }
+  }
+
+  private assertProvider(provider: AiProviderName): void {
+    if (provider !== 'chatgpt' && provider !== 'ollama') {
+      throw new BadRequestException('Provedor não suportado');
+    }
   }
 
   private async catalogForCurrentRuntime(): Promise<{ connectionKey: string; models: AiServerModel[] }> {
@@ -73,23 +173,6 @@ export class AiServerRuntimeService {
     const catalog = { connectionKey, models };
     this.catalog = catalog;
     return catalog;
-  }
-
-  async selectModel(slug: string, actor?: { tenantId: string; tenantUserId: string; userId?: string }): Promise<AiServerRuntimeView> {
-    const catalog = await this.catalogForCurrentRuntime();
-    const model = catalog.models.find((candidate) => candidate.slug === slug);
-    if (!model) throw new BadRequestException('Modelo selecionado não está disponível');
-    await this.withLockedRuntime(async (tx, runtime) => {
-      if (this.connectionKey(runtime) !== catalog.connectionKey) {
-        throw new BadRequestException('A conexão do ChatGPT foi alterada. Atualize a lista de modelos e tente novamente.');
-      }
-      await tx.aiServerRuntime.update({
-        where: { id: 'global' },
-        data: { selectedModelSlug: model.slug, selectedModelDisplayName: model.displayName },
-      });
-    });
-    if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'runtime.model_selected', targetId: 'global', metadata: { provider: 'chatgpt', modelSlug: model.slug } });
-    return this.getRuntime();
   }
 
   private runtime() {

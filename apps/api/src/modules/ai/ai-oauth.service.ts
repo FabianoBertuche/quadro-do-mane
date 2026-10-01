@@ -140,7 +140,7 @@ export class AiOAuthService {
         : await tx.aiOAuthConnection.create({ data: { ...data, tenantId: null, tenantUserId: null } });
       await tx.aiServerRuntime.update({
         where: { id: 'global' },
-        data: { oauthConnectionId: saved.id, selectedModelSlug: null, selectedModelDisplayName: null },
+        data: { oauthConnectionId: saved.id, chatgptModelSlug: null, chatgptModelDisplayName: null },
       });
       return saved;
     });
@@ -232,7 +232,7 @@ export class AiOAuthService {
         // Local revocation is still enforced when discovery or provider revocation is unavailable.
       }
       await tx.aiOAuthConnection.updateMany({ where: { id: connectionId, isRevoked: false }, data: { isRevoked: true, revokedAt: new Date() } });
-      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: { oauthConnectionId: null, selectedModelSlug: null, selectedModelDisplayName: null } });
+      await tx.aiServerRuntime.update({ where: { id: 'global' }, data: { oauthConnectionId: null, chatgptModelSlug: null, chatgptModelDisplayName: null } });
     });
     if (actor) await this.audit?.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, action: 'oauth.disconnected', targetId: connectionId, metadata: { provider: 'chatgpt', status: 'disconnected' } });
   }

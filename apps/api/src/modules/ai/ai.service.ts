@@ -85,10 +85,10 @@ export class AiService {
     await this.requireConversation(actor, conversationId);
     const safeTake = Math.min(Math.max(take, 1), 50);
     const [messages, proposals] = await Promise.all([
-      this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'asc' }, skip: (page - 1) * safeTake, take: safeTake }),
+      this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * safeTake, take: safeTake }),
       this.prisma.aiActionProposal.findMany({ where: { tenantId: actor.tenantId, conversationId, createdByTenantUserId: actor.tenantUserId, conversation: { ownerTenantUserId: actor.tenantUserId }, status: 'PENDING' }, orderBy: { createdAt: 'desc' }, take: 20 }),
     ]);
-    return { messages, pendingProposals: proposals };
+    return { messages: messages.reverse(), pendingProposals: proposals };
   }
 
   async sendMessage(actor: AiActor & { conversationId: string; rateLimitReserved?: boolean }, dto: SendAiMessageDto, inputFormat: AiResponseMode = AiResponseMode.TEXT) {
@@ -124,31 +124,33 @@ export class AiService {
         const tools = completion.toolCalls.map((toolCall) => {
           const tool = this.registry.get(toolCall.name);
           if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
-          this.validateToolArgs(tool, toolCall.arguments);
-          return { tool, args: toolCall.arguments };
+          const args = this.normalizeToolArgs(tool, toolCall.arguments);
+          this.validateToolArgs(tool, args);
+          return { tool, args, call: { ...toolCall, arguments: args as Record<string, unknown> } };
         });
         const currentClarifications: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
-        const currentReads: Array<{ tool: AiTool; args: unknown }> = [];
+        const currentReads: Array<{ tool: AiTool; args: unknown; call: typeof completion.toolCalls[number] }> = [];
+        const currentActions = tools.filter(({ tool }) => !tool.readOnly);
         for (const candidate of tools) {
           const result = await candidate.tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: candidate.args });
           if (this.isClarification(result)) currentClarifications.push({ ...candidate, result });
           else if (candidate.tool.readOnly) currentReads.push(candidate);
-          else actionTools.push(candidate);
+          else actionTools.push({ tool: candidate.tool, args: candidate.args });
         }
         if (currentClarifications.length) {
           clarifiedTools = currentClarifications;
           break;
         }
-        for (const { tool, args } of currentReads) {
-          toolResults.push({ toolName: tool.name, result: await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args }) });
+        const currentResults = [] as Array<{ call: typeof completion.toolCalls[number]; result: unknown }>;
+        for (const { tool, args, call } of currentReads) {
+          const result = await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
+          currentResults.push({ call, result });
+          toolResults.push({ toolName: tool.name, result });
         }
-        if (!currentReads.length) break;
+        if (!currentReads.length || currentActions.length) break;
         if (continuation >= 3) throw new BadRequestException('Limite de consultas do assistente excedido');
-        completionMessages = [
-          ...completionMessages,
-          { role: 'assistant', content: completion.text },
-          ...toolResults.slice(-currentReads.length).map((item) => ({ role: 'tool' as const, content: this.safeJson({ toolName: item.toolName, result: item.result }) })),
-        ];
+        if (!this.provider.buildToolContinuation) throw new BadRequestException('O provider não suporta continuação de ferramentas');
+        completionMessages = this.provider.buildToolContinuation({ ...completionInput, messages: completionMessages }, completion, currentResults).messages;
       }
     } catch (error) {
       const metadata = error instanceof AiProviderError ? {
@@ -161,7 +163,7 @@ export class AiService {
     }
     const { userMessage, assistantMessage, proposals, clarificationMessages } = await this.persistAtomically(async (tx) => {
       const createdUserMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
-      const createdAssistantMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount: completion.toolCalls.length }) } });
+      const createdAssistantMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount }) } });
       const createdProposals: any[] = [];
       const createdClarificationMessages: any[] = [];
       if (clarifiedTools.length) {
@@ -183,7 +185,7 @@ export class AiService {
     if (!this.runtime) return undefined;
     try {
       const runtime = await this.runtime.getRuntime();
-      return runtime.selectedModel?.slug || undefined;
+      return runtime.providers[runtime.primaryProvider]?.selectedModel?.slug || undefined;
     } catch (error) {
       this.logger.error(`Falha ao ler o runtime global de IA: ${safeError(error)}`);
       throw error;
@@ -285,6 +287,12 @@ export class AiService {
   private validateToolArgs(tool: AiTool, args: unknown) {
     if (tool.validate) tool.validate(args);
     else if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
+  }
+
+  private normalizeToolArgs(tool: AiTool, args: unknown): unknown {
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return args;
+    const required = new Set(Array.isArray((tool.parameters as any)?.required) ? (tool.parameters as any).required : []);
+    return Object.fromEntries(Object.entries(args).filter(([key, value]) => required.has(key) || value !== ''));
   }
 
   private isClarification(value: unknown): value is AiToolClarification {
