@@ -177,11 +177,11 @@ test('audits denied proposal confirmation without sensitive details', async () =
 });
 
 test('audits provider failures without recording the prompt or provider error', async () => {
-  const { service, auditLog } = setup({ provider: { complete: async () => { throw new Error('provider-secret raw payload'); } } });
+  const { service, auditLog } = setup({ provider: { complete: async () => { throw new Error('AI provider request failed: provider-secret raw payload'); } } });
   await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'secret prompt', responseMode: AiResponseMode.TEXT }));
 
   assert.equal(auditLog.at(-1).action, 'ai.provider.failed');
-  assert.deepEqual(auditLog.at(-1).metadata, { actorTenantUserId: 'user-a', provider: 'AI_PROVIDER', status: 'failed' });
+  assert.deepEqual(auditLog.at(-1).metadata, { actorTenantUserId: 'user-a', provider: 'chatgpt', status: 'failed' });
   assert.doesNotMatch(JSON.stringify(auditLog), /secret prompt|provider-secret|raw payload/);
 });
 
