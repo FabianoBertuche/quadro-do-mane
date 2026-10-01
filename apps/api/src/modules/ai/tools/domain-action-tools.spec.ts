@@ -85,6 +85,37 @@ test('rejects malformed calendar arguments before domain execution', () => {
   assert.throws(() => tool.validate!({ title: 'Reunião', startAt: '2030-01-01T10:00:00', endAt: '2030-01-01T11:00:00-03:00', attendeeIds: ['user-1'] }), BadRequestException);
 });
 
+test('rejects empty calendar required strings and explicitly empty participant arrays', () => {
+  const tool = new CreateCalendarEventTool({} as any, users(), {} as any);
+  assert.equal((tool.parameters.properties as any).attendeeIds.minItems, 1);
+  assert.equal((tool.parameters.properties as any).attendeeNames.minItems, 1);
+  const base = { title: 'Reunião', startAt: '2030-01-01T10:00:00-03:00', endAt: '2030-01-01T11:00:00-03:00', attendeeIds: ['user-1'] };
+  for (const field of ['title', 'startAt', 'endAt', 'description', 'type', 'relatedProjectId', 'relatedProjectName', 'relatedTaskId', 'assigneeTenantUserId', 'assigneeName', 'recurrenceRule', 'recurrenceUnit', 'recurrenceEndAt']) {
+    assert.throws(() => tool.validate!({ ...base, [field]: ' ' }), BadRequestException, field);
+  }
+  assert.throws(() => tool.validate!({ ...base, attendeeIds: [] }), BadRequestException);
+  assert.throws(() => tool.validate!({ ...base, attendeeNames: [] }), BadRequestException);
+});
+
+test('validates calendar recurrence end requirements and date values', () => {
+  const tool = new CreateCalendarEventTool({} as any, users(), {} as any);
+  const base = { title: 'Reunião', startAt: '2030-01-01T10:00:00-03:00', endAt: '2030-01-01T11:00:00-03:00', attendeeIds: ['user-1'] };
+  assert.throws(() => tool.validate!({ ...base, recurrenceRule: 'WEEKLY' }), BadRequestException);
+  assert.throws(() => tool.validate!({ ...base, recurrenceEndAt: 'not-a-date' }), BadRequestException);
+  assert.throws(() => tool.validate!({ ...base, recurrenceInterval: 2 }), BadRequestException);
+  assert.throws(() => tool.validate!({ ...base, recurrenceUnit: 'week' }), BadRequestException);
+  assert.throws(() => tool.validate!({ ...base, recurrenceRule: 'WEEKLY', recurrenceEndAt: '2029-12-31' }), BadRequestException);
+});
+
+test('accepts only recurrence combinations supported by EventsService', () => {
+  const tool = new CreateCalendarEventTool({} as any, users(), {} as any);
+  const base = { title: 'Reunião', startAt: '2030-01-01T10:00:00-03:00', endAt: '2030-01-01T11:00:00-03:00', attendeeIds: ['user-1'], recurrenceEndAt: '2030-02-01T10:00:00-03:00' };
+  assert.doesNotThrow(() => tool.validate!({ ...base, recurrenceRule: 'WEEKLY', recurrenceUnit: 'week' }));
+  assert.doesNotThrow(() => tool.validate!({ ...base, recurrenceRule: 'CUSTOM', recurrenceInterval: 2, recurrenceUnit: 'week' }));
+  assert.throws(() => tool.validate!({ ...base, recurrenceRule: 'DAILY', recurrenceUnit: 'week' }), BadRequestException);
+  assert.throws(() => tool.validate!({ ...base, recurrenceRule: 'CUSTOM' }), BadRequestException);
+});
+
 test('uses the actor as the routine assignee when no responsible user is supplied', async () => {
   const tool = new CreateRoutineTool({} as any, users());
 

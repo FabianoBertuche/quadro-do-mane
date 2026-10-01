@@ -13,8 +13,9 @@ const validate = (args: unknown): Record<string, any> => {
   const value = args as Record<string, any>;
   const unknown = Object.keys(value).find((key) => !allowed.includes(key));
   if (unknown) throw new BadRequestException(`Campo não suportado: ${unknown}`);
-  for (const field of ['title', 'description', 'type', 'startAt', 'endAt', 'relatedProjectId', 'relatedProjectName', 'relatedTaskId', 'assigneeTenantUserId', 'assigneeName', 'recurrenceRule', 'recurrenceUnit', 'recurrenceEndAt']) {
-    if (value[field] !== undefined && typeof value[field] !== 'string') throw new BadRequestException(`${field} inválido`);
+  const stringFields = ['title', 'description', 'type', 'startAt', 'endAt', 'relatedProjectId', 'relatedProjectName', 'relatedTaskId', 'assigneeTenantUserId', 'assigneeName', 'recurrenceRule', 'recurrenceUnit', 'recurrenceEndAt'];
+  for (const field of stringFields) {
+    if (value[field] !== undefined && (typeof value[field] !== 'string' || !value[field].trim())) throw new BadRequestException(`${field} inválido`);
   }
   if (typeof value.title !== 'string' || !value.title.trim()) throw new BadRequestException('title é obrigatório');
   for (const field of ['startAt', 'endAt']) {
@@ -22,12 +23,21 @@ const validate = (args: unknown): Record<string, any> => {
   }
   if (value.startAt && value.endAt && new Date(value.endAt) <= new Date(value.startAt)) throw new BadRequestException('endAt deve ser posterior a startAt');
   if (value.allDay !== undefined && typeof value.allDay !== 'boolean') throw new BadRequestException('allDay inválido');
-  if (value.attendeeIds !== undefined && (!Array.isArray(value.attendeeIds) || value.attendeeIds.some((id: unknown) => typeof id !== 'string' || !id.trim()))) throw new BadRequestException('attendeeIds inválido');
-  if (value.attendeeNames !== undefined && (!Array.isArray(value.attendeeNames) || value.attendeeNames.some((name: unknown) => typeof name !== 'string' || !name.trim()))) throw new BadRequestException('attendeeNames inválido');
+  if (value.attendeeIds !== undefined && (!Array.isArray(value.attendeeIds) || value.attendeeIds.length === 0 || value.attendeeIds.some((id: unknown) => typeof id !== 'string' || !id.trim()))) throw new BadRequestException('attendeeIds inválido');
+  if (value.attendeeNames !== undefined && (!Array.isArray(value.attendeeNames) || value.attendeeNames.length === 0 || value.attendeeNames.some((name: unknown) => typeof name !== 'string' || !name.trim()))) throw new BadRequestException('attendeeNames inválido');
   if (value.recurrenceRule !== undefined && !recurrenceRules.includes(value.recurrenceRule)) throw new BadRequestException('recurrenceRule inválido');
   if (value.recurrenceUnit !== undefined && !recurrenceUnits.includes(value.recurrenceUnit)) throw new BadRequestException('recurrenceUnit inválido');
   if (value.recurrenceInterval !== undefined && (!Number.isInteger(value.recurrenceInterval) || value.recurrenceInterval < 1 || value.recurrenceInterval > 365)) throw new BadRequestException('recurrenceInterval inválido');
   if (value.remindDaysBefore !== undefined && (!Number.isInteger(value.remindDaysBefore) || value.remindDaysBefore < 0 || value.remindDaysBefore > 365)) throw new BadRequestException('remindDaysBefore inválido');
+  const recurrenceConfigured = value.recurrenceRule !== undefined;
+  const recurrenceFieldsPresent = value.recurrenceInterval !== undefined || value.recurrenceUnit !== undefined || value.recurrenceEndAt !== undefined;
+  if (recurrenceConfigured && !value.recurrenceEndAt) throw new BadRequestException('recurrenceEndAt é obrigatório com recurrenceRule');
+  if (!recurrenceConfigured && recurrenceFieldsPresent) throw new BadRequestException('recurrenceRule é obrigatório para configurar recorrência');
+  if (value.recurrenceEndAt && Number.isNaN(Date.parse(value.recurrenceEndAt))) throw new BadRequestException('recurrenceEndAt inválido');
+  if (value.recurrenceEndAt && value.startAt && new Date(value.recurrenceEndAt) < new Date(value.startAt)) throw new BadRequestException('recurrenceEndAt deve ser posterior a startAt');
+  if (value.recurrenceRule === 'CUSTOM' && !value.recurrenceUnit) throw new BadRequestException('recurrenceUnit é obrigatório com CUSTOM');
+  const presetUnits: Record<string, string> = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', YEARLY: 'year' };
+  if (value.recurrenceRule && value.recurrenceRule !== 'CUSTOM' && value.recurrenceUnit && presetUnits[value.recurrenceRule] !== value.recurrenceUnit) throw new BadRequestException('recurrenceUnit incompatível com recurrenceRule');
   return value;
 };
 
@@ -36,7 +46,7 @@ export class CreateCalendarEventTool implements AiTool {
   name = 'create_calendar_event';
   description = 'Cria um evento de calendário após resolver projeto e participantes autorizados.';
   parameters = { type: 'object', additionalProperties: false, required: ['title', 'startAt', 'endAt'], properties: {
-    title: { type: 'string' }, description: { type: 'string' }, type: { type: 'string' }, startAt: { type: 'string' }, endAt: { type: 'string' }, allDay: { type: 'boolean' }, relatedProjectId: { type: 'string' }, relatedProjectName: { type: 'string' }, relatedTaskId: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, assigneeName: { type: 'string' }, attendeeIds: { type: 'array', items: { type: 'string' } }, attendeeNames: { type: 'array', items: { type: 'string' } }, recurrenceRule: { type: 'string', enum: recurrenceRules }, recurrenceInterval: { type: 'integer', minimum: 1, maximum: 365 }, recurrenceUnit: { type: 'string', enum: recurrenceUnits }, recurrenceEndAt: { type: 'string' }, remindDaysBefore: { type: 'integer', minimum: 0, maximum: 365 },
+    title: { type: 'string', minLength: 1 }, description: { type: 'string', minLength: 1 }, type: { type: 'string', minLength: 1 }, startAt: { type: 'string', minLength: 1 }, endAt: { type: 'string', minLength: 1 }, allDay: { type: 'boolean' }, relatedProjectId: { type: 'string', minLength: 1 }, relatedProjectName: { type: 'string', minLength: 1 }, relatedTaskId: { type: 'string', minLength: 1 }, assigneeTenantUserId: { type: 'string', minLength: 1 }, assigneeName: { type: 'string', minLength: 1 }, attendeeIds: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, attendeeNames: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, recurrenceRule: { type: 'string', minLength: 1, enum: recurrenceRules }, recurrenceInterval: { type: 'integer', minimum: 1, maximum: 365 }, recurrenceUnit: { type: 'string', minLength: 1, enum: recurrenceUnits }, recurrenceEndAt: { type: 'string', minLength: 1 }, remindDaysBefore: { type: 'integer', minimum: 0, maximum: 365 },
   } };
   validate = validate;
 

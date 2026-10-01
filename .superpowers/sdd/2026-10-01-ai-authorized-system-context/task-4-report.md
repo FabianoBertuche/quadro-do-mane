@@ -112,3 +112,33 @@ git diff --check
 
 Results: focused action suite passed 17/17; full AI/module/tool suite passed 186/186;
 build, TypeScript no-emit compilation, and diff checks passed.
+
+## Calendar follow-up
+
+The remaining calendar review findings were addressed:
+
+- Required and optional string arguments reject blank values with `BadRequestException`.
+- Explicitly empty `attendeeIds` and `attendeeNames` are rejected, and both JSON schema
+  properties declare `minItems: 1` plus non-empty string items.
+- `startAt` and `endAt` ordering is checked before authorization resolution or proposal
+  creation.
+- `recurrenceEndAt` is date-validated, required with a recurrence rule, rejected when
+  recurrence-only fields are supplied without a rule, and must not precede `startAt`.
+- Recurrence combinations mirror `EventsService.validateRecurrence`: preset rules accept
+  only their matching units, `CUSTOM` requires a unit, and interval bounds remain
+  positive integer values within the tool range.
+- Calendar schemas now expose these constraints, while validation failures use Nest's
+  structured `BadRequestException` rather than generic errors.
+
+Final follow-up verification:
+
+```text
+node -r ts-node/register --test src/modules/ai/tools/domain-action-tools.spec.ts
+node -r ts-node/register --test src/modules/ai/*.spec.ts src/modules/ai/tools/*.spec.ts
+npm run build
+npx tsc --noEmit
+git diff --check
+```
+
+Results: focused action suite passed 20/20; full AI/module/tool suite passed 189/189;
+build, TypeScript no-emit compilation, and diff checks passed.
