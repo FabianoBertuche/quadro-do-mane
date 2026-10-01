@@ -18,6 +18,13 @@ import { SearchTasksTool } from './tools/search-tasks.tool';
 import { CreateTaskTool } from './tools/create-task.tool';
 import { UpdateTaskTool } from './tools/update-task.tool';
 import { MoveTaskTool } from './tools/move-task.tool';
+import { CreateCalendarEventTool } from './tools/create-calendar-event.tool';
+import { CreateRoutineTool } from './tools/create-routine.tool';
+import { AddTeamMemberTool } from './tools/add-team-member.tool';
+import { AddProjectMemberTool } from './tools/add-project-member.tool';
+import { EventsModule } from '../events/events.module';
+import { DailyRoutineModule } from '../daily-routine/daily-routine.module';
+import { TeamsModule } from '../teams/teams.module';
 import { AiAudioController } from './ai-audio.controller';
 import { AiAudioService, SPEECH_TO_TEXT_PROVIDER, TEXT_TO_SPEECH_PROVIDER } from './ai-audio.service';
 import { AiOAuthController } from './ai-oauth.controller';
@@ -30,7 +37,7 @@ import { OpenAiTextToSpeechProvider } from './providers/openai-text-to-speech.pr
 import OpenAI from 'openai';
 
 @Module({
-  imports: [ProjectsModule, TasksModule, UsersModule],
+  imports: [ProjectsModule, TasksModule, UsersModule, EventsModule, DailyRoutineModule, TeamsModule],
   controllers: [AiController, AiAudioController, AiOAuthController, AiServerRuntimeController],
   providers: [
     AiService,
@@ -41,6 +48,10 @@ import OpenAI from 'openai';
     CreateTaskTool,
     UpdateTaskTool,
     MoveTaskTool,
+    CreateCalendarEventTool,
+    CreateRoutineTool,
+    AddTeamMemberTool,
+    AddProjectMemberTool,
     AiAudioService,
     AiOAuthService,
     AiServerRuntimeService,
@@ -83,7 +94,7 @@ import OpenAI from 'openai';
     },
     {
       provide: AiToolRegistryService,
-      inject: [SearchTasksTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool],
+      inject: [SearchTasksTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool, CreateRoutineTool, AddTeamMemberTool, AddProjectMemberTool],
       useFactory: (...tools: any[]) => new AiToolRegistryService(tools),
     },
     {
