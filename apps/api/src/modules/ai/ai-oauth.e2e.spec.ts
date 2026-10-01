@@ -299,12 +299,13 @@ test('carries one global OAuth runtime through catalog selection and chat withou
     const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
     const context = new AiContextService({ project: { findFirst: async () => null }, task: { findMany: async () => [] } } as any);
     const audit = new AiAuditService({ log: async () => undefined } as any);
+    const identity = { resolve: async () => ({ name: 'Maria', address: 'Maria' }) } as any;
     const completion = new AiService(prisma, {
       complete: async (input: any) => {
         responsesRequest = input;
         return { text: 'ok', toolCalls: [] };
       },
-    }, context, new AiToolRegistryService([]), audit, {}, undefined, oauth as any, runtime as any);
+    }, context, new AiToolRegistryService([]), audit, identity, {}, undefined, oauth as any, runtime as any);
     await assert.rejects(() => completion.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'hello', responseMode: 'TEXT' as any }), /message write failed/);
     assert.equal(responsesRequest.model, 'gpt-5-codex');
     assert.equal(attemptedMessageWrites, 2);
@@ -312,7 +313,7 @@ test('carries one global OAuth runtime through catalog selection and chat withou
     assert.deepEqual(messages, []);
     assert.deepEqual(proposals, []);
 
-    const invalidTool = new AiService(prisma, { complete: async () => ({ text: 'bad', toolCalls: [{ name: 'unknown', arguments: {} }] }) }, context, new AiToolRegistryService([]), audit, {}, undefined, undefined, runtime as any);
+    const invalidTool = new AiService(prisma, { complete: async () => ({ text: 'bad', toolCalls: [{ name: 'unknown', arguments: {} }] }) }, context, new AiToolRegistryService([]), audit, identity, {}, undefined, undefined, runtime as any);
     await assert.rejects(() => invalidTool.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'hello', responseMode: 'TEXT' as any }), /Ferramenta não disponível/);
     assert.deepEqual(messages, []);
     assert.deepEqual(proposals, []);

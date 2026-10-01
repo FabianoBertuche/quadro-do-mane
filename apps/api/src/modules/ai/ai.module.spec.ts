@@ -4,6 +4,7 @@ import 'reflect-metadata';
 import { SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
 import { AiModule } from './ai.module';
 import { AiService, AI_OAUTH_SERVICE, AI_PROVIDER, AI_SERVER_RUNTIME } from './ai.service';
+import { AiIdentityContextService } from './ai-identity.service';
 import { AiOAuthService } from './ai-oauth.service';
 import { AiServerRuntimeService } from './ai-server-runtime.service';
 import { AiServerRuntimeController } from './ai-server-runtime.controller';
@@ -19,12 +20,20 @@ function providerFactory() {
 
 test('declares the actor-scoped OAuth service through an explicit Nest token', () => {
   const dependencies = Reflect.getMetadata(SELF_DECLARED_DEPS_METADATA, AiService) ?? [];
-  const oauthDependency = dependencies.find((dependency: any) => dependency.index === 7);
+  const oauthDependency = dependencies.find((dependency: any) => dependency.index === 8);
   assert.equal(oauthDependency.param, AI_OAUTH_SERVICE);
 
   const providers = Reflect.getMetadata('providers', AiModule) ?? [];
   const oauthAlias = providers.find((provider: any) => provider?.provide === AI_OAUTH_SERVICE);
   assert.equal(oauthAlias.useExisting, AiOAuthService);
+});
+
+test('requires and registers authenticated identity context in the production module', () => {
+  const parameterTypes = Reflect.getMetadata('design:paramtypes', AiService) ?? [];
+  assert.equal(parameterTypes[5], AiIdentityContextService);
+
+  const providers = Reflect.getMetadata('providers', AiModule) ?? [];
+  assert.ok(providers.includes(AiIdentityContextService));
 });
 
 test('exposes the global server runtime through an explicit Nest token', () => {

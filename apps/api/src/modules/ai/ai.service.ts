@@ -48,11 +48,11 @@ export class AiService {
     private readonly context: AiContextService,
     public registry: AiToolRegistryService,
     private readonly audit: AiAuditService,
+    private readonly identity: AiIdentityContextService,
     @Optional() limits: Partial<AiSecurityLimits> = {},
     @Optional() @Inject(AI_RATE_LIMITER) private readonly rateLimiter?: AiRateLimiter,
     @Optional() @Inject(AI_OAUTH_SERVICE) private readonly oauth?: AiOAuthService,
     @Optional() @Inject(AI_SERVER_RUNTIME) private readonly runtime?: AiServerRuntimeService,
-    @Optional() private readonly identity?: AiIdentityContextService,
   ) {
     this.limits = { ...DEFAULT_AI_SECURITY_LIMITS, ...limits };
   }
@@ -97,14 +97,12 @@ export class AiService {
     if (text.length > this.limits.maxMessageLength) throw new BadRequestException('A mensagem excede o limite permitido');
     if (!actor.rateLimitReserved) await this.reserveRateLimit(actor, Math.max(1, Math.ceil(text.length / 1000)));
     const context = await this.context.buildContext({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, projectId: dto.contextProjectId ?? conversation.contextProjectId ?? undefined, query: text });
-    const identity = this.identity
-      ? await this.identity.resolve({ tenantId: actor.tenantId, tenantUserId: actor.tenantUserId })
-      : null;
+    const identity = await this.identity.resolve({ tenantId: actor.tenantId, tenantUserId: actor.tenantUserId });
     const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: Math.max(this.limits.maxHistoryMessages - 1, 0) });
     const model = await this.selectedModel();
     const completionInput: AiCompletionInput = {
       messages: [
-        { role: 'system', content: `${identity ? `Usuário autenticado: ${identity.name}. Tratamento: ${identity.address}. Use este tratamento apenas para se dirigir ao usuário atual.\n` : ''}Use somente este contexto acessível: ${context.summary}` },
+        { role: 'system', content: `Usuário autenticado: ${identity.name}. Tratamento: ${identity.address}. Use este tratamento apenas para se dirigir ao usuário atual.\nUse somente este contexto acessível: ${context.summary}` },
         ...history.reverse().map((message: any) => ({ role: message.role, content: message.content ?? '' })),
         { role: 'user', content: text },
       ],

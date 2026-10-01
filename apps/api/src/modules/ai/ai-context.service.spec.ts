@@ -67,3 +67,40 @@ test('buildContext includes bounded essential task details for the provider', as
   assert.match(context.summary, /Maria/);
   assert.match(context.summary, /Em andamento/);
 });
+
+test('buildContext without a project includes tasks across visible projects with actor visibility', async () => {
+  const calls: any[] = [];
+  const prisma = {
+    project: {
+      findFirst: async () => {
+        throw new Error('global context must not select a single project');
+      },
+    },
+    task: {
+      findMany: async (args: any) => {
+        calls.push(args);
+        return [
+          { id: 'task-1', title: 'Owned project task', projectId: 'project-owned', project: { name: 'Owned project' } },
+          { id: 'task-2', title: 'Team project task', projectId: 'project-team', project: { name: 'Team project' } },
+        ];
+      },
+    },
+  };
+
+  const context = await new AiContextService(prisma as any).buildContext({
+    tenantId: 'tenant-a',
+    actorTenantUserId: 'user-a',
+    query: '',
+  });
+
+  assert.deepEqual(context.items.map((item) => item.id), ['task-1', 'task-2']);
+  assert.equal(calls[0].where.tenantId, 'tenant-a');
+  assert.equal(calls[0].where.projectId, undefined);
+  assert.deepEqual(calls[0].where.project.OR, [
+    { ownerTenantUserId: 'user-a' },
+    { members: { some: { tenantUserId: 'user-a' } } },
+    { team: { members: { some: { tenantUserId: 'user-a' } } } },
+    { tasks: { some: { assigneeTenantUserId: 'user-a', archivedAt: null } } },
+  ]);
+  assert.match(context.summary, /Owned project|Team project/);
+});

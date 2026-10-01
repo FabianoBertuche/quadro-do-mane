@@ -62,6 +62,7 @@ function setup(overrides: { limits?: Partial<AiSecurityLimits>; conversation?: u
     context,
     new AiToolRegistryService([]),
     new AiAuditService({ log: async (entry: any) => auditLog.push(entry) } as any),
+    { resolve: async () => ({ name: 'Maria', address: 'Maria' }) } as any,
     overrides.limits,
     (overrides.rateLimiter ?? rateLimiter) as any,
   );

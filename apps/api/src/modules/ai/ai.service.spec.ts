@@ -122,11 +122,11 @@ function setup(provider: AiProvider, oauth?: any, runtime?: any, options: SetupO
     context,
     new AiToolRegistryService([]),
     new AiAuditService({ log: async (entry: any) => { auditLog.push(entry); } } as any),
+    { resolve: async () => ({ name: 'Maria', address: 'Maria' }) } as any,
     options.limits ?? {},
     undefined,
     oauth,
     runtime,
-    { resolve: async () => ({ name: 'Maria', address: 'Maria' }) } as any,
   );
   return {
     service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates,
