@@ -1,92 +1,74 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { api } from './api';
-import {
-  getAiRuntime,
-  getAiRuntimeErrorMessage,
-  selectAiRuntimeModel,
-} from './ai-runtime';
+import { getAiRuntime, selectAiProviderModel, setAiPrimaryProvider, setAiFailoverProvider, getAiRuntimeErrorMessage } from './ai-runtime';
 
-test('parses only redacted runtime metadata and preserves server model order', async () => {
+const redactedAssets = {
+  primaryProvider: 'chatgpt' as const,
+  failoverProvider: 'ollama' as const,
+  providers: {
+    chatgpt: {
+      connectionStatus: 'connected' as const,
+      selectedModel: { slug: 'gpt-4.1', displayName: 'GPT-4.1', accessToken: 'secret' },
+      models: [{ slug: 'gpt-4.1', displayName: 'GPT-4.1', token: 'secret' }],
+    },
+    ollama: {
+      connectionStatus: 'disconnected' as const,
+      selectedModel: null,
+      models: [{ slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B', apiKey: 'sk-x' }],
+    },
+  },
+  accessToken: 'secret',
+};
+
+test('parses only redacted per-provider runtime metadata', async () => {
   const originalGet = api.get;
   api.get = (async (url: string) => {
     assert.equal(url, '/ai/runtime');
-    return {
-      data: {
-        connectionStatus: 'connected',
-        provider: 'chatgpt',
-        selectedModel: { slug: 'gpt-4.1', displayName: 'GPT-4.1', accessToken: 'secret' },
-        models: [
-          { slug: 'gpt-4.1', displayName: 'GPT-4.1', token: 'secret' },
-          { slug: 'gpt-4o', displayName: 'GPT-4o' },
-        ],
-        accessToken: 'secret',
-      },
-    };
+    return { data: redactedAssets };
   }) as typeof api.get;
 
   try {
     assert.deepEqual(await getAiRuntime(), {
-      connectionStatus: 'connected',
-      provider: 'chatgpt',
-      selectedModel: { slug: 'gpt-4.1', displayName: 'GPT-4.1' },
-      models: [
-        { slug: 'gpt-4.1', displayName: 'GPT-4.1' },
-        { slug: 'gpt-4o', displayName: 'GPT-4o' },
-      ],
+      primaryProvider: 'chatgpt',
+      failoverProvider: 'ollama',
+      providers: {
+        chatgpt: {
+          connectionStatus: 'connected',
+          selectedModel: { slug: 'gpt-4.1', displayName: 'GPT-4.1' },
+          models: [{ slug: 'gpt-4.1', displayName: 'GPT-4.1' }],
+        },
+        ollama: {
+          connectionStatus: 'disconnected',
+          selectedModel: null,
+          models: [{ slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' }],
+        },
+      },
     });
   } finally {
     api.get = originalGet;
   }
 });
 
-test('selects a runtime model with only the slug and parses the redacted response', async () => {
+test('selects a model per provider and calls the provider-driven primary/failover setters', async () => {
   const originalPost = api.post;
+  const calls: Array<{ url: string; payload?: unknown }> = [];
   api.post = (async (url: string, payload?: unknown) => {
-    assert.equal(url, '/ai/runtime/model');
-    assert.deepEqual(payload, { slug: 'gpt-4o' });
-    return {
-      data: {
-        connectionStatus: 'connected',
-        provider: 'chatgpt',
-        selectedModel: { slug: 'gpt-4o', displayName: 'GPT-4o' },
-        models: [{ slug: 'gpt-4o', displayName: 'GPT-4o' }],
-      },
-    };
+    calls.push({ url, payload });
+    return { data: redactedAssets };
   }) as typeof api.post;
 
   try {
-    assert.deepEqual(await selectAiRuntimeModel('gpt-4o'), {
-      connectionStatus: 'connected',
-      provider: 'chatgpt',
-      selectedModel: { slug: 'gpt-4o', displayName: 'GPT-4o' },
-      models: [{ slug: 'gpt-4o', displayName: 'GPT-4o' }],
-    });
+    await selectAiProviderModel('ollama', 'gpt-oss:20b');
+    await setAiPrimaryProvider('ollama');
+    await setAiFailoverProvider(null);
+    assert.deepEqual(calls, [
+      { url: '/ai/runtime/model', payload: { provider: 'ollama', slug: 'gpt-oss:20b' } },
+      { url: '/ai/runtime/primary', payload: { provider: 'ollama' } },
+      { url: '/ai/runtime/failover', payload: { provider: null } },
+    ]);
   } finally {
     api.post = originalPost;
-  }
-});
-
-test('returns a useful disconnected runtime when the model catalog is unavailable', async () => {
-  const originalGet = api.get;
-  api.get = (async () => ({
-    data: {
-      connectionStatus: 'disconnected',
-      provider: 'chatgpt',
-      selectedModel: null,
-      models: [],
-    },
-  })) as typeof api.get;
-
-  try {
-    assert.deepEqual(await getAiRuntime(), {
-      connectionStatus: 'disconnected',
-      provider: 'chatgpt',
-      selectedModel: null,
-      models: [],
-    });
-  } finally {
-    api.get = originalGet;
   }
 });
 

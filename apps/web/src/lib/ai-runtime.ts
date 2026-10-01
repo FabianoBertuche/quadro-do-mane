@@ -1,23 +1,26 @@
 import { api } from './api';
 
+export type AiProviderName = 'chatgpt' | 'ollama';
+
 export interface AiRuntimeModel {
   slug: string;
   displayName: string;
 }
 
-export interface AiRuntime {
+export interface AiRuntimeProvider {
   connectionStatus: 'connected' | 'disconnected';
-  provider: 'chatgpt';
   selectedModel: AiRuntimeModel | null;
   models: AiRuntimeModel[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+export interface AiRuntime {
+  primaryProvider: AiProviderName;
+  failoverProvider: AiProviderName | null;
+  providers: Record<AiProviderName, AiRuntimeProvider>;
 }
 
-function unwrapData(value: unknown): unknown {
-  return isRecord(value) && value.data !== undefined ? value.data : value;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseModel(value: unknown): AiRuntimeModel {
@@ -27,18 +30,33 @@ function parseModel(value: unknown): AiRuntimeModel {
   return { slug: value.slug, displayName: value.displayName };
 }
 
-function parseRuntime(value: unknown): AiRuntime {
-  const payload = unwrapData(value);
-  if (!isRecord(payload) || (payload.connectionStatus !== 'connected' && payload.connectionStatus !== 'disconnected') || payload.provider !== 'chatgpt') {
+function parseProvider(value: unknown): AiRuntimeProvider {
+  if (!isRecord(value) || (value.connectionStatus !== 'connected' && value.connectionStatus !== 'disconnected')) {
     throw new Error('Resposta do runtime de IA inválida');
   }
-  const selectedModel = payload.selectedModel === null ? null : parseModel(payload.selectedModel);
-  const models = Array.isArray(payload.models) ? payload.models.map(parseModel) : [];
   return {
-    connectionStatus: payload.connectionStatus,
-    provider: 'chatgpt',
-    selectedModel,
-    models,
+    connectionStatus: value.connectionStatus,
+    selectedModel: value.selectedModel === null ? null : parseModel(value.selectedModel),
+    models: Array.isArray(value.models) ? value.models.map(parseModel) : [],
+  };
+}
+
+function parseProviderName(value: unknown): AiProviderName {
+  if (value !== 'chatgpt' && value !== 'ollama') throw new Error('Resposta do runtime de IA inválida');
+  return value;
+}
+
+function parseRuntime(value: unknown): AiRuntime {
+  if (!isRecord(value) || !isRecord(value.providers)) throw new Error('Resposta do runtime de IA inválida');
+  return {
+    primaryProvider: parseProviderName(value.primaryProvider),
+    failoverProvider: value.failoverProvider === null ? null
+      : value.failoverProvider === undefined ? null
+      : parseProviderName(value.failoverProvider),
+    providers: {
+      chatgpt: parseProvider(value.providers.chatgpt),
+      ollama: parseProvider(value.providers.ollama),
+    },
   };
 }
 
@@ -47,8 +65,18 @@ export async function getAiRuntime(): Promise<AiRuntime> {
   return parseRuntime(data);
 }
 
-export async function selectAiRuntimeModel(slug: string): Promise<AiRuntime> {
-  const { data } = await api.post('/ai/runtime/model', { slug });
+export async function selectAiProviderModel(provider: AiProviderName, slug: string): Promise<AiRuntime> {
+  const { data } = await api.post('/ai/runtime/model', { provider, slug });
+  return parseRuntime(data);
+}
+
+export async function setAiPrimaryProvider(provider: AiProviderName): Promise<AiRuntime> {
+  const { data } = await api.post('/ai/runtime/primary', { provider });
+  return parseRuntime(data);
+}
+
+export async function setAiFailoverProvider(provider: AiProviderName | null): Promise<AiRuntime> {
+  const { data } = await api.post('/ai/runtime/failover', { provider });
   return parseRuntime(data);
 }
 
