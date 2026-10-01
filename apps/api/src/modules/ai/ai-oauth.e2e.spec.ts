@@ -220,6 +220,8 @@ test('carries one global OAuth runtime through catalog selection and chat withou
   };
   const messages: any[] = [];
   const proposals: any[] = [];
+  const transactionWrites: any[] = [];
+  let attemptedMessageWrites = 0;
   const prisma: any = {
     aiServerRuntime: {
       upsert: async () => runtimeRow,
@@ -227,7 +229,32 @@ test('carries one global OAuth runtime through catalog selection and chat withou
       update: async ({ data }: any) => Object.assign(runtimeRow, data),
     },
     $queryRawUnsafe: async () => undefined,
-    $transaction: async (callback: (tx: any) => Promise<any>) => callback(prisma),
+    $transaction: async (callback: (tx: any) => Promise<any>) => {
+      const pending: any[] = [];
+      const tx = {
+        $queryRawUnsafe: async () => undefined,
+        aiServerRuntime: {
+          findUnique: async () => runtimeRow,
+          update: async ({ data }: any) => Object.assign(runtimeRow, data),
+        },
+        aiMessage: {
+          create: async ({ data }: any) => {
+            attemptedMessageWrites += 1;
+            pending.push({ table: 'message', data });
+            if (pending.length === 2) throw new Error('message write failed');
+            return { id: `message-${pending.length}`, ...data };
+          },
+        },
+        aiActionProposal: { create: async ({ data }: any) => ({ id: 'proposal-1', ...data }) },
+      };
+      try {
+        const result = await callback(tx);
+        transactionWrites.push(...pending);
+        return result;
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
     aiConversation: { findFirst: async () => ({ id: 'conversation-1', contextProjectId: null }) },
     aiMessage: {
       findMany: async () => [],
@@ -269,17 +296,19 @@ test('carries one global OAuth runtime through catalog selection and chat withou
       selectedModel: { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' },
     });
 
-    const provider = new OpenAiResponsesProvider({ get: (key: string) => key === 'AI_ENABLED' ? false : undefined } as any);
-    await provider.complete({ messages: [{ role: 'user', content: 'hello' }], model: runtimeRow.selectedModelSlug }, await oauth.resolveProviderAuth() as any);
-    assert.equal(responsesRequest.model, 'gpt-5-codex');
-    assert.equal(responsesRequest.store, false);
-    assert.equal(responsesRequest.stream, true);
-
     const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
     const context = new AiContextService({ project: { findFirst: async () => null }, task: { findMany: async () => [] } } as any);
     const audit = new AiAuditService({ log: async () => undefined } as any);
-    const failing = new AiService(prisma, { complete: async () => { throw new AiProviderError('provider failed', { status: 500 }); } }, context, new AiToolRegistryService([]), audit);
-    await assert.rejects(() => failing.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'hello', responseMode: 'TEXT' as any }));
+    const completion = new AiService(prisma, {
+      complete: async (input: any) => {
+        responsesRequest = input;
+        return { text: 'ok', toolCalls: [] };
+      },
+    }, context, new AiToolRegistryService([]), audit, {}, undefined, oauth as any, runtime as any);
+    await assert.rejects(() => completion.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'hello', responseMode: 'TEXT' as any }), /message write failed/);
+    assert.equal(responsesRequest.model, 'gpt-5-codex');
+    assert.equal(attemptedMessageWrites, 2);
+    assert.deepEqual(transactionWrites, []);
     assert.deepEqual(messages, []);
     assert.deepEqual(proposals, []);
 

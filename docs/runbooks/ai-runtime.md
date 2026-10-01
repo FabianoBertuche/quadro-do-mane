@@ -70,9 +70,14 @@ npm run build:api
 npm run build:web
 docker compose -f docker-compose.prod.yml build api web
 docker compose -f docker-compose.prod.yml run --build --rm migrate
+# Only after the migration succeeds and the database is reachable:
 docker compose -f docker-compose.prod.yml up -d --build api web
 docker compose -f docker-compose.prod.yml ps
 ```
+
+Stop immediately if the migration fails or the database is unreachable. Do not
+run `docker compose -f docker-compose.prod.yml up -d --build api web` in that
+case; fix database connectivity and rerun the migration first.
 
 Verify the API health/auth route accepts its expected `200` or `401`, the web
 root returns `200` or its expected login redirect, and the runtime/settings
