@@ -56,6 +56,12 @@ const manageRoutineNav = {
   icon: Settings,
 };
 
+const aiProvidersNav = {
+  name: 'Provedores de IA',
+  href: '/settings/ai-providers',
+  icon: Bot,
+};
+
 const operationalNav = {
   name: 'Atividades',
   href: '/operational',
@@ -78,6 +84,7 @@ export function Sidebar({ currentPath, mobileOpen, onClose }: SidebarProps) {
   const showAudit = hydrated && can(auditNav.requires);
   const showMonitorRoutine = hydrated && role === 'admin';
   const showManageRoutine = hydrated && role === 'admin';
+  const showAiProviders = hydrated && role === 'admin';
   const showOperational = hydrated && can(operationalNav.requires);
 
   const handleLinkClick = () => {
@@ -168,6 +175,16 @@ export function Sidebar({ currentPath, mobileOpen, onClose }: SidebarProps) {
                   <item.icon className={navIconClass(isActive)} />
                   {(!collapsed || mobileOpen) && <span className="truncate">{item.name}</span>}
                 </Link>
+                {item.href === '/settings' && showAiProviders && (
+                  <Link
+                    href={aiProvidersNav.href}
+                    onClick={handleLinkClick}
+                    className={navLinkClass(currentPath.startsWith(aiProvidersNav.href))}
+                  >
+                    <aiProvidersNav.icon className={navIconClass(currentPath.startsWith(aiProvidersNav.href))} />
+                    {(!collapsed || mobileOpen) && <span className="truncate">{aiProvidersNav.name}</span>}
+                  </Link>
+                )}
                 {item.href === '/calendar' && (
                   <div className="mt-2">
                     {(!collapsed || mobileOpen) && (

@@ -1,7 +1,8 @@
 'use client';
 
 import { useAuthStore } from '@/lib/auth';
-import { Shield, Building2, User, Bell, Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Shield, Building2, User, Bell, Briefcase, Plus, Edit2, Trash2, Bot } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useState } from 'react';
@@ -98,6 +99,19 @@ export default function SettingsPage() {
       {/* Tenant email server (admin only) */}
       {role === "admin" && (
         <TenantEmailAdminCard />
+      )}
+
+      {role === 'admin' && (
+        <div className="p-6 rounded-2xl bg-card border border-border shadow-sm">
+          <div className="flex items-center gap-2 mb-2">
+            <Bot className="w-5 h-5 text-primary" />
+            <h2 className="font-semibold">Provedores de IA</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">Consulte o status da conexão global e os provedores disponíveis.</p>
+          <Link href="/settings/ai-providers" className="text-sm font-medium text-primary hover:underline">
+            Ver provedores de IA
+          </Link>
+        </div>
       )}
 
       {/* Notifications preferences */}
