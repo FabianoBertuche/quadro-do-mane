@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, GoneException, Logger, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiCompletionInput, AiProvider, AiProviderError } from './ports/ai-provider.port';
 import { AiContextService } from './ai-context.service';
@@ -11,11 +11,13 @@ import { AiResponseMode, SendAiMessageDto } from './dto/send-ai-message.dto';
 import type { AiRateLimiter } from './ai-rate-limit.service';
 import type { AiOAuthService } from './ai-oauth.service';
 import type { AiServerRuntimeService } from './ai-server-runtime.service';
+import type { AiProviderExecution, AiProviderRoutingService } from './ai-provider-routing.service';
 
 export const AI_PROVIDER = 'AI_PROVIDER';
 export const AI_RATE_LIMITER = 'AI_RATE_LIMITER';
 export const AI_OAUTH_SERVICE = 'AI_OAUTH_SERVICE';
 export const AI_SERVER_RUNTIME = 'AI_SERVER_RUNTIME';
+export const AI_PROVIDER_ROUTING = 'AI_PROVIDER_ROUTING';
 export interface AiActor { tenantId: string; tenantUserId: string; userId?: string }
 
 export interface AiSecurityLimits {
@@ -54,6 +56,7 @@ export class AiService {
     @Optional() @Inject(AI_RATE_LIMITER) private readonly rateLimiter?: AiRateLimiter,
     @Optional() @Inject(AI_OAUTH_SERVICE) private readonly oauth?: AiOAuthService,
     @Optional() @Inject(AI_SERVER_RUNTIME) private readonly runtime?: AiServerRuntimeService,
+    @Optional() @Inject(AI_PROVIDER_ROUTING) private readonly routing?: AiProviderRoutingService,
   ) {
     this.limits = { ...DEFAULT_AI_SECURITY_LIMITS, ...limits };
   }
@@ -110,57 +113,40 @@ export class AiService {
       tools: this.registry.list().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
       ...(model ? { model } : {}),
     };
-    let completion: Awaited<ReturnType<AiProvider['complete']>>;
-    let completionMessages = completionInput.messages;
-    let actionTools: Array<{ tool: AiTool; args: unknown }> = [];
+    let completion: Awaited<ReturnType<AiProvider['complete']>> | undefined;
+    let toolResults: Array<{ toolName: string; result: unknown }> = [];
     let clarifiedTools: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
-    const toolResults: Array<{ toolName: string; result: unknown }> = [];
+    let actionTools: Array<{ tool: AiTool; args: unknown }> = [];
     let toolCallCount = 0;
-    try {
-      const auth = this.oauth ? await this.oauth.resolveProviderAuth() : undefined;
-      for (let continuation = 0; ; continuation += 1) {
-        completion = await this.provider.complete({ ...completionInput, messages: completionMessages }, auth);
-        toolCallCount += completion.toolCalls.length;
-        const tools = completion.toolCalls.map((toolCall) => {
-          const tool = this.registry.get(toolCall.name);
-          if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
-          const args = this.normalizeToolArgs(tool, toolCall.arguments);
-          this.validateToolArgs(tool, args);
-          return { tool, args, call: { ...toolCall, arguments: args as Record<string, unknown> } };
+    let lastError: unknown;
+    let usedProvider: 'chatgpt' | 'ollama' = 'chatgpt';
+
+    const executions = this.routing
+      ? await this.routing.resolveExecutions()
+      : [{ provider: 'chatgpt' as const, providerInstance: this.provider, model: await this.selectedModel(), auth: this.oauth ? await this.oauth.resolveProviderAuth() : undefined }];
+    if (!executions.length) throw new ServiceUnavailableException('AI provider is not configured');
+
+    for (const execution of executions) {
+      try {
+        const run = await this.runProviderLoop(completionInput, execution, actor);
+        completion = run.completion;
+        toolResults = run.toolResults;
+        clarifiedTools = run.clarifiedTools;
+        actionTools = run.actionTools;
+        toolCallCount = run.toolCallCount;
+        usedProvider = execution.provider;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof AiProviderError) && !(error instanceof Error && /^AI (provider|response)/.test(error.message))) throw error;
+        await this.audit.record({
+          tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId,
+          action: 'provider.failed', targetId: conversation.id,
+          metadata: this.providerErrorMetadata(error, execution.provider),
         });
-        const currentClarifications: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
-        const currentReads: Array<{ tool: AiTool; args: unknown; call: typeof completion.toolCalls[number] }> = [];
-        const currentActions = tools.filter(({ tool }) => !tool.readOnly);
-        for (const candidate of tools) {
-          const result = await candidate.tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: candidate.args });
-          if (this.isClarification(result)) currentClarifications.push({ ...candidate, result });
-          else if (candidate.tool.readOnly) currentReads.push(candidate);
-          else actionTools.push({ tool: candidate.tool, args: candidate.args });
-        }
-        if (currentClarifications.length) {
-          clarifiedTools = currentClarifications;
-          break;
-        }
-        const currentResults = [] as Array<{ call: typeof completion.toolCalls[number]; result: unknown }>;
-        for (const { tool, args, call } of currentReads) {
-          const result = await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
-          currentResults.push({ call, result });
-          toolResults.push({ toolName: tool.name, result });
-        }
-        if (!currentReads.length || currentActions.length) break;
-        if (continuation >= 3) throw new BadRequestException('Limite de consultas do assistente excedido');
-        if (!this.provider.buildToolContinuation) throw new BadRequestException('O provider não suporta continuação de ferramentas');
-        completionMessages = this.provider.buildToolContinuation({ ...completionInput, messages: completionMessages }, completion, currentResults).messages;
       }
-    } catch (error) {
-      const metadata = error instanceof AiProviderError ? {
-        providerStatus: error.metadata.status,
-        providerCode: error.metadata.code,
-        providerRequestId: error.metadata.requestId,
-      } : {};
-      await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'provider.failed', targetId: conversation.id, metadata: { provider: 'AI_PROVIDER', status: 'failed', ...metadata } });
-      throw error;
     }
+    if (!completion) throw lastError;
     const { userMessage, assistantMessage, proposals, clarificationMessages } = await this.persistAtomically(async (tx) => {
       const createdUserMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
       const createdAssistantMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount }) } });
@@ -177,15 +163,78 @@ export class AiService {
       }
       return { userMessage: createdUserMessage, assistantMessage: createdAssistantMessage, proposals: createdProposals, clarificationMessages: createdClarificationMessages };
     });
-    await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount } });
+    await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount, provider: usedProvider } });
     return { message: userMessage, assistantMessage, proposals, clarificationMessages, toolResults, proposal: proposals[0] };
+  }
+
+  private async runProviderLoop(
+    completionInput: AiCompletionInput,
+    execution: AiProviderExecution,
+    actor: AiActor & { conversationId: string },
+  ) {
+    let completionMessages = completionInput.messages;
+    let actionTools: Array<{ tool: AiTool; args: unknown }> = [];
+    let clarifiedTools: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
+    const toolResults: Array<{ toolName: string; result: unknown }> = [];
+    let toolCallCount = 0;
+    let completion: Awaited<ReturnType<AiProvider['complete']>>;
+    for (let continuation = 0; ; continuation += 1) {
+      completion = await execution.providerInstance.complete(
+        { ...completionInput, messages: completionMessages, ...(execution.model ? { model: execution.model } : {}) },
+        execution.auth,
+      );
+      toolCallCount += completion.toolCalls.length;
+      const tools = completion.toolCalls.map((toolCall) => {
+        const tool = this.registry.get(toolCall.name);
+        if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
+        const args = this.normalizeToolArgs(tool, toolCall.arguments);
+        this.validateToolArgs(tool, args);
+        return { tool, args, call: { ...toolCall, arguments: args as Record<string, unknown> } };
+      });
+      const currentClarifications: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
+      const currentReads: Array<{ tool: AiTool; args: unknown; call: typeof completion.toolCalls[number] }> = [];
+      const currentActions = tools.filter(({ tool }) => !tool.readOnly);
+      for (const candidate of tools) {
+        const result = await candidate.tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: candidate.args });
+        if (this.isClarification(result)) currentClarifications.push({ ...candidate, result });
+        else if (candidate.tool.readOnly) currentReads.push(candidate);
+        else actionTools.push({ tool: candidate.tool, args: candidate.args });
+      }
+      if (currentClarifications.length) {
+        clarifiedTools = currentClarifications;
+        break;
+      }
+      const currentResults = [] as Array<{ call: typeof completion.toolCalls[number]; result: unknown }>;
+      for (const { tool, args, call } of currentReads) {
+        const result = await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
+        currentResults.push({ call, result });
+        toolResults.push({ toolName: tool.name, result });
+      }
+      if (!currentReads.length || currentActions.length) break;
+      if (continuation >= 3) throw new BadRequestException('Limite de consultas do assistente excedido');
+      if (!execution.providerInstance.buildToolContinuation) throw new BadRequestException('O provider não suporta continuação de ferramentas');
+      completionMessages = execution.providerInstance.buildToolContinuation({ ...completionInput, messages: completionMessages }, completion, currentResults).messages;
+    }
+    return { completion, toolResults, clarifiedTools, actionTools, toolCallCount };
+  }
+
+  private providerErrorMetadata(error: unknown, provider: 'chatgpt' | 'ollama') {
+    return {
+      provider,
+      status: 'failed',
+      ...(error instanceof AiProviderError ? {
+        providerStatus: error.metadata.status,
+        providerCode: error.metadata.code,
+        providerRequestId: error.metadata.requestId,
+      } : {}),
+    };
   }
 
   private async selectedModel(): Promise<string | undefined> {
     if (!this.runtime) return undefined;
     try {
       const runtime = await this.runtime.getRuntime();
-      return runtime.providers[runtime.primaryProvider]?.selectedModel?.slug || undefined;
+      return runtime.providers.chatgpt.selectedModel?.slug || undefined;
     } catch (error) {
       this.logger.error(`Falha ao ler o runtime global de IA: ${safeError(error)}`);
       throw error;

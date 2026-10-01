@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BadRequestException, ForbiddenException, GoneException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, GoneException, ServiceUnavailableException } from '@nestjs/common';
 import { AiService } from './ai.service';
 import { AiContextService } from './ai-context.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
 import { AiProvider, AiProviderError } from './ports/ai-provider.port';
 import { AiResponseMode } from './dto/send-ai-message.dto';
+import { DailyRoutineService } from '../daily-routine/daily-routine.service';
+import { CreateRoutineTool } from './tools/create-routine.tool';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
@@ -151,7 +153,7 @@ test('audits provider HTTP metadata while keeping the thrown error safe', async 
     providerCode: auditLog.at(-1).metadata.providerCode,
     providerRequestId: auditLog.at(-1).metadata.providerRequestId,
   }, {
-    provider: 'AI_PROVIDER', status: 'failed', providerStatus: 429, providerCode: 'rate_limit_exceeded', providerRequestId: 'req-audit',
+    provider: 'chatgpt', status: 'failed', providerStatus: 429, providerCode: 'rate_limit_exceeded', providerRequestId: 'req-audit',
   });
 });
 
@@ -247,6 +249,28 @@ test('provider-loop read denial leaves no persisted message, proposal, or mutati
   assert.deepEqual(outsideWrites, []);
 });
 
+test('provider metadata counts tool calls across every read continuation', async () => {
+  let calls = 0;
+  const { service, txWrites } = setup({
+    complete: async () => {
+      calls += 1;
+      if (calls === 1) return { text: 'consultando projetos', toolCalls: [{ id: 'call-1', name: 'read-one', arguments: {} }] };
+      if (calls === 2) return { text: 'consultando usuários', toolCalls: [{ id: 'call-2', name: 'read-two', arguments: {} }] };
+      return { text: 'resultado final', toolCalls: [] };
+    },
+    buildToolContinuation: (input: any, completion: any, results: any[]) => ({
+      ...input,
+      messages: [...input.messages, { role: 'assistant', content: completion.text }, ...results.map(({ call, result }) => ({ role: 'tool', toolCallId: call.id, content: JSON.stringify(result) }))],
+    }),
+  });
+  (service as any).registry = new AiToolRegistryService(['read-one', 'read-two'].map((name) => ({
+    name, readOnly: true, parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => [{ name }],
+  })));
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'consulte tudo', responseMode: AiResponseMode.TEXT });
+  assert.deepEqual(JSON.parse(txWrites[1].providerMetaJson), { toolCallCount: 2 });
+});
+
 test('provider-loop ambiguity persists structured clarification without a proposal or mutation', async () => {
   const { service, rows, txWrites } = setup({
     complete: async () => ({ text: 'vou resolver o projeto', toolCalls: [{ name: 'create_task', arguments: { title: 'Nova tarefa' } }] }),
@@ -266,32 +290,46 @@ test('provider-loop ambiguity persists structured clarification without a propos
   assert.deepEqual(txWrites.map((write) => write.kind), ['message', 'message', 'message']);
 });
 
-test('confirmed provider action delegates actor context and records execution invariants', async () => {
-  const activity: any[] = [];
+test('confirmed provider action uses the real routine tool and domain activity path', async () => {
+  const activityLog: any[] = [];
+  const routinePrisma = {
+    dailyRoutineItem: {
+      create: async ({ data }: any) => ({ id: 'routine-1', ...data }),
+    },
+  };
+  const routineService = new DailyRoutineService(
+    routinePrisma as any,
+    { log: async (entry: any) => { activityLog.push(entry); } } as any,
+    {} as any,
+  );
+  const users = {
+    findOne: async (tenantId: string, tenantUserId: string) => tenantId === actor.tenantId && tenantUserId === actor.tenantUserId
+      ? { role: { name: 'collaborator', rolePermissions: [{ permission: { code: 'daily_routine.manage' } }] } }
+      : null,
+  };
+  const routineTool = new CreateRoutineTool(routineService, users as any);
   const { service, prisma, auditLog, proposalUpdates } = setup({
-    complete: async () => ({ text: 'vou propor a alteração', toolCalls: [{ name: 'demo', arguments: { title: 'Nova tarefa' } }] }),
+    complete: async () => ({ text: 'vou propor a rotina', toolCalls: [{ name: 'create_routine', arguments: { title: 'Nova rotina', scheduledTime: '09:00' } }] }),
   });
   let currentStatus = 'PENDING';
   (prisma as any).aiActionProposal.findFirst = async ({ where }: any) => ({
     id: 'proposal-1', tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId,
-    status: where.status ?? currentStatus, expiresAt: new Date(Date.now() + 60_000), toolName: 'demo', argumentsJson: '{}', conversationId: 'conversation-1',
+    status: where.status ?? currentStatus, expiresAt: new Date(Date.now() + 60_000), toolName: 'create_routine',
+    argumentsJson: JSON.stringify({ title: 'Nova rotina', scheduledTime: '09:00' }), conversationId: 'conversation-1',
   });
   (prisma as any).aiActionProposal.updateMany = async ({ where, data }: any) => {
     proposalUpdates.push({ where, data });
     currentStatus = data.status;
     return { count: 1 };
   };
-  let receivedInput: any;
-  (service as any).registry = new AiToolRegistryService([{
-    name: 'demo', parameters: { type: 'object' },
-    authorize: async () => undefined,
-    execute: async (input: any) => { receivedInput = input; activity.push({ action: 'task.created', actor: input.actorTenantUserId }); return { id: 'task-1' }; },
-  }]);
+  (service as any).registry = new AiToolRegistryService([routineTool]);
 
   const proposed = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'crie uma tarefa', responseMode: AiResponseMode.TEXT });
   const executed = await service.confirmProposal(actor, proposed.proposal.id);
-  assert.deepEqual(receivedInput, { tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: {} });
-  assert.equal(activity[0].actor, actor.tenantUserId);
+  assert.equal(activityLog[0].tenantId, actor.tenantId);
+  assert.equal(activityLog[0].actorTenantUserId, actor.tenantUserId);
+  assert.equal(activityLog[0].action, 'ROUTINE_CREATED');
+  assert.equal(activityLog[0].entityId, 'routine-1');
   assert.equal(executed.status, 'EXECUTED');
   assert.deepEqual(proposalUpdates.map((entry) => entry.data.status), ['CONFIRMED', 'EXECUTED']);
   assert.ok(auditLog.some((entry) => entry.action === 'ai.proposal.executed'));
@@ -325,6 +363,25 @@ test('messages and history include the conversation owner in their tenant predic
     assert.equal(where.conversationId, 'conversation-1');
     assert.deepEqual(where.conversation, { ownerTenantUserId: 'user-a' });
   }
+});
+
+test('message page one loads the newest messages and returns them chronologically', async () => {
+  const { service, prisma } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });
+  let query: any;
+  (prisma as any).aiMessage.findMany = async (args: any) => {
+    query = args;
+    return [
+      { id: 'newest', createdAt: new Date('2026-10-01T12:02:00Z') },
+      { id: 'older', createdAt: new Date('2026-10-01T12:01:00Z') },
+    ];
+  };
+
+  const result = await service.getMessages(actor, 'conversation-1', 1, 20);
+
+  assert.deepEqual(query.orderBy, { createdAt: 'desc' });
+  assert.equal(query.skip, 0);
+  assert.equal(query.take, 20);
+  assert.deepEqual(result.messages.map((message: any) => message.id), ['older', 'newest']);
 });
 
 test('sendMessage creates proposals for every tool call and never executes tools', async () => {
@@ -404,7 +461,13 @@ test('completes with the globally selected runtime model', async () => {
   let receivedInput: any;
   const { service } = setup({ complete: async (input: any) => { receivedInput = input; return { text: 'ok', toolCalls: [] }; } },
     undefined,
-    { getRuntime: async () => ({ connectionStatus: 'connected', provider: 'chatgpt', selectedModel: { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' } }) });
+    { getRuntime: async () => ({
+      primaryProvider: 'chatgpt', failoverProvider: null,
+      providers: {
+        chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' } },
+        ollama: { connectionStatus: 'disconnected', selectedModel: null },
+      },
+    }) });
 
   await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
 
@@ -416,7 +479,13 @@ test('omits the model when the global runtime has no selected model', async () =
   let receivedInput: any;
   const { service } = setup({ complete: async (input: any) => { receivedInput = input; return { text: 'ok', toolCalls: [] }; } },
     undefined,
-    { getRuntime: async () => ({ connectionStatus: 'disconnected', provider: 'chatgpt', selectedModel: null }) });
+    { getRuntime: async () => ({
+      primaryProvider: 'chatgpt', failoverProvider: null,
+      providers: {
+        chatgpt: { connectionStatus: 'disconnected', selectedModel: null },
+        ollama: { connectionStatus: 'disconnected', selectedModel: null },
+      },
+    }) });
 
   await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
 
@@ -520,6 +589,39 @@ test('persists nothing when a normalized tool call has malformed arguments', asy
   assert.deepEqual(persistedRows(), []);
 });
 
+test('drops blank optional tool arguments before validation and execution', async () => {
+  let providerCalls = 0;
+  let receivedArgs: unknown;
+  const { service } = setup({
+    complete: async () => {
+      providerCalls += 1;
+      return providerCalls === 1
+        ? { text: '', toolCalls: [{ id: 'call-1', name: 'read-one', arguments: { projectId: '', projectName: 'Projeto A' } }] }
+        : { text: 'resultado', toolCalls: [] };
+    },
+    buildToolContinuation: (input, _completion, _results) => input,
+  });
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'read-one',
+    readOnly: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { projectId: { type: 'string' }, projectName: { type: 'string' } },
+    },
+    validate: (args: any) => {
+      if (args.projectId === '') throw new BadRequestException('projectId inválido');
+      return args;
+    },
+    authorize: async ({ args }: any) => { receivedArgs = args; },
+    execute: async ({ args }: any) => { receivedArgs = args; return []; },
+  }]);
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'consulte', responseMode: AiResponseMode.TEXT });
+
+  assert.deepEqual(receivedArgs, { projectName: 'Projeto A' });
+});
+
 test('commits every chat write through the transaction client in a single transaction', async () => {
   const { service, prisma, txClients, txWrites, outsideWrites, transactions } = setup({ complete: async () => ({ text: 'Posso criar?', toolCalls: [
     { name: 'first', arguments: { value: 1 } },
@@ -566,4 +668,83 @@ test('restores the pre-write state when a write fails inside the transaction', a
   assert.deepEqual(txWrites, []);
   assert.deepEqual(persistedRows(), [previous]);
   assert.deepEqual(outsideWrites.map((write) => write.content), ['mensagem anterior']);
+});
+
+const executionRuntime = (provider: 'chatgpt' | 'ollama' = 'chatgpt') => ({
+  getRuntime: async () => ({
+    primaryProvider: provider, failoverProvider: null,
+    providers: {
+      chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' } },
+      ollama: { connectionStatus: 'disconnected', selectedModel: { slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' } },
+    },
+  }),
+});
+
+test('replays the whole flow on the failover provider when the primary errors', async () => {
+  const calls: string[] = [];
+  const primary = {
+    complete: async () => { calls.push('primary'); throw new AiProviderError('AI provider request failed', { status: 429, code: 'subscription_sharing_usage_limit_exceeded' }); },
+  };
+  const failover = { complete: async () => { calls.push('failover'); return { text: 'resolvi do fallback', toolCalls: [] }; } };
+  const routing = { resolveExecutions: async () => [
+    { provider: 'chatgpt' as const, providerInstance: primary, model: 'gpt-5', auth: { type: 'oauth' as const, accessToken: 'x' } },
+    { provider: 'ollama' as const, providerInstance: failover, model: 'gpt-oss:20b' },
+  ] };
+  const { service, txWrites, auditLog } = setup({ complete: async () => { throw new Error('must not be used'); } }, undefined, executionRuntime());
+  (service as any).routing = routing;
+
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
+
+  assert.deepEqual(calls, ['primary', 'failover']);
+  assert.equal(result.assistantMessage.content, 'resolvi do fallback');
+  assert.deepEqual(JSON.parse(txWrites[1].providerMetaJson), { toolCallCount: 0 });
+  assert.equal(auditLog.at(-1).metadata.provider, 'ollama');
+  assert.equal(auditLog.filter((entry) => entry.action === 'ai.provider.failed').at(-1).metadata.provider, 'chatgpt');
+  const completed = auditLog.filter((entry) => entry.action === 'ai.message.completed').at(-1);
+  assert.equal(completed.metadata.provider, 'ollama');
+});
+
+test('a business error never triggers failover', async () => {
+  const primary = { complete: async () => ({ text: 'x', toolCalls: [{ name: 'read', arguments: {} }] }) };
+  const failover = { complete: async () => { throw new Error('failover must not run'); } };
+  const routing = { resolveExecutions: async () => [
+    { provider: 'chatgpt' as const, providerInstance: primary, model: 'gpt-5' },
+    { provider: 'ollama' as const, providerInstance: failover, model: 'gpt-oss:20b' },
+  ] };
+  const { service } = setup({ complete: async () => { throw new Error('must not be used'); } }, undefined, executionRuntime());
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'read', readOnly: true, parameters: { type: 'object' },
+    authorize: async () => { throw new ForbiddenException('sem acesso'); },
+    execute: async () => { throw new Error('must not run'); },
+  }]);
+  (service as any).routing = routing;
+
+  await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }), ForbiddenException);
+});
+
+test('raises the last provider error when both providers fail', async () => {
+  const primary = { complete: async () => { throw new AiProviderError('AI provider request failed', { status: 500 }); } };
+  const failover = { complete: async () => { throw new Error('AI provider request failed'); } };
+  const routing = { resolveExecutions: async () => [
+    { provider: 'chatgpt' as const, providerInstance: primary, model: 'gpt-5' },
+    { provider: 'ollama' as const, providerInstance: failover, model: 'gpt-oss:20b' },
+  ] };
+  const { service, txWrites, outsideWrites, persistedRows, transactions } = setup({ complete: async () => { throw new Error('must not be used'); } }, undefined, executionRuntime());
+  (service as any).routing = routing;
+
+  await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }), /AI provider request failed/);
+
+  assert.deepEqual(txWrites, []);
+  assert.deepEqual(outsideWrites, []);
+  assert.deepEqual(persistedRows(), []);
+  assert.deepEqual(transactions, []);
+});
+
+test('sendMessage fails fast with the routing error when no provider is configured', async () => {
+  const { service } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) }, undefined, executionRuntime());
+  (service as any).routing = { resolveExecutions: async () => [] };
+  await assert.rejects(
+    () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT }),
+    ServiceUnavailableException,
+  );
 });
