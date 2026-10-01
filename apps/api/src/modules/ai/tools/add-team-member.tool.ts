@@ -1,13 +1,14 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { TeamsService } from '../../teams/teams.service';
 import { UsersService } from '../../users/users.service';
 import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { clarification, requirePermission, resolveOne, TaskToolInput } from './task-tool.schemas';
 
 const validate = (args: unknown) => {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Argumentos inválidos');
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
   const value = args as Record<string, any>;
-  if (Object.keys(value).some((key) => !['teamId', 'memberTenantUserId', 'memberName'].includes(key))) throw new Error('Campo não suportado');
+  if (Object.keys(value).some((key) => !['teamId', 'memberTenantUserId', 'memberName'].includes(key))) throw new BadRequestException('Campo não suportado');
+  for (const field of ['teamId', 'memberTenantUserId', 'memberName']) if (value[field] !== undefined && (typeof value[field] !== 'string' || !value[field].trim())) throw new BadRequestException(`${field} inválido`);
   return value;
 };
 
@@ -17,8 +18,8 @@ export class AddTeamMemberTool implements AiTool {
   description = 'Adiciona um colaborador a uma equipe autorizada.';
   parameters = { type: 'object', additionalProperties: false, required: ['teamId'], properties: { teamId: { type: 'string' }, memberTenantUserId: { type: 'string' }, memberName: { type: 'string' } } };
   validate = validate;
-  constructor(private readonly teams: TeamsService, private readonly users: UsersService, private readonly teamLookup: TeamsService) {}
+  constructor(private readonly teams: TeamsService, private readonly users: UsersService) {}
   async authorize(input: AiToolInput): Promise<void | AiToolResult> { await requirePermission(this.users, input as TaskToolInput, 'teams.manage_members'); return this.resolve(input); }
   async execute(input: AiToolInput) { const args = validate(input.args); const resolved = await this.resolve(input); if (clarification(resolved)) return resolved; return this.teams.addMember(input.tenantId, args.teamId, resolved.userId, input.actorTenantUserId); }
-  private async resolve(input: AiToolInput) { const args = validate(input.args); if (!args.teamId) return { needsClarification: true as const, field: 'teamId', matches: [] }; if (!args.memberTenantUserId && !args.memberName) return { needsClarification: true as const, field: 'memberTenantUserId', matches: [] }; await this.teamLookup.findOne(input.tenantId, args.teamId); const user = args.memberTenantUserId ? await this.users.findOne(input.tenantId, args.memberTenantUserId) : resolveOne(await this.users.findAll(input.tenantId), args.memberName, 'memberName'); if (clarification(user)) return user; if (!user) throw new ForbiddenException('memberTenantUserId não encontrado no tenant'); return { userId: user.id }; }
+  private async resolve(input: AiToolInput) { const args = validate(input.args); if (!args.teamId) return { needsClarification: true as const, field: 'teamId', matches: [] }; if (!args.memberTenantUserId && !args.memberName) return { needsClarification: true as const, field: 'memberTenantUserId', matches: [] }; if (!await this.teams.findOne(input.tenantId, args.teamId)) throw new ForbiddenException('teamId não encontrado no tenant'); const user = args.memberTenantUserId ? await this.users.findOne(input.tenantId, args.memberTenantUserId) : resolveOne(await this.users.findAll(input.tenantId), args.memberName, 'memberName'); if (clarification(user)) return user; if (!user) throw new ForbiddenException('memberTenantUserId não encontrado no tenant'); return { userId: user.id }; }
 }

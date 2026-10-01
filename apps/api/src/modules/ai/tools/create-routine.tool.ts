@@ -1,16 +1,18 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { DailyRoutineService } from '../../daily-routine/daily-routine.service';
 import { UsersService } from '../../users/users.service';
 import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { clarification, requirePermission, resolveOne, TaskToolInput } from './task-tool.schemas';
 
 const validate = (args: unknown): Record<string, any> => {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Argumentos inválidos');
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
   const value = args as Record<string, any>;
   const unknown = Object.keys(value).find((key) => !['title', 'description', 'scheduledTime', 'assignedTenantUserId', 'assignedUserName'].includes(key));
-  if (unknown) throw new Error(`Campo não suportado: ${unknown}`);
-  if (typeof value.title !== 'string' || !value.title.trim()) throw new Error('title é obrigatório');
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value.scheduledTime ?? '')) throw new Error('scheduledTime inválido');
+  if (unknown) throw new BadRequestException(`Campo não suportado: ${unknown}`);
+  if (typeof value.title !== 'string' || !value.title.trim()) throw new BadRequestException('title é obrigatório');
+  if (value.description !== undefined && typeof value.description !== 'string') throw new BadRequestException('description inválido');
+  if (value.scheduledTime !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.scheduledTime)) throw new BadRequestException('scheduledTime inválido');
+  for (const field of ['assignedTenantUserId', 'assignedUserName']) if (value[field] !== undefined && (typeof value[field] !== 'string' || !value[field].trim())) throw new BadRequestException(`${field} inválido`);
   return value;
 };
 
@@ -18,7 +20,7 @@ const validate = (args: unknown): Record<string, any> => {
 export class CreateRoutineTool implements AiTool {
   name = 'create_routine';
   description = 'Cria uma rotina diária com responsável inequívoco.';
-  parameters = { type: 'object', additionalProperties: false, required: ['title', 'scheduledTime', 'assignedTenantUserId'], properties: { title: { type: 'string' }, description: { type: 'string' }, scheduledTime: { type: 'string' }, assignedTenantUserId: { type: 'string' }, assignedUserName: { type: 'string' } } };
+  parameters = { type: 'object', additionalProperties: false, required: ['title'], properties: { title: { type: 'string' }, description: { type: 'string' }, scheduledTime: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }, assignedTenantUserId: { type: 'string' }, assignedUserName: { type: 'string' } } };
   validate = validate;
 
   constructor(private readonly routines: DailyRoutineService, private readonly users: UsersService) {}
@@ -32,12 +34,16 @@ export class CreateRoutineTool implements AiTool {
     const args = validate(input.args);
     const resolved = await this.resolve(input);
     if (clarification(resolved)) return resolved;
-    return this.routines.create({ ...args, assignedTenantUserId: resolved.userId } as any, { tenantId: input.tenantId, tenantUserId: input.actorTenantUserId, actorTenantUserId: input.actorTenantUserId } as any);
+    const dto = { ...args };
+    delete dto.assignedUserName;
+    if (resolved.userId) dto.assignedTenantUserId = resolved.userId;
+    return this.routines.create(dto as any, { tenantId: input.tenantId, tenantUserId: input.actorTenantUserId, actorTenantUserId: input.actorTenantUserId } as any);
   }
 
   private async resolve(input: AiToolInput) {
     const args = validate(input.args);
-    if (!args.assignedTenantUserId && !args.assignedUserName) return { needsClarification: true as const, field: 'assignedTenantUserId', matches: [] };
+    if (!args.scheduledTime) return { needsClarification: true as const, field: 'scheduledTime', matches: [] };
+    if (!args.assignedTenantUserId && !args.assignedUserName) return {};
     let user = args.assignedTenantUserId ? await this.users.findOne(input.tenantId, args.assignedTenantUserId) : resolveOne(await this.users.findAll(input.tenantId), args.assignedUserName, 'assignedUserName');
     if (clarification(user)) return user;
     if (!user) throw new ForbiddenException('assignedTenantUserId não encontrado no tenant');

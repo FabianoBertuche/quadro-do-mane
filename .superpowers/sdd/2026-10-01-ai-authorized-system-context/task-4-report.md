@@ -79,3 +79,36 @@ All commands completed successfully at the final verification point.
 - `.superpowers/sdd/2026-10-01-ai-authorized-system-context/task-4-report.md`
 
 Unrelated worktree changes were not modified or staged.
+
+## Review follow-up
+
+The follow-up review findings were addressed without changing domain-service execution:
+
+- Calendar validation now checks `allDay`, non-empty attendee ID/name arrays, explicit
+  timezone-bearing dates, chronological ordering, recurrence rule/unit values, positive
+  integer recurrence intervals bounded to 365, and reminder days bounded to 365.
+- Calendar tool metadata now publishes boolean, integer, enum, array-item, and numeric
+  range schemas instead of treating every property as a string.
+- Routine schedule validation accepts omission so authorization can return structured
+  clarification for a missing `scheduledTime`; malformed schedules still fail with a
+  validation error. The assignee is optional, resolves by tenant-scoped ID/name when
+  supplied, and otherwise remains omitted so `DailyRoutineService` applies its existing
+  actor default.
+- Team and project membership tools now inject one domain service each, use it for both
+  target lookup and mutation, and reject missing targets after tenant-scoped lookup.
+- Each action has expanded tests for unauthorized access, malformed arguments,
+  cross-tenant references, invalid targets, clarification, and successful actor-aware
+  delegation.
+
+## Follow-up verification
+
+```text
+node -r ts-node/register --test src/modules/ai/tools/domain-action-tools.spec.ts
+node -r ts-node/register --test src/modules/ai/*.spec.ts src/modules/ai/tools/*.spec.ts
+npm run build
+npx tsc --noEmit
+git diff --check
+```
+
+Results: focused action suite passed 17/17; full AI/module/tool suite passed 186/186;
+build, TypeScript no-emit compilation, and diff checks passed.
