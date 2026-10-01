@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 export type TaskToolInput = { tenantId: string; actorTenantUserId: string; args: any };
-export type Permission = 'tasks.view' | 'tasks.create' | 'tasks.edit' | 'tasks.change_status';
+export type Permission = 'tasks.view' | 'tasks.create' | 'tasks.edit' | 'tasks.change_status' | 'projects.view' | 'users.view' | 'teams.view' | 'calendar.view' | 'daily_routine.view';
 
 const objectArgs = (args: unknown, allowed: string[]) => {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
@@ -71,6 +71,14 @@ export const requirePermission = async (users: any, input: TaskToolInput, permis
     throw new ForbiddenException('Você não tem permissão para usar esta ferramenta');
   }
 };
+
+export const validateReadArgs = (args: unknown, allowed: string[]) => objectArgs(args, allowed);
+
+export const bounded = <T>(items: T[]) => items.slice(0, 50);
+
+export const safeDate = (value: unknown) => value instanceof Date
+  ? value.toISOString()
+  : typeof value === 'string' ? new Date(value).toISOString() : value;
 
 export const actorRoleName = async (users: any, input: TaskToolInput) => {
   const actor = await users.findOne(input.tenantId, input.actorTenantUserId);
