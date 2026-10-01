@@ -4,6 +4,8 @@ This flow lets an authenticated Monte Moria user authorize ChatGPT plan usage
 without exposing an OAuth callback server to the Internet. The browser callback
 is copied back to the application, while access and refresh tokens remain
 encrypted in the API database. API responses expose connection metadata only.
+The connection is intentionally global: one connected ChatGPT account and one
+selected model are used by every authenticated user and tenant.
 
 ## Configuration
 
@@ -31,9 +33,10 @@ OPENAI_API_KEY=<secret-manager-value>
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-Use the fallback only when explicitly enabled. If a user has an active OAuth
-connection, provider resolution uses that user's token; it does not fall back
-to the global key for that request.
+`AI_ENABLED` gates only this API-key fallback. OAuth can be used with
+`AI_ENABLED=false`. Provider resolution always tries the global OAuth
+connection first; the API key is used only when OAuth is disconnected and the
+flag and key are both enabled. There is no per-user OAuth connection.
 
 ## OpenAI client setup
 
@@ -46,9 +49,11 @@ to the global key for that request.
 4. Apply the OAuth migration with the normal deploy flow before enabling the
    UI. The migration stores encrypted token fields and no plaintext tokens.
 
-## User connection flow
+## Global connection flow
 
-1. Sign in to Monte Moria as the target user with the `ai.use` permission.
+1. Sign in to Monte Moria with the `ai.use` permission. During homologation,
+   this permission may start the global connection from chat; the account that
+   completes the flow becomes the account used by all users.
 2. Start the connection from the AI settings page, or call:
    `POST /api/ai/oauth/start`.
 3. Open the returned `authorizationUrl` in the same browser session.
@@ -64,8 +69,8 @@ to the global key for that request.
      --data '{"callbackUrl":"http://127.0.0.1:1455/auth/callback?code=PASTE_CODE&state=PASTE_STATE"}'
    ```
 
-7. Confirm the response contains only `id`, provider, email, scopes, expiry,
-   and status. List connections with `GET /api/ai/oauth/connections`.
+7. Confirm the response contains only redacted connection metadata. List the
+   single global connection with `GET /api/ai/oauth/connections`.
 
 The state, nonce, and PKCE verifier are one-time and expire after ten minutes.
 A callback with the wrong state, redirect URI, client ID, missing code, or a
@@ -80,9 +85,28 @@ connection revoked locally. Local revocation is authoritative if the provider
 is unavailable. Verify the connection list reports `status: "revoked"` and
 that subsequent AI requests do not use its token.
 
-If a user revokes access directly in OpenAI, refresh failures mark the local
-connection revoked. Reconnect through the start flow rather than reusing an old
-callback URL.
+If the account owner revokes access directly in OpenAI, refresh failures mark
+the local global connection revoked. Reconnect through the start flow rather
+than reusing an old callback URL. Until reconnection, users receive a safe
+recoverable configuration error and no partial chat rows are written.
+
+## Model catalog and selection
+
+The API fetches `GET https://api.openai.com/v1/models` with the encrypted
+global OAuth token. It keeps only entries whose `visibility` is `list`,
+preserves OpenAI response order, and exposes only `slug` and `display_name`.
+The redacted catalog is cached in API memory for the active connection and is
+discarded when the connection is connected, refreshed/changed, or
+disconnected. Selecting a model validates the slug against the current
+catalog, stores it globally, and uses it for subsequent Responses requests.
+An unavailable catalog should be retried after reconnecting or refreshing the
+chat page; it never exposes the provider response or token.
+
+The administrator settings provider page is the long-term home for this
+configuration. During migration, chat retains the connect/disconnect and
+model controls, while `GET /api/settings/ai/providers` is administrator-only.
+Future providers are displayed as disabled `Em breve` entries and have no
+connect action.
 
 ## Troubleshooting
 

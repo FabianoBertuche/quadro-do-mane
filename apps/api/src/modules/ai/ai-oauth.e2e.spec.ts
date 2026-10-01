@@ -4,6 +4,12 @@ import test from 'node:test';
 import { AiOAuthController } from './ai-oauth.controller';
 import { AiOAuthService } from './ai-oauth.service';
 import { codeChallenge } from './ai-oauth.protocol';
+import { AiServerRuntimeService } from './ai-server-runtime.service';
+import { AiService } from './ai.service';
+import { AiContextService } from './ai-context.service';
+import { AiAuditService } from './ai-audit.service';
+import { AiToolRegistryService } from './tools/ai-tool-registry.service';
+import { AiProviderError } from './ports/ai-provider.port';
 import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
@@ -201,6 +207,86 @@ test('uses the callback-issued dynamic client ID to complete ChatGPT OAuth and r
     const result = await provider.complete({ messages: [{ role: 'user', content: 'hello' }] }, auth);
     assert.deepEqual(result, { text: 'ok', toolCalls: [] });
     assert.equal(calls.at(-1)?.authorization, 'Bearer oauth-access');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('carries one global OAuth runtime through catalog selection and chat without partial rows', async () => {
+  const connection = { id: 'global-connection', updatedAt: new Date('2030-01-01T00:00:00.000Z') };
+  const runtimeRow: any = {
+    id: 'global', oauthConnectionId: connection.id, selectedModelSlug: null,
+    selectedModelDisplayName: null, oauthConnection: connection,
+  };
+  const messages: any[] = [];
+  const proposals: any[] = [];
+  const prisma: any = {
+    aiServerRuntime: {
+      upsert: async () => runtimeRow,
+      findUnique: async () => runtimeRow,
+      update: async ({ data }: any) => Object.assign(runtimeRow, data),
+    },
+    $queryRawUnsafe: async () => undefined,
+    $transaction: async (callback: (tx: any) => Promise<any>) => callback(prisma),
+    aiConversation: { findFirst: async () => ({ id: 'conversation-1', contextProjectId: null }) },
+    aiMessage: {
+      findMany: async () => [],
+      create: async ({ data }: any) => { const row = { id: `message-${messages.length + 1}`, ...data }; messages.push(row); return row; },
+    },
+    aiActionProposal: {
+      create: async ({ data }: any) => { const row = { id: `proposal-${proposals.length + 1}`, ...data }; proposals.push(row); return row; },
+    },
+  };
+  const oauth = {
+    resolveProviderAuth: async () => ({ type: 'oauth', accessToken: 'global-oauth-token', connectionId: connection.id, connectionUpdatedAt: connection.updatedAt.toISOString() }),
+  };
+  const originalFetch = globalThis.fetch;
+  let responsesRequest: any;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    assert.equal(init?.headers && new Headers(init.headers).get('authorization'), 'Bearer global-oauth-token');
+    if (url === 'https://api.openai.com/v1/models') {
+      return new Response(JSON.stringify({ data: [
+        { slug: 'gpt-hidden', display_name: 'Hidden', visibility: 'hidden' },
+        { slug: 'gpt-5-codex', display_name: 'GPT-5 Codex', visibility: 'list' },
+        { slug: 'gpt-4.1', display_name: 'GPT 4.1', visibility: 'list' },
+      ] }), { status: 200 });
+    }
+    assert.equal(url, 'https://api.openai.com/v1/responses');
+    responsesRequest = JSON.parse(String(init?.body));
+    return new Response('data: {"type":"response.output_text.delta","delta":"ok"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n', {
+      status: 200, headers: { 'content-type': 'text/event-stream' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const runtime = new AiServerRuntimeService(prisma, oauth as any);
+    assert.deepEqual(await runtime.listModels(), [
+      { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' },
+      { slug: 'gpt-4.1', displayName: 'GPT 4.1' },
+    ]);
+    assert.deepEqual(await runtime.selectModel('gpt-5-codex'), {
+      connectionStatus: 'connected', provider: 'chatgpt',
+      selectedModel: { slug: 'gpt-5-codex', displayName: 'GPT-5 Codex' },
+    });
+
+    const provider = new OpenAiResponsesProvider({ get: (key: string) => key === 'AI_ENABLED' ? false : undefined } as any);
+    await provider.complete({ messages: [{ role: 'user', content: 'hello' }], model: runtimeRow.selectedModelSlug }, await oauth.resolveProviderAuth() as any);
+    assert.equal(responsesRequest.model, 'gpt-5-codex');
+    assert.equal(responsesRequest.store, false);
+    assert.equal(responsesRequest.stream, true);
+
+    const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
+    const context = new AiContextService({ project: { findFirst: async () => null }, task: { findMany: async () => [] } } as any);
+    const audit = new AiAuditService({ log: async () => undefined } as any);
+    const failing = new AiService(prisma, { complete: async () => { throw new AiProviderError('provider failed', { status: 500 }); } }, context, new AiToolRegistryService([]), audit);
+    await assert.rejects(() => failing.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'hello', responseMode: 'TEXT' as any }));
+    assert.deepEqual(messages, []);
+    assert.deepEqual(proposals, []);
+
+    const invalidTool = new AiService(prisma, { complete: async () => ({ text: 'bad', toolCalls: [{ name: 'unknown', arguments: {} }] }) }, context, new AiToolRegistryService([]), audit, {}, undefined, undefined, runtime as any);
+    await assert.rejects(() => invalidTool.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'hello', responseMode: 'TEXT' as any }), /Ferramenta não disponível/);
+    assert.deepEqual(messages, []);
+    assert.deepEqual(proposals, []);
   } finally {
     globalThis.fetch = originalFetch;
   }
