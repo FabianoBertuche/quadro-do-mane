@@ -21,6 +21,7 @@ import { UpdateTaskTool } from './tools/update-task.tool';
 import { MoveTaskTool } from './tools/move-task.tool';
 import { CreateCalendarEventTool } from './tools/create-calendar-event.tool';
 import { CreateRoutineTool } from './tools/create-routine.tool';
+import { DeleteRoutineTool } from './tools/delete-routine.tool';
 import { AddTeamMemberTool } from './tools/add-team-member.tool';
 import { AddProjectMemberTool } from './tools/add-project-member.tool';
 import { SearchProjectsTool } from './tools/search-projects.tool';
@@ -62,6 +63,7 @@ import { TasksService } from '../tasks/tasks.service';
     { provide: MoveTaskTool, inject: [TasksService, UsersService, ProjectsService], useFactory: (tasks: TasksService, users: UsersService, projects: ProjectsService) => new MoveTaskTool(tasks, users, projects) },
     CreateCalendarEventTool,
     CreateRoutineTool,
+    DeleteRoutineTool,
     AddTeamMemberTool,
     AddProjectMemberTool,
     { provide: SearchProjectsTool, inject: [ProjectsService, UsersService], useFactory: (projects: ProjectsService, users: UsersService) => new SearchProjectsTool(projects, users) },
@@ -111,7 +113,7 @@ import { TasksService } from '../tasks/tasks.service';
     },
     {
       provide: AiToolRegistryService,
-      inject: [SearchProjectsTool, SearchTasksTool, SearchUsersTool, SearchTeamsTool, SearchCalendarTool, SearchRoutinesTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool, CreateRoutineTool, AddTeamMemberTool, AddProjectMemberTool],
+      inject: [SearchProjectsTool, SearchTasksTool, SearchUsersTool, SearchTeamsTool, SearchCalendarTool, SearchRoutinesTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool, CreateRoutineTool, DeleteRoutineTool, AddTeamMemberTool, AddProjectMemberTool],
       useFactory: (...tools: AiTool[]) => new AiToolRegistryService(tools),
     },
     {

@@ -22,6 +22,7 @@ import { UpdateTaskTool } from './tools/update-task.tool';
 import { MoveTaskTool } from './tools/move-task.tool';
 import { CreateCalendarEventTool } from './tools/create-calendar-event.tool';
 import { CreateRoutineTool } from './tools/create-routine.tool';
+import { DeleteRoutineTool } from './tools/delete-routine.tool';
 import { AddTeamMemberTool } from './tools/add-team-member.tool';
 import { AddProjectMemberTool } from './tools/add-project-member.tool';
 import { TasksService } from '../tasks/tasks.service';
@@ -79,7 +80,7 @@ test('registers every authorized read and action tool with concrete dependencies
   const expected = [
     SearchProjectsTool, SearchTasksTool, SearchUsersTool, SearchTeamsTool, SearchCalendarTool, SearchRoutinesTool,
     CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool,
-    CreateRoutineTool, AddTeamMemberTool, AddProjectMemberTool,
+    CreateRoutineTool, DeleteRoutineTool, AddTeamMemberTool, AddProjectMemberTool,
   ];
   for (const tool of expected) assert.ok(providers.some((entry: any) => entry === tool || entry?.provide === tool), `${tool.name} is not registered`);
 

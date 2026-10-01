@@ -5,6 +5,7 @@ import { AddProjectMemberTool } from './add-project-member.tool';
 import { AddTeamMemberTool } from './add-team-member.tool';
 import { CreateCalendarEventTool } from './create-calendar-event.tool';
 import { CreateRoutineTool } from './create-routine.tool';
+import { DeleteRoutineTool } from './delete-routine.tool';
 
 const tenantId = 'tenant-1';
 const actorId = 'actor-1';
@@ -144,6 +145,27 @@ test('clarifies a routine when its schedule is missing and allows the actor as t
   await tool.authorize(input(args));
   await tool.execute(input(args));
   assert.deepEqual(received, [{ ...args }, { tenantId, tenantUserId: actorId, actorTenantUserId: actorId }]);
+});
+
+test('denies routine deletion without daily_routine.manage', async () => {
+  const tool = new DeleteRoutineTool({} as any, users([]));
+
+  await assert.rejects(() => tool.authorize(input({ routineId: 'routine-1' })), ForbiddenException);
+});
+
+test('rejects routine deletion without a routine ID', () => {
+  const tool = new DeleteRoutineTool({} as any, users());
+  assert.throws(() => tool.validate!({}), BadRequestException);
+});
+
+test('delegates routine deletion with tenant identity preserved', async () => {
+  let received: unknown;
+  const domain = { remove: async (...args: unknown[]) => { received = args; return { id: 'routine-1' }; } };
+  const tool = new DeleteRoutineTool(domain as any, users());
+
+  await tool.authorize(input({ routineId: 'routine-1' }));
+  assert.deepEqual(await tool.execute(input({ routineId: 'routine-1' })), { id: 'routine-1' });
+  assert.deepEqual(received, ['routine-1', tenantId]);
 });
 
 test('rejects malformed routine schedules and ambiguous or cross-tenant assignees', async () => {
