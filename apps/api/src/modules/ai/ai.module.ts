@@ -9,6 +9,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiController } from './ai.controller';
 import { AiServerRuntimeController } from './ai-server-runtime.controller';
 import { AiContextService } from './ai-context.service';
+import { AiIdentityContextService } from './ai-identity.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
 import { UsersModule } from '../users/users.module';
@@ -34,6 +35,7 @@ import OpenAI from 'openai';
   providers: [
     AiService,
     AiContextService,
+    AiIdentityContextService,
     AiAuditService,
     SearchTasksTool,
     CreateTaskTool,

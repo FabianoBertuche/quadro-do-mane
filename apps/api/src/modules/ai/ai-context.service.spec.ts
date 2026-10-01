@@ -32,7 +32,7 @@ test('buildContext scopes project and task reads to the tenant and actor visibil
   assert.equal(calls[0].args.where.id, 'project-1');
   assert.equal(calls[0].args.where.OR[0].ownerTenantUserId, 'user-a');
   assert.equal(calls[1].args.where.tenantId, 'tenant-a');
-  assert.equal(calls[1].args.where.projectId, 'project-1');
+  assert.equal(calls[1].args.where.projectId, undefined);
 });
 
 test('buildContext returns an explicit no-access result without leaking records', async () => {

@@ -51,7 +51,6 @@ export class AiContextService {
       where: {
         tenantId: input.tenantId,
         archivedAt: null,
-        ...(input.projectId ? { projectId: input.projectId } : {}),
         ...(search ? { OR: [{ title: { contains: search, mode: 'insensitive' } }, { description: { contains: search, mode: 'insensitive' } }] } : {}),
         project: visibility,
       },

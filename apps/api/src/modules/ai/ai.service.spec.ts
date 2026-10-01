@@ -126,6 +126,7 @@ function setup(provider: AiProvider, oauth?: any, runtime?: any, options: SetupO
     undefined,
     oauth,
     runtime,
+    { resolve: async () => ({ name: 'Maria', address: 'Maria' }) } as any,
   );
   return {
     service, prisma, created, updated, conversationQueries, messageQueries, proposalQueries, proposalUpdates,
@@ -167,6 +168,21 @@ test('resolves the global provider credential independently of the authenticated
 
   assert.equal(receivedActor, undefined);
   assert.deepEqual(receivedAuth, { type: 'oauth', accessToken: 'global-token' });
+});
+
+test('adds authenticated identity treatment to the system prompt without email or tenant ids', async () => {
+  let receivedInput: any;
+  const { service } = setup({ complete: async (input: any) => {
+    receivedInput = input;
+    return { text: 'ok', toolCalls: [] };
+  } });
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
+
+  const systemMessage = receivedInput.messages.find((message: any) => message.role === 'system');
+  assert.match(systemMessage.content, /Usuário autenticado: Maria/);
+  assert.match(systemMessage.content, /Tratamento: Maria/);
+  assert.doesNotMatch(systemMessage.content, /email|tenant-a|user-a|@/i);
 });
 
 test('conversation reads are owned by the authenticated tenant user', async () => {
