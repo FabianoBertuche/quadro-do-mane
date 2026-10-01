@@ -1,11 +1,11 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { ProjectsService } from '../../projects/projects.service';
-import { bounded, clarification, exact, requirePermission, resolveId, resolveOne, validateReadArgs } from './task-tool.schemas';
+import { bounded, clarification, exact, requirePermission, resolveId, resolveReadOne, validateReadArgs } from './task-tool.schemas';
 
 export class SearchProjectsTool implements AiTool {
   name = 'search_projects';
   description = 'Busca projetos visíveis no tenant e retorna resumos limitados.';
-  parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, name: { type: 'string' }, projectId: { type: 'string' } } };
+  parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, projectId: { type: 'string' } } };
   constructor(private readonly projects: ProjectsService, private readonly users: any) {}
 
   validate = (args: unknown) => validateReadArgs(args, ['search', 'name', 'projectId']);
@@ -18,7 +18,7 @@ export class SearchProjectsTool implements AiTool {
     let selected = rows;
     if (args.projectId) selected = [resolveId(rows, args.projectId, 'projectId')];
     if (args.name) {
-      const match = resolveOne(rows, args.name, 'name');
+      const match = resolveReadOne(rows, args.name, 'name');
       if (clarification(match)) return match;
       selected = [match];
     }

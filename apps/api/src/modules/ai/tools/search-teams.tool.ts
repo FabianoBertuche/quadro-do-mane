@@ -1,11 +1,11 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { TeamsService } from '../../teams/teams.service';
-import { bounded, clarification, exact, requirePermission, resolveId, resolveOne, validateReadArgs } from './task-tool.schemas';
+import { bounded, clarification, exact, requirePermission, resolveId, resolveReadOne, validateReadArgs } from './task-tool.schemas';
 
 export class SearchTeamsTool implements AiTool {
   name = 'search_teams';
   description = 'Busca equipes do tenant com relacionamentos redigidos.';
-  parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, name: { type: 'string' }, teamId: { type: 'string' } } };
+  parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, teamId: { type: 'string' } } };
   constructor(private readonly teams: TeamsService, private readonly users: any) {}
 
   validate = (args: unknown) => validateReadArgs(args, ['search', 'name', 'teamId']);
@@ -14,11 +14,11 @@ export class SearchTeamsTool implements AiTool {
   async execute(input: AiToolInput) {
     await this.authorize(input);
     const args = this.validate(input.args) as any;
-    const rows = await this.teams.findAll(input.tenantId);
+    const rows = await this.teams.findAll(input.tenantId, 50);
     let selected = rows;
     if (args.teamId) selected = [resolveId(rows, args.teamId, 'teamId')];
     if (args.name) {
-      const match = resolveOne(rows, args.name, 'name');
+      const match = resolveReadOne(rows, args.name, 'name');
       if (clarification(match)) return match;
       selected = [match];
     }
@@ -28,7 +28,7 @@ export class SearchTeamsTool implements AiTool {
       name: team.name,
       color: team.color,
       manager: team.manager?.user?.name,
-      members: team.members?.map((member: any) => member.tenantUser?.user?.name).filter(Boolean),
+      members: bounded(team.members ?? []).map((member: any) => member.tenantUser?.user?.name).filter(Boolean),
       memberCount: team._count?.members,
       projectCount: team._count?.projects,
     }));

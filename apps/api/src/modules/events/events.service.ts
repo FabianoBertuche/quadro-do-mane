@@ -35,6 +35,7 @@ export class EventsService {
     startDate?: string,
     endDate?: string,
     requestedTenantUserId?: string,
+    attendeeLimit = 50,
   ) {
     const range = this.parseRange(startDate, endDate);
     const isAdmin = actorRoleName === 'admin';
@@ -60,7 +61,7 @@ export class EventsService {
           ? { startAt: { lt: range.end }, endAt: { gt: range.start } }
           : {}),
       },
-      include: this.includeForList(),
+      include: this.includeForList(attendeeLimit),
       orderBy: { startAt: 'asc' },
     });
   }
@@ -498,11 +499,11 @@ export class EventsService {
     return event;
   }
 
-  private includeForList() {
+  private includeForList(attendeeLimit = 50) {
     return {
       createdBy: { include: { user: { select: { name: true, avatarUrl: true } } } },
       assignee: { include: { user: { select: { id: true, name: true, avatarUrl: true } } } },
-      attendees: { include: { tenantUser: { include: { user: { select: { name: true, avatarUrl: true } } } } } },
+      attendees: { take: attendeeLimit, include: { tenantUser: { include: { user: { select: { name: true, avatarUrl: true } } } } } },
       project: { select: { id: true, name: true } },
       task: { select: { id: true, title: true } },
     };

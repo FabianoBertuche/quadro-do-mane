@@ -72,7 +72,31 @@ export const requirePermission = async (users: any, input: TaskToolInput, permis
   }
 };
 
-export const validateReadArgs = (args: unknown, allowed: string[]) => objectArgs(args, allowed);
+export const validateReadArgs = (
+  args: unknown,
+  allowed: string[],
+  options: { dateRange?: [string, string] } = {},
+) => {
+  const value = objectArgs(args, allowed);
+  for (const field of allowed) {
+    if (value[field] !== undefined && (typeof value[field] !== 'string' || !value[field].trim())) {
+      throw new BadRequestException(`${field} inválido`);
+    }
+  }
+  const range = options.dateRange;
+  if (range) {
+    const [startField, endField] = range;
+    const start = value[startField];
+    const end = value[endField];
+    if ((start === undefined) !== (end === undefined)) {
+      throw new BadRequestException(`${startField} e ${endField} devem ser informados juntos`);
+    }
+    if (start !== undefined && (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)) || new Date(end) <= new Date(start))) {
+      throw new BadRequestException('Período inválido');
+    }
+  }
+  return value;
+};
 
 export const bounded = <T>(items: T[]) => items.slice(0, 50);
 
@@ -96,6 +120,19 @@ export const exact = (value: unknown) => typeof value === 'string' ? value.trim(
 export const resolveOne = (items: any[], name: string, field: string) => {
   const matches = items.filter((item) => exact(item.name ?? item.user?.name) === exact(name));
   if (matches.length > 1) return { needsClarification: true, field, matches: matches.map((item) => item.id) };
+  if (matches.length === 0) throw new ForbiddenException(`${field} não encontrado no tenant`);
+  return matches[0];
+};
+
+export const resolveReadOne = (items: any[], name: string, field: string) => {
+  const matches = items.filter((item) => exact(item.name ?? item.user?.name) === exact(name));
+  if (matches.length > 1) {
+    return {
+      needsClarification: true as const,
+      field,
+      matches: matches.map((item) => ({ id: item.id, name: item.name ?? item.user?.name })),
+    };
+  }
   if (matches.length === 0) throw new ForbiddenException(`${field} não encontrado no tenant`);
   return matches[0];
 };

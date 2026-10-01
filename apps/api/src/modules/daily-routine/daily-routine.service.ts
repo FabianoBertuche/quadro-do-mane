@@ -308,6 +308,17 @@ export class DailyRoutineService {
     }));
   }
 
+  async getRoutinesForUserAuthorized(
+    actor: Pick<RequestUser, 'tenantId' | 'tenantUserId' | 'roleName' | 'permissions'>,
+    requestedTenantUserId: string,
+  ) {
+    const canReadAnotherUser = actor.roleName === 'admin' || actor.permissions.includes('daily_routine.manage');
+    if (requestedTenantUserId !== actor.tenantUserId && !canReadAnotherUser) {
+      throw new ForbiddenException('Você não tem permissão para visualizar a rotina de outro colaborador');
+    }
+    return this.getRoutinesForUser(requestedTenantUserId, actor.tenantId);
+  }
+
   async update(id: string, dto: UpdateRoutineDto, currentUser: RequestUser) {
     const item = await this.prisma.dailyRoutineItem.findUnique({
       where: { id },

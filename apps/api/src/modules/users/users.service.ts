@@ -70,7 +70,7 @@ export class UsersService {
   // Queries
   // ────────────────────────────────────────────────────────────────────────
 
-  async findAll(tenantId: string, status?: TenantUserStatusEnum, activeOnly?: boolean) {
+  async findAll(tenantId: string, status?: TenantUserStatusEnum, activeOnly?: boolean, teamLimit = 50) {
     return this.prisma.tenantUser.findMany({
       where: {
         tenantId,
@@ -93,6 +93,7 @@ export class UsersService {
           select: { id: true, name: true, isSystemRole: true },
         },
         teamMemberships: {
+          take: teamLimit,
           include: {
             team: { select: { id: true, name: true, color: true } },
           },

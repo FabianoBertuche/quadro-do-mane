@@ -219,3 +219,19 @@ test('uma entrega que falha não interrompe as demais rotinas e não ecoa o erro
   assert.ok(logged.includes('routine=routine-1') && logged.includes('Error'), `o erro precisa identificar a rotina que falhou: ${logged}`);
   assert.equal(logged.includes('segredo'), false, 'a mensagem do erro pode conter token e não pode ser logada');
 });
+
+test('read routines permits self and requires manage permission for another tenant user', async () => {
+  const findMany = mock(async () => []);
+  const service = new DailyRoutineService(
+    { dailyRoutineItem: { findMany } } as any,
+    { log: mock(async () => undefined) } as any,
+    { dispatch: mock(async () => undefined) } as any,
+  );
+  const actor = { tenantId: 'tenant-1', tenantUserId: 'actor-1', roleName: 'colaborador', permissions: ['daily_routine.view'] };
+  await assert.rejects(
+    () => service.getRoutinesForUserAuthorized(actor, 'other-user'),
+    /permissão/,
+  );
+  await service.getRoutinesForUserAuthorized(actor, 'actor-1');
+  assert.equal(findMany.mock.calls.length, 1);
+});

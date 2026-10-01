@@ -11,12 +11,12 @@ export class TeamsService {
     private dispatcher: NotificationDispatcherService,
   ) {}
 
-  async findAll(tenantId: string) {
+  async findAll(tenantId: string, memberLimit = 50) {
     return this.prisma.team.findMany({
       where: { tenantId },
       include: {
         manager: { include: { user: { select: { name: true, email: true, avatarUrl: true } } } },
-        members: { include: { tenantUser: { include: { user: { select: { name: true, avatarUrl: true } } } } } },
+        members: { take: memberLimit, include: { tenantUser: { include: { user: { select: { name: true, avatarUrl: true } } } } } },
         _count: { select: { members: true, projects: true } },
       },
       orderBy: { name: 'asc' },

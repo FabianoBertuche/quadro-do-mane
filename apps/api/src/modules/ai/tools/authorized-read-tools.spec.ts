@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { SearchProjectsTool } from './search-projects.tool';
 import { SearchUsersTool } from './search-users.tool';
 import { SearchTeamsTool } from './search-teams.tool';
@@ -20,12 +20,15 @@ const actor = (permissions: string[] = [
 
 const services = () => ({
   users: {
-    findOne: async (_tenant: string, id: string) => id === 'actor-1'
-      ? actor()
-      : { id, user: { name: id === 'user-1' ? 'Maria' : 'Outro', email: `${id}@example.com`, phone: '999' }, role: { name: 'colaborador', rolePermissions: [] } },
-    findAll: async () => [
-      { id: 'user-1', tenantId: 'tenant-1', user: { id: 'global-1', name: 'Maria', email: 'maria@example.com', phone: '999' }, role: { name: 'colaborador' } },
-    ],
+    findOne: async (tenant: string, id: string) => {
+      if (tenant !== 'tenant-1' || !['actor-1', 'user-1'].includes(id)) throw new ForbiddenException('Colaborador não encontrado no tenant');
+      return id === 'actor-1'
+        ? actor()
+        : { id, tenantId: tenant, user: { name: 'Maria', email: 'maria@example.com', phone: '999' }, role: { name: 'colaborador', rolePermissions: [] } };
+    },
+    findAll: async (tenant: string) => tenant === 'tenant-1' ? [
+      { id: 'user-1', tenantId: tenant, user: { id: 'global-1', name: 'Maria', email: 'maria@example.com', phone: '999' }, role: { name: 'colaborador' } },
+    ] : [],
   },
   projects: {
     findAll: async () => [
@@ -39,7 +42,7 @@ const services = () => ({
     findAll: async () => [{ id: 'event-1', tenantId: 'tenant-1', title: 'Reunião', startAt: new Date('2026-10-01T10:00:00Z'), endAt: new Date('2026-10-01T11:00:00Z'), description: 'privado', assignee: { user: { name: 'Maria', email: 'maria@example.com' } }, attendees: [] }],
   },
   routines: {
-    getRoutinesForUser: async () => [{ id: 'routine-1', tenantId: 'tenant-1', title: 'Revisar', description: 'privado', scheduledTime: '09:00', completedToday: false, log: null }],
+    getRoutinesForUserAuthorized: async () => [{ id: 'routine-1', tenantId: 'tenant-1', title: 'Revisar', description: 'privado', scheduledTime: '09:00', completedToday: false, log: null }],
   },
 });
 
@@ -122,7 +125,9 @@ test('cross-tenant target IDs are rejected and ambiguous names return clarificat
   ]) as any;
   const projects = new SearchProjectsTool(s.projects as any, s.users as any);
   assert.deepEqual(await projects.execute(input({ name: 'Projeto' })), {
-    needsClarification: true, field: 'name', matches: ['project-1', 'project-2'],
+    needsClarification: true, field: 'name', matches: [
+      { id: 'project-1', name: 'Projeto' }, { id: 'project-2', name: 'Projeto' },
+    ],
   });
 });
 
@@ -131,7 +136,63 @@ test('calendar and routine reads validate requested users inside the tenant', as
   const calls: unknown[][] = [];
   s.events.findAll = async (...args: any[]) => { calls.push(args); return []; };
   await new SearchCalendarTool(s.events as any, s.users as any).execute(input({ requestedTenantUserId: 'user-1', startDate: '2026-10-01', endDate: '2026-10-02' }));
-  assert.deepEqual(calls[0], ['tenant-1', 'actor-1', 'colaborador', '2026-10-01', '2026-10-02', 'user-1']);
+  assert.deepEqual(calls[0], ['tenant-1', 'actor-1', 'colaborador', '2026-10-01', '2026-10-02', 'user-1', 50]);
   s.users.findOne = async () => { throw new ForbiddenException('Colaborador não encontrado no tenant'); };
   await assert.rejects(() => new SearchRoutinesTool(s.routines as any, s.users as any).execute(input({ requestedTenantUserId: 'other-tenant-user' })), ForbiddenException);
+});
+
+test('routine reads delegate cross-user authorization to the actor-aware domain method', async () => {
+  const s = services();
+  const calls: unknown[][] = [];
+  s.routines.getRoutinesForUserAuthorized = async (...args: any[]) => { calls.push(args); return []; };
+  const tool = new SearchRoutinesTool(s.routines as any, s.users as any);
+  await tool.execute(input({ requestedTenantUserId: 'user-1' }));
+  assert.equal(calls.length, 1);
+  assert.equal((calls[0][0] as any).tenantUserId, 'actor-1');
+  assert.equal((calls[0][0] as any).tenantId, 'tenant-1');
+  assert.equal(calls[0][1], 'user-1');
+});
+
+test('read tools reject malformed values and invalid calendar ranges', async () => {
+  const s = services();
+  const projects = new SearchProjectsTool(s.projects as any, s.users as any);
+  assert.throws(() => projects.validate?.({ search: 42 }), BadRequestException);
+  assert.throws(() => projects.validate?.({ name: ' ' }), BadRequestException);
+  const calendar = new SearchCalendarTool(s.events as any, s.users as any);
+  assert.throws(() => calendar.validate?.({ startDate: 'not-a-date', endDate: '2026-10-02' }), BadRequestException);
+  assert.throws(() => calendar.validate?.({ startDate: '2026-10-03', endDate: '2026-10-02' }), BadRequestException);
+  assert.throws(() => calendar.validate?.({ startDate: '2026-10-01' }), BadRequestException);
+});
+
+test('read tool schemas declare object properties, types, and required arrays', () => {
+  const s = services();
+  const calendar = new SearchCalendarTool(s.events as any, s.users as any);
+  const schema = calendar.parameters as any;
+  assert.equal(schema.type, 'object');
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.required, []);
+  assert.deepEqual(schema.anyOf[1].required, ['startDate', 'endDate']);
+  assert.equal(schema.properties.startDate.type, 'string');
+  assert.equal(schema.properties.endDate.type, 'string');
+  for (const tool of [
+    new SearchProjectsTool(s.projects as any, s.users as any),
+    new SearchUsersTool(s.users as any),
+    new SearchTeamsTool(s.teams as any, s.users as any),
+    new SearchRoutinesTool(s.routines as any, s.users as any),
+  ]) {
+    assert.equal((tool.parameters as any).type, 'object');
+    assert.equal((tool.parameters as any).additionalProperties, false);
+    for (const property of Object.values((tool.parameters as any).properties)) assert.equal((property as any).type, 'string');
+  }
+});
+
+test('nested summaries are bounded and omit relation e-mails', async () => {
+  const s = services();
+  s.teams.findAll = (async () => [{ id: 'team-1', name: 'Equipe', members: Array.from({ length: 51 }, (_, i) => ({ tenantUser: { user: { name: `Pessoa ${i}`, email: `${i}@example.com` } } })) }]) as any;
+  s.events.findAll = (async () => [{ id: 'event-1', title: 'Reunião', startAt: new Date(), endAt: new Date(), attendees: Array.from({ length: 51 }, (_, i) => ({ tenantUser: { user: { name: `Pessoa ${i}`, email: `${i}@example.com` } } })) }]) as any;
+  const teamResult = await new SearchTeamsTool(s.teams as any, s.users as any).execute(input({}));
+  const eventResult = await new SearchCalendarTool(s.events as any, s.users as any).execute(input({}));
+  assert.equal((teamResult as any[])[0].members.length, 50);
+  assert.equal((eventResult as any[])[0].attendees.length, 50);
+  assert.equal(JSON.stringify({ teamResult, eventResult }).includes('email'), false);
 });
