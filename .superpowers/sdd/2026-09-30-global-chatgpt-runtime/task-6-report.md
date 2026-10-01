@@ -7,10 +7,14 @@ Date: 2026-10-01
 Implementation and documentation complete. No live OAuth or OpenAI request
 was made. The integration coverage uses a native HTTP router harness because
 this workspace does not include `@nestjs/testing` or `supertest`; it exercises
-the real controllers, production DTO pipe behavior, auth/permission gates,
-response redaction, global model selection, and settings admin access. The
-chat path uses the real `AiService` with a selected runtime model and a
-rollback-capable transaction mock.
+the real controllers, production DTO pipe behavior, real
+`TenantContextGuard`/`PermissionGuard` behavior and metadata, response
+redaction, global model selection, and settings admin access. Its explicitly
+named `testAuthAdapter` fixture accepts only test credentials; it does not
+validate JWTs, register Passport, or exercise production `AuthGuard('jwt')` and
+the Nest application bootstrap/middleware pipeline. The chat path uses the
+real `AiService` with a selected runtime model and a rollback-capable
+transaction mock.
 
 ## Changes
 
@@ -36,9 +40,10 @@ rollback-capable transaction mock.
 All commands below were run from the stated workspace and no live provider
 credentials were required.
 
-- Focused API integration: `node -r ts-node/register --test src/modules/ai/ai-oauth.e2e.spec.ts` from `apps/api`: **2/2 passed**.
-- Full AI suite: `node -r ts-node/register --test src/modules/ai/*.spec.ts src/modules/ai/providers/*.spec.ts src/modules/ai/tools/*.spec.ts src/modules/ai/media/*.spec.ts` from `apps/api`: **170/170 passed**.
+- Focused API integration: `node -r ts-node/register --test src/modules/ai/ai-oauth.e2e.spec.ts src/modules/ai/ai-runtime.http.e2e.spec.ts` from `apps/api`: **4/4 passed**.
+- Full AI suite: `node -r ts-node/register --test src/modules/ai/*.spec.ts src/modules/ai/providers/*.spec.ts src/modules/ai/tools/*.spec.ts src/modules/ai/media/*.spec.ts` from `apps/api`: **172/172 passed**.
 - API build: `npm run build` from `apps/api`: **passed**.
+- API typecheck: `npx tsc --noEmit` from `apps/api`: **passed**.
 - Web tests: `TS_NODE_COMPILER_OPTIONS='{"module":"CommonJS","jsx":"react-jsx"}' node -r ts-node/register --test src/lib/ai-runtime.spec.ts src/lib/ai-oauth.spec.ts src/components/ai/AiModelCombobox.spec.ts src/lib/ai-chat.test.ts` from `apps/web`: **20/20 passed**.
 - Web typecheck: `npx tsc --noEmit` from `apps/web`, after the Next build generated route types: **passed**.
 - Web build: `npm run build` from `apps/web`: **passed**. Next reported cache snapshot warnings but completed successfully.

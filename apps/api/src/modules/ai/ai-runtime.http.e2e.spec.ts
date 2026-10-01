@@ -4,8 +4,11 @@ import test from 'node:test';
 import 'reflect-metadata';
 import express from 'express';
 import { Type, ValidationPipe } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { AiServerRuntimeController } from './ai-server-runtime.controller';
 import { AiProviderSettingsController } from '../settings/ai-provider-settings.controller';
+import { PermissionGuard } from '../../common/guards/permission.guard';
+import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
 
 const runtimeUser = {
   userId: 'user-1', email: 'person@example.com', tenantId: 'tenant-a', tenantUserId: 'tenant-user-1',
@@ -34,29 +37,66 @@ const pipe = new ValidationPipe({
 function app() {
   const server = express();
   server.use(express.json());
-  server.use((req, res, next) => {
+  const reflector = new Reflector();
+  const permissionGuard = new PermissionGuard(reflector, {
+    rolePermission: { findMany: async () => [] },
+    role: { findFirst: async () => null },
+  } as any);
+  const tenantContextGuard = new TenantContextGuard();
+
+  // This is a deterministic fixture adapter, not a JWT implementation or a
+  // claim that arbitrary bearer strings authenticate in production.
+  function testAuthAdapter(req: express.Request, res: express.Response, next: express.NextFunction) {
     const token = req.header('authorization')?.replace('Bearer ', '');
     if (!token) return res.status(401).json({ statusCode: 401, message: 'Unauthorized' });
-    (req as any).user = token === 'admin' ? adminUser : token === 'limited' ? { ...runtimeUser, permissions: [] } : runtimeUser;
+    const users: Record<string, typeof runtimeUser> = {
+      'test-admin': adminUser,
+      'test-limited': { ...runtimeUser, permissions: [] },
+      'test-user': runtimeUser,
+    };
+    const user = users[token];
+    if (!user) return res.status(401).json({ statusCode: 401, message: 'Unauthorized' });
+    (req as any).user = user;
     next();
-  });
+  }
+  server.use(testAuthAdapter);
   const runtimeController = new AiServerRuntimeController(runtime as any);
   const settingsController = new AiProviderSettingsController(runtime as any);
-  const permission = (name: string) => (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const user = (req as any).user;
-    if (user.roleName !== 'admin' && !user.permissions.includes(name)) return res.status(403).json({ statusCode: 403 });
-    next();
-  };
-  server.get('/api/ai/runtime', permission('ai.use'), async (_req, res, next) => {
+  const guard = (guardInstance: PermissionGuard | TenantContextGuard, handler: Function, controller: Function) =>
+    async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const context = {
+        getHandler: () => handler,
+        getClass: () => controller,
+        switchToHttp: () => ({ getRequest: () => req }),
+      } as any;
+      try {
+        if (await guardInstance.canActivate(context)) next();
+      } catch (error) {
+        next(error);
+      }
+    };
+  const runtimeGuards = [
+    guard(tenantContextGuard, AiServerRuntimeController.prototype.getRuntime, AiServerRuntimeController),
+    guard(permissionGuard, AiServerRuntimeController.prototype.getRuntime, AiServerRuntimeController),
+  ];
+  const selectModelGuards = [
+    guard(tenantContextGuard, AiServerRuntimeController.prototype.selectModel, AiServerRuntimeController),
+    guard(permissionGuard, AiServerRuntimeController.prototype.selectModel, AiServerRuntimeController),
+  ];
+  const settingsGuards = [
+    guard(tenantContextGuard, AiProviderSettingsController.prototype.providers, AiProviderSettingsController),
+    guard(permissionGuard, AiProviderSettingsController.prototype.providers, AiProviderSettingsController),
+  ];
+  server.get('/api/ai/runtime', ...runtimeGuards, async (_req, res, next) => {
     try { res.json(await runtimeController.getRuntime()); } catch (error) { next(error); }
   });
-  server.post('/api/ai/runtime/model', permission('ai.use'), async (req, res, next) => {
+  server.post('/api/ai/runtime/model', ...selectModelGuards, async (req, res, next) => {
     try {
       const dto = await pipe.transform(req.body, { type: 'body', metatype: (Reflect.getMetadata('design:paramtypes', AiServerRuntimeController.prototype, 'selectModel') as unknown[])[1] as Type });
       res.json(await runtimeController.selectModel((req as any).user, dto));
     } catch (error) { next(error); }
   });
-  server.get('/api/settings/ai/providers', permission('settings.edit'), async (_req, res, next) => {
+  server.get('/api/settings/ai/providers', ...settingsGuards, async (_req, res, next) => {
     try { res.json(await settingsController.providers()); } catch (error) { next(error); }
   });
   server.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status ?? 500).json({ statusCode: error.status ?? 500, message: error.message }));
@@ -82,14 +122,14 @@ async function request(server: express.Express, method: string, path: string, op
 test('HTTP runtime routes enforce auth, permission, DTO validation, and response redaction', async () => {
   const server = app();
   assert.equal((await request(server, 'GET', '/api/ai/runtime')).status, 401);
-  assert.equal((await request(server, 'GET', '/api/ai/runtime', { token: 'limited' })).status, 403);
-  assert.equal((await request(server, 'GET', '/api/ai/runtime', { token: 'user' })).status, 200);
-  const selected = await request(server, 'POST', '/api/ai/runtime/model', { token: 'user', body: { slug: 'gpt-5', extra: true } });
+  assert.equal((await request(server, 'GET', '/api/ai/runtime', { token: 'test-limited' })).status, 403);
+  assert.equal((await request(server, 'GET', '/api/ai/runtime', { token: 'test-user' })).status, 200);
+  const selected = await request(server, 'POST', '/api/ai/runtime/model', { token: 'test-user', body: { slug: 'gpt-5', extra: true } });
   assert.equal(selected.status, 400);
-  const selectedResponse = await request(server, 'POST', '/api/ai/runtime/model', { token: 'user', body: { slug: 'gpt-5' } });
+  const selectedResponse = await request(server, 'POST', '/api/ai/runtime/model', { token: 'test-user', body: { slug: 'gpt-5' } });
   assert.equal(selectedResponse.status, 200);
   assert.equal(selectedResponse.body.selectedModel.slug, 'gpt-5');
-  const response = await request(server, 'GET', '/api/ai/runtime', { token: 'user' });
+  const response = await request(server, 'GET', '/api/ai/runtime', { token: 'test-user' });
   assert.deepEqual(response.body, {
     connectionStatus: 'connected', provider: 'chatgpt', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' },
     models: [{ slug: 'gpt-5', displayName: 'GPT-5' }],
@@ -99,8 +139,8 @@ test('HTTP runtime routes enforce auth, permission, DTO validation, and response
 
 test('HTTP settings provider route requires admin permission and returns redacted status', async () => {
   const server = app();
-  assert.equal((await request(server, 'GET', '/api/settings/ai/providers', { token: 'user' })).status, 403);
-  const response = await request(server, 'GET', '/api/settings/ai/providers', { token: 'admin' });
+  assert.equal((await request(server, 'GET', '/api/settings/ai/providers', { token: 'test-user' })).status, 403);
+  const response = await request(server, 'GET', '/api/settings/ai/providers', { token: 'test-admin' });
   assert.equal(response.status, 200);
   assert.equal(response.body.providers[0].connectionStatus, 'connected');
   assert.equal(JSON.stringify(response.body).includes('secret-token'), false);
