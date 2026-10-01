@@ -23,21 +23,50 @@ function modelLine(model: string, field: string): string {
   return line.trim();
 }
 
-function runtimeMigration(): string {
+function migrationBySuffix(suffix: string): string {
   const migrationName = readdirSync(migrationDirectory).find((entry) =>
-    entry.endsWith('_add_ai_server_runtime'),
+    entry.endsWith(suffix),
   );
-  assert.ok(migrationName, 'missing AI server runtime migration');
+  assert.ok(migrationName, `missing migration ending in ${suffix}`);
   return readFileSync(join(migrationDirectory, migrationName, 'migration.sql'), 'utf8');
 }
 
-test('defines one global AI runtime with optional OAuth connection and selected model metadata', () => {
+function runtimeMigration(): string {
+  return migrationBySuffix('_add_ai_server_runtime');
+}
+
+function providerConfigMigration(): string {
+  return migrationBySuffix('_ai_provider_config');
+}
+
+test('defines one global AI runtime with optional OAuth connection', () => {
   const runtime = modelBlock('AiServerRuntime');
 
   assert.equal(modelLine(runtime, 'id'), 'id                       String   @id @default("global")');
   assert.equal(modelLine(runtime, 'oauthConnectionId'), 'oauthConnectionId        String?  @unique @map("oauth_connection_id")');
-  assert.equal(modelLine(runtime, 'selectedModelSlug'), 'selectedModelSlug        String?  @map("selected_model_slug")');
-  assert.equal(modelLine(runtime, 'selectedModelDisplayName'), 'selectedModelDisplayName String?  @map("selected_model_display_name")');
+  assert.match(modelLine(runtime, 'createdAt'), /DateTime.*@default\(now\(\)\).*created_at/);
+  assert.match(modelLine(runtime, 'updatedAt'), /DateTime.*@updatedAt.*updated_at/);
+  assert.match(
+    runtime,
+    /oauthConnection\s+AiOAuthConnection\?\s+@relation\(fields: \[oauthConnectionId\], references: \[id\], onDelete: SetNull\)/,
+  );
+  assert.match(runtime, /@@map\("ai_server_runtime"\)/);
+});
+
+test('defines one global AI runtime with provider config and per-provider model metadata', () => {
+  const runtime = modelBlock('AiServerRuntime');
+
+  assert.equal(modelLine(runtime, 'id'), 'id                       String   @id @default("global")');
+  assert.equal(modelLine(runtime, 'oauthConnectionId'), 'oauthConnectionId        String?  @unique @map("oauth_connection_id")');
+  assert.equal(modelLine(runtime, 'primaryProvider'), 'primaryProvider          String   @default("chatgpt") @map("primary_provider")');
+  assert.equal(modelLine(runtime, 'failoverProvider'), 'failoverProvider         String?  @map("failover_provider")');
+  assert.equal(modelLine(runtime, 'chatgptModelSlug'), 'chatgptModelSlug         String?  @map("chatgpt_model_slug")');
+  assert.equal(modelLine(runtime, 'chatgptModelDisplayName'), 'chatgptModelDisplayName  String?  @map("chatgpt_model_display_name")');
+  assert.equal(modelLine(runtime, 'ollamaModelSlug'), 'ollamaModelSlug          String?  @map("ollama_model_slug")');
+  assert.equal(modelLine(runtime, 'ollamaModelDisplayName'), 'ollamaModelDisplayName   String?  @map("ollama_model_display_name")');
+  assert.equal(modelLine(runtime, 'ollamaApiKeyCiphertext'), 'ollamaApiKeyCiphertext   String?  @map("ollama_api_key_ciphertext")');
+  assert.equal(modelLine(runtime, 'ollamaApiKeyIv'), 'ollamaApiKeyIv           String?  @map("ollama_api_key_iv")');
+  assert.equal(modelLine(runtime, 'ollamaApiKeyAuthTag'), 'ollamaApiKeyAuthTag      String?  @map("ollama_api_key_auth_tag")');
   assert.match(modelLine(runtime, 'createdAt'), /DateTime.*@default\(now\(\)\).*created_at/);
   assert.match(modelLine(runtime, 'updatedAt'), /DateTime.*@updatedAt.*updated_at/);
   assert.match(
@@ -104,4 +133,16 @@ test('migration enforces singleton runtime and preserves disconnected legacy own
     /CONSTRAINT "ai_oauth_connections_ownership_pair_check"\s+CHECK \(\("tenant_id" IS NULL\) = \("tenant_user_id" IS NULL\)\)/,
   );
   assert.doesNotMatch(migration, /INSERT INTO "ai_server_runtime"[\s\S]*SELECT/);
+});
+
+test('migration copies legacy selected model into the chatgpt columns and drops the old ones', () => {
+  const migration = providerConfigMigration();
+  assert.match(migration, /ADD COLUMN "primary_provider" TEXT NOT NULL DEFAULT 'chatgpt'/);
+  assert.match(migration, /ADD COLUMN "failover_provider" TEXT/);
+  assert.match(migration, /ADD COLUMN "chatgpt_model_slug" TEXT/);
+  assert.match(migration, /ADD COLUMN "ollama_api_key_ciphertext" TEXT/);
+  assert.match(migration, /UPDATE "ai_server_runtime" SET "chatgpt_model_slug" = "selected_model_slug"/);
+  assert.match(migration, /DROP COLUMN "selected_model_slug"/);
+  assert.match(migration, /DROP COLUMN "selected_model_display_name"/);
+  assert.doesNotMatch(migration, /CREATE TABLE "ai_server_runtime"/);
 });
