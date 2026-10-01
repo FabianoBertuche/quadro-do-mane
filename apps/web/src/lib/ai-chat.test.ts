@@ -4,12 +4,23 @@ import { api } from './api';
 import {
   cancelAction,
   confirmAction,
+  createOptimisticAiMessage,
   createConversation,
   getClarificationDetails,
   listConversations,
   listMessages,
   sendTextMessage,
 } from './ai-chat';
+
+test('creates an immediate optimistic user message with sending state', () => {
+  assert.deepEqual(createOptimisticAiMessage(' Organizar tarefas ', 'optimistic-1'), {
+    id: 'optimistic-1',
+    role: 'user',
+    content: 'Organizar tarefas',
+    format: 'TEXT',
+    localStatus: 'sending',
+  });
+});
 
 test('lists global conversations through the authenticated API', async () => {
   const originalGet = api.get;
@@ -128,11 +139,21 @@ test('maps structured clarification details instead of dropping them', () => {
   assert.deepEqual(
     getClarificationDetails(JSON.stringify({
       status: 'needsClarification',
-      result: { needsClarification: true, field: 'projectName', matches: ['Projeto Alpha', 'Projeto Alfa'] },
+       result: {
+         needsClarification: true,
+         field: 'projectName',
+         matches: [
+           { id: 'project-1', name: 'Projeto Alpha' },
+           { id: 'project-2', name: 'Projeto Alfa' },
+         ],
+       },
     })),
     {
       field: 'projectName',
-      options: ['Projeto Alpha', 'Projeto Alfa'],
+       options: [
+         { id: 'project-1', name: 'Projeto Alpha' },
+         { id: 'project-2', name: 'Projeto Alfa' },
+       ],
       message: 'Escolha um valor para projectName.',
     },
   );
@@ -144,6 +165,12 @@ test('maps clarification messages and ambiguous names when the field is absent',
       status: 'needsClarification',
       result: { options: ['Ana', 'Anabela'], message: 'Qual pessoa você quis dizer?' },
     })),
-    { options: ['Ana', 'Anabela'], message: 'Qual pessoa você quis dizer?' },
+     {
+       options: [
+         { id: 'Ana', name: 'Ana' },
+         { id: 'Anabela', name: 'Anabela' },
+       ],
+       message: 'Qual pessoa você quis dizer?',
+     },
   );
 });

@@ -6,6 +6,7 @@ import { AiIdentityContextService } from './ai-identity.service';
 import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
 import { AiTool } from './tools/ai-tool.port';
+import type { AiToolClarification } from './tools/ai-tool.port';
 import { AiResponseMode, SendAiMessageDto } from './dto/send-ai-message.dto';
 import type { AiRateLimiter } from './ai-rate-limit.service';
 import type { AiOAuthService } from './ai-oauth.service';
@@ -127,7 +128,7 @@ export class AiService {
       this.validateToolArgs(tool, toolCall.arguments);
       return { tool, args: toolCall.arguments };
     });
-    const clarifiedTools: Array<{ tool: AiTool; args: unknown; result: Record<string, unknown> }> = [];
+    const clarifiedTools: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
     for (const { tool, args } of tools) {
       const result = await tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
       if (this.isClarification(result)) clarifiedTools.push({ tool, args, result });
@@ -260,7 +261,7 @@ export class AiService {
     else if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
   }
 
-  private isClarification(value: unknown): value is { needsClarification: true } {
+  private isClarification(value: unknown): value is AiToolClarification {
     return !!value && typeof value === 'object' && (value as any).needsClarification === true;
   }
 

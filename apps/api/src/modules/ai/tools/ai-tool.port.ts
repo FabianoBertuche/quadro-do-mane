@@ -15,7 +15,7 @@ export interface AiToolClarification {
   matches: AiToolClarificationMatch[];
 }
 
-export type AiToolResult = unknown | AiToolClarification;
+export type AiToolResult = AiToolClarification | Record<string, unknown> | unknown[] | null | undefined | void;
 
 export interface AiTool {
   name: string;

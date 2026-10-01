@@ -15,8 +15,19 @@ export interface AiMessage {
   role: AiMessageRole;
   content: string | null;
   format?: string;
+  localStatus?: 'sending' | 'failed';
   createdAt?: string;
   [key: string]: unknown;
+}
+
+export function createOptimisticAiMessage(content: string, id: string): AiMessage {
+  return {
+    id,
+    role: 'user',
+    content: content.trim(),
+    format: 'TEXT',
+    localStatus: 'sending',
+  };
 }
 
 export interface AiActionProposal {
@@ -45,9 +56,14 @@ export type AiActionResult = AiActionProposal & {
   resultJson?: string;
 };
 
+export interface AiClarificationOption {
+  id: string;
+  name: string;
+}
+
 export interface AiClarificationDetails {
   field?: string;
-  options: string[];
+  options: AiClarificationOption[];
   message: string;
 }
 
@@ -68,6 +84,12 @@ function isMessageRole(value: unknown): value is AiMessageRole {
 
 function isProposalStatus(value: unknown): value is AiProposalStatus {
   return value === 'PENDING' || value === 'CONFIRMED' || value === 'CANCELLED' || value === 'EXECUTED' || value === 'FAILED';
+}
+
+function parseClarificationOption(value: unknown): AiClarificationOption | null {
+  if (typeof value === 'string') return { id: value, name: value };
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
+  return { id: value.id, name: value.name };
 }
 
 function parseConversation(value: unknown): AiConversation {
@@ -116,7 +138,7 @@ export function getClarificationDetails(content: string): AiClarificationDetails
     const result = parsed.result;
     const field = typeof result.field === 'string' ? result.field : undefined;
     const rawOptions = Array.isArray(result.matches) ? result.matches : Array.isArray(result.options) ? result.options : [];
-    const options = rawOptions.filter((option): option is string => typeof option === 'string');
+    const options = rawOptions.map(parseClarificationOption).filter((option): option is AiClarificationOption => option !== null);
     const message = typeof result.message === 'string'
       ? result.message
       : field
