@@ -37,7 +37,7 @@ test('lists the ChatGPT provider with live global connection status and no crede
       primaryProvider: 'chatgpt', failoverProvider: null,
       providers: {
         chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' }, accessToken: 'secret-token', oauthConnectionId: 'connection-1' },
-        ollama: { connectionStatus: 'disconnected', selectedModel: null },
+        ollama: { connectionStatus: 'disconnected', selectedModel: null, apiKey: 'sk-secret' },
       },
     }),
   } as any);
@@ -50,6 +50,7 @@ test('lists the ChatGPT provider with live global connection status and no crede
   assert.equal(result.providers.length, 1 + COMING_SOON_AI_PROVIDERS.length);
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes('secret-token'), false);
+  assert.equal(serialized.includes('sk-secret'), false);
   assert.equal(serialized.includes('accessToken'), false);
   assert.equal(serialized.includes('oauthConnection'), false);
 });
@@ -86,4 +87,25 @@ test('future providers are fixed coming_soon descriptors with no connect action'
   const ids = COMING_SOON_AI_PROVIDERS.map((provider) => provider.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.equal(ids.includes('chatgpt' as never), false);
+});
+
+test('Ollama key save/remove routes live on the settings controller under settings.edit', async () => {
+  const calls: any[] = [];
+  const controller = new AiProviderSettingsController({
+    saveOllamaKey: async (apiKey: string, actor: any) => calls.push(['save', apiKey, actor]),
+    removeOllamaKey: async (actor: any) => calls.push(['remove', actor]),
+  } as any);
+  const user = { userId: 'user-1', tenantId: 'tenant-a', tenantUserId: 'tenant-user-1' };
+  assert.equal(Reflect.getMetadata(PATH_METADATA, AiProviderSettingsController.prototype.saveOllamaKey), 'ollama/key');
+  assert.equal(Reflect.getMetadata(METHOD_METADATA, AiProviderSettingsController.prototype.saveOllamaKey), RequestMethod.PUT);
+  assert.equal(Reflect.getMetadata(PATH_METADATA, AiProviderSettingsController.prototype.removeOllamaKey), 'ollama/key');
+  assert.equal(Reflect.getMetadata(METHOD_METADATA, AiProviderSettingsController.prototype.removeOllamaKey), RequestMethod.DELETE);
+  assert.deepEqual(Reflect.getMetadata(PERMISSIONS_KEY, AiProviderSettingsController), ['settings.edit']);
+  await controller.saveOllamaKey(user as any, { apiKey: 'sk-secret' });
+  await controller.removeOllamaKey(user as any);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], 'save');
+  assert.equal(calls[0][1], 'sk-secret');
+  assert.deepEqual(calls[0][2], { tenantId: 'tenant-a', tenantUserId: 'tenant-user-1', userId: 'user-1' });
+  assert.equal(calls[1][0], 'remove');
 });

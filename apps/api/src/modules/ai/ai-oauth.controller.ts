@@ -19,7 +19,7 @@ interface OAuthConnectionMetadata {
 }
 
 @UseGuards(AuthGuard('jwt'), TenantContextGuard, PermissionGuard)
-@RequirePermissions('ai.use')
+@RequirePermissions('settings.edit')
 @Controller('ai/oauth')
 export class AiOAuthController {
   constructor(

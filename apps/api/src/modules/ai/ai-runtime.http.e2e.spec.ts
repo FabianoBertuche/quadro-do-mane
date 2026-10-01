@@ -14,16 +14,38 @@ const runtimeUser = {
   userId: 'user-1', email: 'person@example.com', tenantId: 'tenant-a', tenantUserId: 'tenant-user-1',
   roleId: 'role-1', roleName: 'collaborator', permissions: ['ai.use'],
 };
-const adminUser = { ...runtimeUser, roleName: 'admin', permissions: [] };
+const adminUser = { ...runtimeUser, roleName: 'admin', permissions: ['settings.edit'] };
 const runtime = {
   getRuntime: async () => ({
-    connectionStatus: 'connected', provider: 'chatgpt',
-    selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' },
-    oauthConnectionId: 'secret-connection', accessToken: 'secret-token',
+    primaryProvider: 'chatgpt', failoverProvider: 'ollama',
+    providers: {
+      chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' }, oauthConnectionId: 'secret-connection', accessToken: 'secret-token' },
+      ollama: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' }, apiKey: 'sk-secret' },
+    },
   }),
-  listModels: async () => [{ slug: 'gpt-5', displayName: 'GPT-5' }],
-  selectModel: async (slug: string) => ({
-    connectionStatus: 'connected', provider: 'chatgpt', selectedModel: { slug, displayName: 'GPT-5' },
+  listModels: async (provider: string) => provider === 'ollama'
+    ? [{ slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' }]
+    : [{ slug: 'gpt-5', displayName: 'GPT-5' }],
+  selectModel: async (provider: string, slug: string) => ({
+    primaryProvider: 'chatgpt', failoverProvider: 'ollama',
+    providers: {
+      chatgpt: { connectionStatus: 'connected', selectedModel: { slug: provider === 'ollama' ? 'gpt-5' : slug, displayName: 'GPT-5' } },
+      ollama: { connectionStatus: 'connected', selectedModel: { slug: provider === 'ollama' ? slug : 'gpt-oss:20b', displayName: 'GPT-OSS 20B' } },
+    },
+  }),
+  setPrimaryProvider: async (provider: string) => ({
+    primaryProvider: provider, failoverProvider: 'ollama',
+    providers: {
+      chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' } },
+      ollama: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' } },
+    },
+  }),
+  setFailoverProvider: async (provider: string | null) => ({
+    primaryProvider: 'chatgpt', failoverProvider: provider,
+    providers: {
+      chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' } },
+      ollama: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' } },
+    },
   }),
 };
 
@@ -119,22 +141,37 @@ async function request(server: express.Express, method: string, path: string, op
   }
 }
 
-test('HTTP runtime routes enforce auth, permission, DTO validation, and response redaction', async () => {
+test('HTTP runtime routes now require the admin settings permission and redact the nested per-provider view', async () => {
   const server = app();
   assert.equal((await request(server, 'GET', '/api/ai/runtime')).status, 401);
   assert.equal((await request(server, 'GET', '/api/ai/runtime', { token: 'test-limited' })).status, 403);
-  assert.equal((await request(server, 'GET', '/api/ai/runtime', { token: 'test-user' })).status, 200);
-  const selected = await request(server, 'POST', '/api/ai/runtime/model', { token: 'test-user', body: { slug: 'gpt-5', extra: true } });
-  assert.equal(selected.status, 400);
-  const selectedResponse = await request(server, 'POST', '/api/ai/runtime/model', { token: 'test-user', body: { slug: 'gpt-5' } });
-  assert.equal(selectedResponse.status, 200);
-  assert.equal(selectedResponse.body.selectedModel.slug, 'gpt-5');
-  const response = await request(server, 'GET', '/api/ai/runtime', { token: 'test-user' });
-  assert.deepEqual(response.body, {
-    connectionStatus: 'connected', provider: 'chatgpt', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' },
-    models: [{ slug: 'gpt-5', displayName: 'GPT-5' }],
+  assert.equal((await request(server, 'GET', '/api/ai/runtime', { token: 'test-user' })).status, 403);
+  const adminResponse = await request(server, 'GET', '/api/ai/runtime', { token: 'test-admin' });
+  assert.equal(adminResponse.status, 200);
+  assert.deepEqual(adminResponse.body, {
+    primaryProvider: 'chatgpt', failoverProvider: 'ollama',
+    providers: {
+      chatgpt: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-5', displayName: 'GPT-5' }, models: [{ slug: 'gpt-5', displayName: 'GPT-5' }] },
+      ollama: { connectionStatus: 'connected', selectedModel: { slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' }, models: [{ slug: 'gpt-oss:20b', displayName: 'GPT-OSS 20B' }] },
+    },
   });
-  assert.equal(JSON.stringify(response.body).includes('secret-token'), false);
+  const serialized = JSON.stringify(adminResponse.body);
+  assert.equal(serialized.includes('secret-token'), false);
+  assert.equal(serialized.includes('secret-connection'), false);
+  assert.equal(serialized.includes('sk-secret'), false);
+  assert.equal(serialized.includes('accessToken'), false);
+});
+
+test('model selection is provider-aware and validates the body before the service runs', async () => {
+  const server = app();
+  const invalid = await request(server, 'POST', '/api/ai/runtime/model', { token: 'test-admin', body: { provider: 'chatgpt', slug: 'gpt-5', extra: true } });
+  assert.equal(invalid.status, 400);
+  const selected = await request(server, 'POST', '/api/ai/runtime/model', { token: 'test-admin', body: { provider: 'chatgpt', slug: 'gpt-5' } });
+  assert.equal(selected.status, 200);
+  assert.equal(selected.body.providers.chatgpt.selectedModel.slug, 'gpt-5');
+  const ollama = await request(server, 'POST', '/api/ai/runtime/model', { token: 'test-admin', body: { provider: 'ollama', slug: 'gpt-oss:20b' } });
+  assert.equal(ollama.status, 200);
+  assert.equal(ollama.body.providers.ollama.selectedModel.slug, 'gpt-oss:20b');
 });
 
 test('HTTP settings provider route requires admin permission and returns redacted status', async () => {

@@ -3,7 +3,8 @@ import test from 'node:test';
 import 'reflect-metadata';
 import { SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
 import { AiModule } from './ai.module';
-import { AiService, AI_OAUTH_SERVICE, AI_PROVIDER, AI_SERVER_RUNTIME } from './ai.service';
+import { AiService, AI_OAUTH_SERVICE, AI_PROVIDER, AI_PROVIDER_ROUTING, AI_SERVER_RUNTIME } from './ai.service';
+import { AiProviderRoutingService, AI_OLLAMA_PROVIDER_FACTORY } from './ai-provider-routing.service';
 import { AiIdentityContextService } from './ai-identity.service';
 import { AiOAuthService } from './ai-oauth.service';
 import { AiServerRuntimeService } from './ai-server-runtime.service';
@@ -23,6 +24,9 @@ import { CreateCalendarEventTool } from './tools/create-calendar-event.tool';
 import { CreateRoutineTool } from './tools/create-routine.tool';
 import { AddTeamMemberTool } from './tools/add-team-member.tool';
 import { AddProjectMemberTool } from './tools/add-project-member.tool';
+import { TasksService } from '../tasks/tasks.service';
+import { ProjectsService } from '../projects/projects.service';
+import { UsersService } from '../users/users.service';
 
 const config = (values: Record<string, unknown>) => ({ get: (key: string, fallback?: unknown) => values[key] ?? fallback }) as any;
 
@@ -83,6 +87,28 @@ test('registers every authorized read and action tool with concrete dependencies
   assert.deepEqual(registryProvider.inject, expected);
 });
 
+test('constructs task tools with explicit domain service dependencies', () => {
+  const providers = Reflect.getMetadata('providers', AiModule) ?? [];
+  const expected = new Map<any, any[]>([
+    [SearchTasksTool, [TasksService, UsersService, ProjectsService]],
+    [CreateTaskTool, [TasksService, ProjectsService, UsersService]],
+    [UpdateTaskTool, [TasksService, UsersService, ProjectsService]],
+    [MoveTaskTool, [TasksService, UsersService, ProjectsService]],
+  ]);
+
+  for (const [Tool, dependencies] of expected) {
+    const provider = providers.find((entry: any) => entry?.provide === Tool);
+    assert.ok(provider, `${Tool.name} must use an explicit factory provider`);
+    assert.deepEqual(provider.inject, dependencies);
+    const instances = dependencies.map((Dependency) => ({ dependency: Dependency.name }));
+    const tool = provider.useFactory(...instances);
+    assert.deepEqual([
+      (tool as any).tasks,
+      ...(Tool === CreateTaskTool ? [(tool as any).projects, (tool as any).users] : [(tool as any).users, (tool as any).projects]),
+    ], instances);
+  }
+});
+
 test('publishes strict schemas that reject unknown tool arguments', () => {
   const providers = Reflect.getMetadata('providers', AiModule) ?? [];
   const registryProvider = providers.find((entry: any) => entry?.provide === AiToolRegistryService);
@@ -91,4 +117,23 @@ test('publishes strict schemas that reject unknown tool arguments', () => {
 
   assert.ok(tools instanceof AiToolRegistryService);
   for (const tool of tools.list()) assert.throws(() => tool.validate?.({ unexpected: true }), /Campo não suportado|Argumentos inválidos/);
+});
+
+test('registers the provider routing service and the Ollama factory token', () => {
+  const providers = Reflect.getMetadata('providers', AiModule) ?? [];
+  assert.ok(providers.includes(AiProviderRoutingService));
+  assert.deepEqual(
+    (providers.find((entry: any) => entry?.provide === AI_PROVIDER_ROUTING) ?? {}).useExisting,
+    AiProviderRoutingService,
+  );
+  const ollamaFactory = providers.find((entry: any) => entry?.provide === AI_OLLAMA_PROVIDER_FACTORY);
+  assert.ok(ollamaFactory, 'missing Ollama provider factory');
+  const instance = ollamaFactory.useFactory();
+  assert.equal(typeof instance, 'function');
+});
+
+test('AiService declares the routing token behind the optional deps', () => {
+  const dependencies = Reflect.getMetadata(SELF_DECLARED_DEPS_METADATA, AiService) ?? [];
+  const routingDependency = dependencies.find((dependency: any) => dependency.index === 10);
+  assert.equal(routingDependency.param, AI_PROVIDER_ROUTING);
 });

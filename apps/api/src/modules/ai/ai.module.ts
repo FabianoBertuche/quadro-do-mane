@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { ProjectsModule } from '../projects/projects.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
-import { AI_OAUTH_SERVICE, AI_PROVIDER, AI_RATE_LIMITER, AI_SERVER_RUNTIME, AiService, DEFAULT_AI_SECURITY_LIMITS } from './ai.service';
+import { AI_OAUTH_SERVICE, AI_PROVIDER, AI_PROVIDER_ROUTING, AI_RATE_LIMITER, AI_SERVER_RUNTIME, AiService, DEFAULT_AI_SECURITY_LIMITS } from './ai.service';
+import { AiProviderRoutingService, AI_OLLAMA_PROVIDER_FACTORY, defaultOllamaProviderFactory } from './ai-provider-routing.service';
 import { AiRateLimitService } from './ai-rate-limit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AiController } from './ai.controller';
@@ -45,6 +46,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { TeamsService } from '../teams/teams.service';
 import { EventsService } from '../events/events.service';
 import { DailyRoutineService } from '../daily-routine/daily-routine.service';
+import { TasksService } from '../tasks/tasks.service';
 
 @Module({
   imports: [ProjectsModule, TasksModule, UsersModule, EventsModule, DailyRoutineModule, TeamsModule],
@@ -54,10 +56,10 @@ import { DailyRoutineService } from '../daily-routine/daily-routine.service';
     AiContextService,
     AiIdentityContextService,
     AiAuditService,
-    SearchTasksTool,
-    CreateTaskTool,
-    UpdateTaskTool,
-    MoveTaskTool,
+    { provide: SearchTasksTool, inject: [TasksService, UsersService, ProjectsService], useFactory: (tasks: TasksService, users: UsersService, projects: ProjectsService) => new SearchTasksTool(tasks, users, projects) },
+    { provide: CreateTaskTool, inject: [TasksService, ProjectsService, UsersService], useFactory: (tasks: TasksService, projects: ProjectsService, users: UsersService) => new CreateTaskTool(tasks, projects, users) },
+    { provide: UpdateTaskTool, inject: [TasksService, UsersService, ProjectsService], useFactory: (tasks: TasksService, users: UsersService, projects: ProjectsService) => new UpdateTaskTool(tasks, users, projects) },
+    { provide: MoveTaskTool, inject: [TasksService, UsersService, ProjectsService], useFactory: (tasks: TasksService, users: UsersService, projects: ProjectsService) => new MoveTaskTool(tasks, users, projects) },
     CreateCalendarEventTool,
     CreateRoutineTool,
     AddTeamMemberTool,
@@ -117,6 +119,12 @@ import { DailyRoutineService } from '../daily-routine/daily-routine.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => new OpenAiResponsesProvider(config),
     },
+    {
+      provide: AI_OLLAMA_PROVIDER_FACTORY,
+      useFactory: () => defaultOllamaProviderFactory,
+    },
+    AiProviderRoutingService,
+    { provide: AI_PROVIDER_ROUTING, useExisting: AiProviderRoutingService },
   ],
   // `AiServerRuntimeService` é exportado para o painel administrativo ler o
   // estado global sem duplicar a resolução de conexão/credencial.

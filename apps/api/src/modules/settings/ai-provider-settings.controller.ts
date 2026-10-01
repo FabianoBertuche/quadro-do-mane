@@ -1,9 +1,12 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Put, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
+import { RequestUser } from '../../common/interfaces/request-context.interface';
 import { AiServerRuntimeService } from '../ai/ai-server-runtime.service';
+import { UpdateOllamaApiKeyDto } from '../ai/dto/update-ollama-api-key.dto';
 
 export interface AiProviderDescriptor {
   id: string;
@@ -33,7 +36,7 @@ export const COMING_SOON_AI_PROVIDERS: readonly ComingSoonAiProvider[] = Object.
 ]);
 
 /**
- * Status dos provedores de IA para a área administrativa.
+ * Configuração dos provedores de IA para a área administrativa.
  *
  * Por que `settings.edit` e não `ai.use`: este é o painel da empresa, separado
  * do uso do assistente no chat. `settings.edit` é concedida apenas ao admin no
@@ -41,9 +44,10 @@ export const COMING_SOON_AI_PROVIDERS: readonly ComingSoonAiProvider[] = Object.
  * `roleName === 'admin'`, então a porta é de administrador sem inventar um guard
  * novo.
  *
- * Por que o ChatGPT aparece sem `connectable`: a conexão é global e o fluxo de
- * OAuth vive em `ai/oauth` durante a homologação. Esta rota é somente leitura
- * de estado — não devolve token, e-mail, escopos nem link de conectar.
+ * O controlador cobre duas responsabilidades sob o mesmo guard: o status
+ * somente-leitura dos provedores (`GET /settings/ai/providers`) e a gestão da
+ * chave Ollama Cloud (`PUT`/`DELETE /settings/ai/ollama/key`). Nenhuma rota
+ * devolve token, chave, e-mail ou escopos.
  */
 @UseGuards(AuthGuard('jwt'), TenantContextGuard, PermissionGuard)
 @RequirePermissions('settings.edit')
@@ -62,5 +66,17 @@ export class AiProviderSettingsController {
       connectable: false,
     };
     return { providers: [chatgpt, ...COMING_SOON_AI_PROVIDERS] };
+  }
+
+  @Put('ollama/key')
+  async saveOllamaKey(@CurrentUser() user: RequestUser, @Body() dto: UpdateOllamaApiKeyDto) {
+    await this.runtime.saveOllamaKey(dto.apiKey, { tenantId: user.tenantId, tenantUserId: user.tenantUserId, userId: user.userId });
+    return { status: 'saved' };
+  }
+
+  @Delete('ollama/key')
+  async removeOllamaKey(@CurrentUser() user: RequestUser) {
+    await this.runtime.removeOllamaKey({ tenantId: user.tenantId, tenantUserId: user.tenantUserId, userId: user.userId });
+    return { status: 'removed' };
   }
 }

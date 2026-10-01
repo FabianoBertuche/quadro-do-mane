@@ -11,12 +11,12 @@ import { CompleteAiOAuthDto } from './dto/complete-ai-oauth.dto';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
-test('OAuth controller is protected by JWT, tenant, permission, and ai.use', () => {
+test('OAuth controller is protected by JWT, tenant, permission, and settings.edit', () => {
   const guards = Reflect.getMetadata(GUARDS_METADATA, AiOAuthController) as Function[];
   assert.equal(guards.length, 3);
   assert.equal(guards.includes(TenantContextGuard), true);
   assert.equal(guards.includes(PermissionGuard), true);
-  assert.deepEqual(Reflect.getMetadata(PERMISSIONS_KEY, AiOAuthController), ['ai.use']);
+  assert.deepEqual(Reflect.getMetadata(PERMISSIONS_KEY, AiOAuthController), ['settings.edit']);
 });
 
 test('start delegates the authenticated tenant user and does not expose verifier material', async () => {
