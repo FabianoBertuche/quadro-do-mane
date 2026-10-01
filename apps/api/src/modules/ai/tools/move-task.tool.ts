@@ -12,15 +12,23 @@ export class MoveTaskTool implements AiTool {
   async authorize(input: AiToolInput) {
     await requirePermission(this.users, input as TaskToolInput, 'tasks.change_status');
     const task = await this.tasks.findOne(input.tenantId, validateMoveArgs(input.args).taskId);
+    if (!task) throw new ForbiddenException('Tarefa não encontrada');
     if (this.projects) {
       const projects = await visibleProjects(this.projects, this.users, input as TaskToolInput);
       if (!projects.some((project: any) => project.id === task.projectId)) throw new ForbiddenException('Tarefa não encontrada');
     }
+    return this.resolveStatus(input);
   }
   async execute(input: AiToolInput) {
     const args = validateMoveArgs(input.args);
-    const status = args.statusName ? resolveOne(await this.tasks.getStatuses(input.tenantId), args.statusName, 'statusName') : resolveId(await this.tasks.getStatuses(input.tenantId), args.statusId, 'statusId');
+    const status = await this.resolveStatus(input);
     if (clarification(status)) return status;
     return this.tasks.changeStatus(input.tenantId, args.taskId, status.id, input.actorTenantUserId);
+  }
+
+  private async resolveStatus(input: AiToolInput) {
+    const args = validateMoveArgs(input.args);
+    const status = args.statusName ? resolveOne(await this.tasks.getStatuses(input.tenantId), args.statusName, 'statusName') : resolveId(await this.tasks.getStatuses(input.tenantId), args.statusId, 'statusId');
+    return status;
   }
 }

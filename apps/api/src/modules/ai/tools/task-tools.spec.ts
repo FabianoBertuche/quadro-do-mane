@@ -162,6 +162,16 @@ test('update_task and move_task reject tasks whose projects are outside actor vi
   await assert.rejects(() => move.authorize(input({ taskId: 'task-1', statusName: 'Em andamento' })), ForbiddenException);
 });
 
+test('update_task and move_task reject unknown task IDs safely', async () => {
+  const s = services();
+  s.tasks.findOne = (async () => null) as any;
+  const update = new UpdateTaskTool(s.tasks as any, s.users as any);
+  const move = new MoveTaskTool(s.tasks as any, s.users as any);
+
+  await assert.rejects(() => update.authorize(input({ taskId: 'missing-task', title: 'Novo' })), ForbiddenException);
+  await assert.rejects(() => move.authorize(input({ taskId: 'missing-task', statusName: 'Em andamento' })), ForbiddenException);
+});
+
 test('search_tasks applies actor project visibility to global searches', async () => {
   const s = services();
   s.projects.findAll = (async () => [{ id: 'visible-project', name: 'Visível' }]) as any;
@@ -170,4 +180,60 @@ test('search_tasks applies actor project visibility to global searches', async (
   const tool = new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any);
   await tool.execute(input({ search: 'privado' }));
   assert.deepEqual(filters.projectIds, ['visible-project']);
+});
+
+test('create_task returns clarification when the required project is missing', async () => {
+  const s = services();
+  let writes = 0;
+  s.tasks.create = (async () => { writes += 1; return {}; }) as any;
+  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+
+  const result = await tool.execute(input({ title: 'Sem projeto' }));
+
+  assert.deepEqual(result, { needsClarification: true, field: 'projectName', matches: [] });
+  assert.equal(writes, 0);
+});
+
+test('create_task clarifies duplicate assignee and status before writing', async () => {
+  const s = services();
+  let writes = 0;
+  s.tasks.create = (async () => { writes += 1; return {}; }) as any;
+  s.users.findAll = (async () => [
+    { id: 'user-1', user: { name: 'Maria' } },
+    { id: 'user-2', user: { name: 'Maria' } },
+  ]) as any;
+  s.tasks.getStatuses = (async () => [
+    { id: 'status-1', name: 'Em andamento' },
+    { id: 'status-2', name: 'Em andamento' },
+  ]) as any;
+  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+
+  const assigneeResult = await tool.execute(input({ title: 'Nova', projectId: 'project-1', assigneeName: 'Maria' }));
+  assert.deepEqual(assigneeResult, { needsClarification: true, field: 'assigneeName', matches: ['user-1', 'user-2'] });
+  assert.equal(writes, 0);
+
+  const statusResult = await tool.execute(input({ title: 'Nova', projectId: 'project-1', statusName: 'Em andamento' }));
+  assert.deepEqual(statusResult, { needsClarification: true, field: 'statusName', matches: ['status-1', 'status-2'] });
+  assert.equal(writes, 0);
+});
+
+test('create_task rejects an unresolved collaborator instead of retaining an unknown ID', async () => {
+  const s = services();
+  s.users.findOne = (async () => null) as any;
+  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+
+  await assert.rejects(() => tool.execute(input({ title: 'Nova', projectId: 'project-1', assigneeTenantUserId: 'missing-user' })), ForbiddenException);
+});
+
+test('task clarification matches may carry descriptors', () => {
+  const s = services();
+  s.projects.findAll = (async () => [
+    { id: 'project-1', name: 'Projeto' },
+    { id: 'project-2', name: 'Projeto' },
+  ]) as any;
+  const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
+
+  return tool.execute(input({ title: 'Nova', projectName: 'Projeto' })).then((result: any) => {
+    assert.deepEqual(result.matches, ['project-1', 'project-2']);
+  });
 });

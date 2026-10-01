@@ -127,17 +127,29 @@ export class AiService {
       this.validateToolArgs(tool, toolCall.arguments);
       return { tool, args: toolCall.arguments };
     });
-    const { userMessage, assistantMessage, proposals } = await this.persistAtomically(async (tx) => {
+    const clarifiedTools: Array<{ tool: AiTool; args: unknown; result: Record<string, unknown> }> = [];
+    for (const { tool, args } of tools) {
+      const result = await tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
+      if (this.isClarification(result)) clarifiedTools.push({ tool, args, result });
+    }
+    const { userMessage, assistantMessage, proposals, clarificationMessages } = await this.persistAtomically(async (tx) => {
       const createdUserMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
       const createdAssistantMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: dto.responseMode, content: completion.text, providerMetaJson: JSON.stringify({ toolCallCount: completion.toolCalls.length }) } });
       const createdProposals: any[] = [];
-      for (const { tool, args } of tools) {
-        createdProposals.push(await tx.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(args), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } }));
+      const createdClarificationMessages: any[] = [];
+      if (clarifiedTools.length) {
+        for (const { tool, result } of clarifiedTools) {
+          createdClarificationMessages.push(await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: 'TEXT', content: this.safeJson({ status: 'needsClarification', toolName: tool.name, result }) } }));
+        }
+      } else {
+        for (const { tool, args } of tools) {
+          createdProposals.push(await tx.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(args), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } }));
+        }
       }
-      return { userMessage: createdUserMessage, assistantMessage: createdAssistantMessage, proposals: createdProposals };
+      return { userMessage: createdUserMessage, assistantMessage: createdAssistantMessage, proposals: createdProposals, clarificationMessages: createdClarificationMessages };
     });
     await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount: proposals.length } });
-    return { message: userMessage, assistantMessage, proposals, proposal: proposals[0] };
+    return { message: userMessage, assistantMessage, proposals, clarificationMessages, proposal: proposals[0] };
   }
 
   private async selectedModel(): Promise<string | undefined> {

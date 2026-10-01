@@ -210,6 +210,26 @@ test('text response is persisted and provider tool calls become confirmation pro
   assert.deepEqual(outsideWrites, []);
 });
 
+test('sendMessage persists clarification messages without creating an actionable proposal', async () => {
+  const provider = {
+    complete: async () => ({ text: 'Preciso do projeto.', toolCalls: [{ name: 'create_task', arguments: { title: 'Nova' } }] }),
+  };
+  const { service, rows, txWrites } = setup(provider);
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'create_task', parameters: { type: 'object' },
+    validate: () => undefined,
+    authorize: (async () => ({ needsClarification: true, field: 'projectName', matches: [] })) as any,
+    execute: async () => { throw new Error('execute must not run during preflight'); },
+  }]);
+
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'crie uma tarefa', responseMode: AiResponseMode.TEXT });
+
+  assert.deepEqual(result.proposals, []);
+  assert.equal(rows.proposal.length, 0);
+  assert.match(rows.message.at(-1).content, /needsClarification/);
+  assert.deepEqual(txWrites.map((write) => write.kind), ['message', 'message', 'message']);
+});
+
 test('expired proposals cannot be confirmed and confirmation revalidates tenant ownership', async () => {
   const { service, prisma } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });
   (prisma as any).aiActionProposal.findFirst = async () => ({

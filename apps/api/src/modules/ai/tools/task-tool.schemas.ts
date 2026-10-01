@@ -32,7 +32,6 @@ export const validateSearchArgs = (args: unknown) => {
 export const validateCreateArgs = (args: unknown) => {
   const value = objectArgs(args, ['title', 'projectId', 'projectName', 'description', 'assigneeName', 'assigneeTenantUserId', 'statusName', 'statusId', 'priorityName', 'priorityId', 'startDate', 'dueDate']);
   nonEmpty(value.title, 'title');
-  if (!value.projectId && !value.projectName) throw new BadRequestException('projectId ou projectName é obrigatório');
   for (const field of ['description', 'assigneeName', 'assigneeTenantUserId', 'statusName', 'statusId', 'priorityName', 'priorityId']) {
     if (value[field] !== undefined && typeof value[field] !== 'string') throw new BadRequestException(`${field} inválido`);
   }
@@ -144,3 +143,5 @@ export const resolveId = (items: any[], id: string, field: string) => {
 };
 
 export const clarification = (value: any): value is { needsClarification: true } => value?.needsClarification === true;
+
+export const missingProject = () => ({ needsClarification: true as const, field: 'projectName', matches: [] });

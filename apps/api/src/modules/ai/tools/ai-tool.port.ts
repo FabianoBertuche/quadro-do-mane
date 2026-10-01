@@ -7,7 +7,7 @@ export interface AiToolInput {
 export interface AiToolClarification {
   needsClarification: true;
   field: string;
-  matches: string[];
+  matches: Array<string | { id: string; name?: string }>;
 }
 
 export type AiToolResult = unknown | AiToolClarification;
@@ -17,6 +17,6 @@ export interface AiTool {
   description?: string;
   parameters: Record<string, unknown>;
   validate?(args: unknown): unknown;
-  authorize(input: AiToolInput): Promise<void>;
+  authorize(input: AiToolInput): Promise<void | AiToolResult>;
   execute(input: AiToolInput): Promise<AiToolResult>;
 }
