@@ -27,3 +27,4 @@ Implemented global task visibility, strict write-target resolution, structured c
 - `search_tasks` now rejects unknown `assigneeTenantUserId` values after a tenant-scoped lookup and before querying tasks.
 - Added regression coverage for tenant-scoped lookup, safe rejection, and the shared `{ id, name }` clarification descriptor shape.
 - Typed the descriptor expectation as `AiToolClarification`, so reverting `matches` to `string[]` fails TypeScript compilation.
+- Made the shared clarification contract strict with required `{ id, name }` matches and updated `resolveOne` producers plus fixtures accordingly.

@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { AiToolClarification, AiToolClarificationMatch } from './ai-tool.port';
 
 export type TaskToolInput = { tenantId: string; actorTenantUserId: string; args: any };
 export type Permission = 'tasks.view' | 'tasks.create' | 'tasks.edit' | 'tasks.change_status' | 'projects.view' | 'users.view' | 'teams.view' | 'calendar.view' | 'daily_routine.view';
@@ -116,9 +117,15 @@ export const assertVisibleProject = (projects: any[], projectId: string, field =
 
 export const exact = (value: unknown) => typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 
+const clarificationMatch = (item: any, field: string): AiToolClarificationMatch => {
+  const name = item.name ?? item.user?.name;
+  if (typeof item.id !== 'string' || typeof name !== 'string') throw new ForbiddenException(`${field} não encontrado no tenant`);
+  return { id: item.id, name };
+};
+
 export const resolveOne = (items: any[], name: string, field: string) => {
   const matches = items.filter((item) => exact(item.name ?? item.user?.name) === exact(name));
-  if (matches.length > 1) return { needsClarification: true, field, matches: matches.map((item) => item.id) };
+  if (matches.length > 1) return { needsClarification: true as const, field, matches: matches.map((item) => clarificationMatch(item, field)) };
   if (matches.length === 0) throw new ForbiddenException(`${field} não encontrado no tenant`);
   return matches[0];
 };
@@ -129,7 +136,7 @@ export const resolveReadOne = (items: any[], name: string, field: string) => {
     return {
       needsClarification: true as const,
       field,
-      matches: matches.map((item) => ({ id: item.id, name: item.name ?? item.user?.name })),
+      matches: matches.map((item) => clarificationMatch(item, field)),
     };
   }
   if (matches.length === 0) throw new ForbiddenException(`${field} não encontrado no tenant`);
@@ -142,6 +149,6 @@ export const resolveId = (items: any[], id: string, field: string) => {
   return match;
 };
 
-export const clarification = (value: any): value is { needsClarification: true } => value?.needsClarification === true;
+export const clarification = (value: any): value is AiToolClarification => value?.needsClarification === true;
 
 export const missingProject = () => ({ needsClarification: true as const, field: 'projectName', matches: [] });

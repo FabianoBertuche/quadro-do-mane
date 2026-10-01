@@ -4,10 +4,15 @@ export interface AiToolInput {
   args: unknown;
 }
 
+export interface AiToolClarificationMatch {
+  id: string;
+  name: string;
+}
+
 export interface AiToolClarification {
   needsClarification: true;
   field: string;
-  matches: Array<string | { id: string; name?: string }>;
+  matches: AiToolClarificationMatch[];
 }
 
 export type AiToolResult = unknown | AiToolClarification;

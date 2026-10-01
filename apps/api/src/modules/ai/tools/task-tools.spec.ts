@@ -7,7 +7,7 @@ import { SearchTasksTool } from './search-tasks.tool';
 import { UpdateTaskTool } from './update-task.tool';
 import { AiToolRegistryService } from './ai-tool-registry.service';
 import { AiToolClarification } from './ai-tool.port';
-import { resolveReadOne } from './task-tool.schemas';
+import { clarification, resolveReadOne } from './task-tool.schemas';
 
 const input = (args: unknown, actorTenantUserId = 'actor-1') => ({
   tenantId: 'tenant-1', actorTenantUserId, args,
@@ -105,7 +105,14 @@ test('ambiguous project names return clarification instead of guessing', async (
   ];
   const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
   const result = await tool.execute(input({ title: 'Nova', projectName: 'Projeto' }));
-  assert.deepEqual(result, { needsClarification: true, field: 'projectName', matches: ['project-1', 'project-2'] });
+  assert.deepEqual(result, {
+    needsClarification: true,
+    field: 'projectName',
+    matches: [
+      { id: 'project-1', name: 'Projeto' },
+      { id: 'project-2', name: 'Projeto' },
+    ],
+  });
 });
 
 test('cross-tenant IDs are rejected during authorization', async () => {
@@ -227,11 +234,25 @@ test('create_task clarifies duplicate assignee and status before writing', async
   const tool = new CreateTaskTool(s.tasks as any, s.projects as any, s.users as any);
 
   const assigneeResult = await tool.execute(input({ title: 'Nova', projectId: 'project-1', assigneeName: 'Maria' }));
-  assert.deepEqual(assigneeResult, { needsClarification: true, field: 'assigneeName', matches: ['user-1', 'user-2'] });
+  assert.deepEqual(assigneeResult, {
+    needsClarification: true,
+    field: 'assigneeName',
+    matches: [
+      { id: 'user-1', name: 'Maria' },
+      { id: 'user-2', name: 'Maria' },
+    ],
+  });
   assert.equal(writes, 0);
 
   const statusResult = await tool.execute(input({ title: 'Nova', projectId: 'project-1', statusName: 'Em andamento' }));
-  assert.deepEqual(statusResult, { needsClarification: true, field: 'statusName', matches: ['status-1', 'status-2'] });
+  assert.deepEqual(statusResult, {
+    needsClarification: true,
+    field: 'statusName',
+    matches: [
+      { id: 'status-1', name: 'Em andamento' },
+      { id: 'status-2', name: 'Em andamento' },
+    ],
+  });
   assert.equal(writes, 0);
 });
 
@@ -248,14 +269,11 @@ test('task clarification matches carry shared ID and name descriptors', () => {
     { id: 'project-1', name: 'Projeto' },
     { id: 'project-2', name: 'Projeto' },
   ], 'Projeto', 'projectName');
-  const expected: AiToolClarification = {
-    needsClarification: true,
-    field: 'projectName',
-    matches: [
-      { id: 'project-1', name: 'Projeto' },
-      { id: 'project-2', name: 'Projeto' },
-    ],
-  };
+  assert.ok(clarification(result));
+  const typedResult: AiToolClarification = result;
 
-  assert.deepEqual(result, expected);
+  assert.deepEqual(typedResult.matches, [
+    { id: 'project-1', name: 'Projeto' },
+    { id: 'project-2', name: 'Projeto' },
+  ]);
 });

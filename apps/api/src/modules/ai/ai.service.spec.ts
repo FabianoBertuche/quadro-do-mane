@@ -307,7 +307,7 @@ test('confirmation keeps clarification proposals pending and persists a structur
   (prisma as any).aiMessage.create = async ({ data }: any) => { messages.push(data); return { id: `message-${messages.length}`, ...data }; };
   (service as any).registry = new AiToolRegistryService([{
     name: 'demo', parameters: { type: 'object' }, authorize: async () => undefined,
-    execute: async () => ({ needsClarification: true, field: 'projectName', matches: ['p1', 'p2'] }),
+     execute: async () => ({ needsClarification: true, field: 'projectName', matches: [{ id: 'p1', name: 'Projeto 1' }, { id: 'p2', name: 'Projeto 2' }] }),
   }]);
   const result = await service.confirmProposal(actor, 'proposal-1');
   assert.equal(result.status, 'PENDING');
