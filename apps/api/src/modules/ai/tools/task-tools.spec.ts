@@ -6,6 +6,7 @@ import { MoveTaskTool } from './move-task.tool';
 import { SearchTasksTool } from './search-tasks.tool';
 import { UpdateTaskTool } from './update-task.tool';
 import { AiToolRegistryService } from './ai-tool-registry.service';
+import { AiToolClarification } from './ai-tool.port';
 import { resolveReadOne } from './task-tool.schemas';
 
 const input = (args: unknown, actorTenantUserId = 'actor-1') => ({
@@ -247,13 +248,14 @@ test('task clarification matches carry shared ID and name descriptors', () => {
     { id: 'project-1', name: 'Projeto' },
     { id: 'project-2', name: 'Projeto' },
   ], 'Projeto', 'projectName');
-
-  assert.deepEqual(result, {
+  const expected: AiToolClarification = {
     needsClarification: true,
     field: 'projectName',
     matches: [
       { id: 'project-1', name: 'Projeto' },
       { id: 'project-2', name: 'Projeto' },
     ],
-  });
+  };
+
+  assert.deepEqual(result, expected);
 });
