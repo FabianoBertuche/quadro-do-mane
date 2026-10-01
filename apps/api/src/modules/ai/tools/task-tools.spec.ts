@@ -40,6 +40,7 @@ test('registry exposes exactly the four task tools', () => {
     new MoveTaskTool(s.tasks as any, s.users as any),
   ]);
   assert.deepEqual(registry.list().map((tool) => tool.name), ['search_tasks', 'create_task', 'update_task', 'move_task']);
+  assert.equal(registry.get('search_tasks')?.readOnly, true);
 });
 
 test('search_tasks publishes name filters and passes actor role to project visibility lookup', async () => {
@@ -51,8 +52,57 @@ test('search_tasks publishes name filters and passes actor role to project visib
   assert.ok((tool.parameters.properties as any).projectName);
   assert.ok((tool.parameters.properties as any).statusName);
   assert.ok((tool.parameters.properties as any).priorityName);
+  assert.deepEqual((tool.parameters.properties as any).myTasks, { type: 'boolean' });
+  assert.deepEqual((tool.parameters.properties as any).overdue, { type: 'boolean' });
   await tool.execute(input({ projectName: 'Projeto' }));
   assert.deepEqual(projectCalls[0], ['tenant-1', 'actor-1', 'admin']);
+});
+
+test('search_tasks resolves a unique collaborator by partial name', async () => {
+  const s = services();
+  let filters: any;
+  s.users.findAll = async () => [
+    { id: 'fabiano-1', tenantId: 'tenant-1', user: { name: 'Fabiano Bertuche' } },
+    { id: 'maria-1', tenantId: 'tenant-1', user: { name: 'Maria Souza' } },
+  ];
+  s.tasks.findByFilters = (async (_tenantId: string, received: any) => { filters = received; return []; }) as any;
+
+  const result = await new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any)
+    .execute(input({ assigneeName: 'Fabiano', overdue: true }));
+
+  assert.deepEqual(result, []);
+  assert.equal(filters.assigneeTenantUserId, 'fabiano-1');
+  assert.equal(filters.overdue, true);
+});
+
+test('search_tasks resolves myTasks to the authenticated tenant user', async () => {
+  const s = services();
+  let filters: any;
+  s.tasks.findByFilters = (async (_tenantId: string, received: any) => { filters = received; return []; }) as any;
+
+  await new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any)
+    .execute(input({ myTasks: true, overdue: true }));
+
+  assert.equal(filters.assigneeTenantUserId, 'actor-1');
+  assert.equal(filters.overdue, true);
+  assert.equal('myTasks' in filters, false);
+});
+
+test('search_tasks asks for clarification when a partial collaborator name is ambiguous', async () => {
+  const s = services();
+  s.users.findAll = async () => [
+    { id: 'carlos-1', tenantId: 'tenant-1', user: { name: 'Carlos Andrade' } },
+    { id: 'carlos-2', tenantId: 'tenant-1', user: { name: 'Carlos Silva' } },
+  ];
+
+  const result = await new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any)
+    .execute(input({ assigneeName: 'Carlos' }));
+
+  assert.equal(clarification(result), true);
+  assert.deepEqual((result as AiToolClarification).matches, [
+    { id: 'carlos-1', name: 'Carlos Andrade' },
+    { id: 'carlos-2', name: 'Carlos Silva' },
+  ]);
 });
 
 test('create_task resolves exact tenant names and passes actor to TasksService.create', async () => {
@@ -142,7 +192,22 @@ test('search_tasks returns bounded summaries without unrestricted user data', as
   const s = services();
   const tool = new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any);
   const result = await tool.execute(input({ search: 'Tarefa' }));
-  assert.deepEqual(result, [{ id: 'task-1', title: 'Tarefa', projectId: undefined, status: undefined, priority: undefined, assignee: undefined }]);
+  assert.deepEqual(result, [{ id: 'task-1', title: 'Tarefa', projectName: null, status: undefined, priority: undefined, assignee: undefined }]);
+});
+
+test('search_tasks exposes the project name so overdue summaries stay human-friendly', async () => {
+  const s = services();
+  s.tasks.findByFilters = (async () => [{
+    id: 'task-1', title: 'Tarefa atrasada', tenantId: 'tenant-1',
+    project: { id: 'project-1', name: 'Projeto Alpha', code: 'PA' },
+    status: { name: 'Em andamento' }, priority: { name: 'Alta' }, assignee: { user: { name: 'Maria' } },
+  }]) as any;
+  const tool = new SearchTasksTool(s.tasks as any, s.users as any, s.projects as any);
+  const result = await tool.execute(input({ overdue: true }));
+  assert.deepEqual(result, [{
+    id: 'task-1', title: 'Tarefa atrasada', projectName: 'Projeto Alpha',
+    status: 'Em andamento', priority: 'Alta', assignee: 'Maria',
+  }]);
 });
 
 test('search_tasks rejects an invalid tenant-scoped project ID before querying tasks', async () => {

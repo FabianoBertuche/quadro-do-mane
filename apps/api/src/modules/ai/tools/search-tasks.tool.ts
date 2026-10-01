@@ -4,8 +4,9 @@ import { clarification, resolveId, resolveOne, TaskToolInput, requirePermission,
 
 export class SearchTasksTool implements AiTool {
   name = 'search_tasks';
-  description = 'Busca tarefas acessíveis no tenant e retorna resumos limitados.';
-  parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, projectId: { type: 'string' }, projectName: { type: 'string' }, statusId: { type: 'string' }, statusName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, assigneeName: { type: 'string' }, priorityId: { type: 'string' }, priorityName: { type: 'string' } } };
+  readOnly = true;
+  description = 'Busca tarefas acessíveis no tenant e retorna resumos limitados. Use myTasks para perguntas sobre as tarefas do usuário autenticado e overdue para tarefas atrasadas.';
+  parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, projectId: { type: 'string' }, projectName: { type: 'string' }, statusId: { type: 'string' }, statusName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, assigneeName: { type: 'string' }, priorityId: { type: 'string' }, priorityName: { type: 'string' }, myTasks: { type: 'boolean' }, overdue: { type: 'boolean' } } };
   constructor(private readonly tasks: any, private readonly users: any, private readonly projects: ProjectsService) {}
   validate = validateSearchArgs;
   authorize(input: AiToolInput) { return requirePermission(this.users, input as TaskToolInput, 'tasks.view'); }
@@ -29,7 +30,9 @@ export class SearchTasksTool implements AiTool {
       if (clarification(priority)) return priority;
       filters.priorityId = priority.id;
     } else if (args.priorityId) filters.priorityId = resolveId(await this.tasks.getPriorities(input.tenantId), args.priorityId, 'priorityId').id;
-    if (args.assigneeName) {
+    if (args.myTasks) {
+      filters.assigneeTenantUserId = input.actorTenantUserId;
+    } else if (args.assigneeName) {
       const assignee = resolveOne(await this.users.findAll(input.tenantId), args.assigneeName, 'assigneeName');
       if (clarification(assignee)) return assignee;
       filters.assigneeTenantUserId = assignee.id;
@@ -37,10 +40,10 @@ export class SearchTasksTool implements AiTool {
       const assignee = await this.users.findOne(input.tenantId, args.assigneeTenantUserId);
       filters.assigneeTenantUserId = resolveId(assignee ? [assignee] : [], args.assigneeTenantUserId, 'assigneeTenantUserId').id;
     }
-    delete filters.projectName; delete filters.statusName; delete filters.priorityName; delete filters.assigneeName;
+    delete filters.projectName; delete filters.statusName; delete filters.priorityName; delete filters.assigneeName; delete filters.myTasks;
     const rows = await this.tasks.findByFilters(input.tenantId, filters);
     return rows.slice(0, 50).map((task: any) => ({
-      id: task.id, title: task.title, projectId: task.projectId, status: task.status?.name, priority: task.priority?.name, assignee: task.assignee?.user?.name,
+      id: task.id, title: task.title, projectName: task.project?.name ?? null, status: task.status?.name, priority: task.priority?.name, assignee: task.assignee?.user?.name,
     }));
   }
 }
