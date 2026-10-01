@@ -360,6 +360,7 @@ test('serializes the expanded authorized tool contract without identity or crede
 test('executes an authorized global read without a proposal and preserves the actor boundary', async () => {
   const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
   const writes: any[] = [];
+  const providerInputs: any[] = [];
   const projects = {
     findAll: async (tenantId: string, tenantUserId: string) => {
       assert.equal(tenantId, actor.tenantId);
@@ -383,7 +384,12 @@ test('executes an authorized global read without a proposal and preserves the ac
   };
   const service = new AiService(
     prisma,
-    { complete: async () => ({ text: 'consulta concluída', toolCalls: [{ name: 'search_projects', arguments: {} }] }) },
+    { complete: async (input: any) => {
+      providerInputs.push(input);
+      return providerInputs.length === 1
+        ? { text: 'vou consultar', toolCalls: [{ name: 'search_projects', arguments: {} }] }
+        : { text: 'Você pode ver o projeto Visible project.', toolCalls: [] };
+    } },
     new AiContextService({ project: { findFirst: async () => null }, task: { findMany: async () => [] } } as any),
     new AiToolRegistryService([readTool]),
     new AiAuditService({ log: async () => undefined } as any),
@@ -392,6 +398,14 @@ test('executes an authorized global read without a proposal and preserves the ac
 
   const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'quais projetos posso ver?', responseMode: 'TEXT' as any });
   assert.deepEqual((result as any).toolResults, [{ toolName: 'search_projects', result: [{ id: 'project-a', name: 'Visible project', status: 'ACTIVE', owner: undefined, team: undefined, progressPercent: undefined, totalTasks: undefined }] }]);
+  assert.equal(providerInputs.length, 2);
+  assert.equal(result.assistantMessage?.content, 'Você pode ver o projeto Visible project.');
+  assert.match(providerInputs[1].messages.at(-1).content, /Visible project/);
+  const serializedInputs = JSON.stringify(providerInputs);
+  assert.match(serializedInputs, /Maria/);
+  assert.equal(serializedInputs.includes('person@example.com'), false);
+  assert.equal(serializedInputs.includes('tenant-a'), false);
+  assert.equal(serializedInputs.includes('accessToken'), false);
   assert.deepEqual(result.proposals, []);
   assert.equal(writes.length, 2);
 });

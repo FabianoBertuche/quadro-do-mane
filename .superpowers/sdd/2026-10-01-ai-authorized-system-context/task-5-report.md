@@ -25,3 +25,18 @@ Implemented explicit registry wiring and end-to-end authorization/provider cover
 
 - The combined AI/module-wiring command reported one unrelated existing failure in `apps/api/src/modules/module-wiring.spec.ts`: the `AiAudioService` optional-dependency assertion. The other 197 tests in that command passed. No unrelated files were changed.
 - Live provider validation was not attempted; coverage uses the existing deterministic Responses/OAuth fixtures.
+
+## Review Follow-up
+
+- Fixed the read-tool orchestration gap: authorized read results are appended as bounded `tool` messages to a provider continuation, and only the final provider response is persisted as the assistant message.
+- Added a maximum of four provider passes to prevent an unbounded read loop; write tools remain proposals and clarification stops before mutation or continuation.
+- Added provider-loop coverage for final authorized read output, denied/cross-tenant isolation, ambiguous targets, missing-target clarification, confirmed actor-preserving actions, and audit/activity/proposal status invariants.
+- Added actual `AiService` payload redaction assertions and web parsing for optional `toolResults`, while keeping structured clarification `{ id, name }` descriptors intact.
+
+## Review Verification
+
+- Full API suite: 349 passed, 1 unrelated failure in `src/modules/module-wiring.spec.ts` for the pre-existing `AiAudioService` optional-dependency assertion.
+- Web chat parser tests: 10 passed.
+- API build and typecheck: passed.
+- Web build and typecheck: passed.
+- Full diff whitespace check: passed.

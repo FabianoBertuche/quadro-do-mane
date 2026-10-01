@@ -230,6 +230,73 @@ test('sendMessage persists clarification messages without creating an actionable
   assert.deepEqual(txWrites.map((write) => write.kind), ['message', 'message', 'message']);
 });
 
+test('provider-loop read denial leaves no persisted message, proposal, or mutation', async () => {
+  const { service, rows, outsideWrites } = setup({
+    complete: async () => ({ text: 'não autorizado', toolCalls: [{ name: 'search_projects', arguments: { projectId: 'tenant-b-project' } }] }),
+  });
+  let executions = 0;
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'search_projects', readOnly: true, parameters: { type: 'object' },
+    authorize: async () => { throw new ForbiddenException('sem acesso'); },
+    execute: async () => { executions += 1; return []; },
+  }]);
+
+  await assert.rejects(() => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'veja o outro tenant', responseMode: AiResponseMode.TEXT }), ForbiddenException);
+  assert.equal(executions, 0);
+  assert.deepEqual(rows.proposal, []);
+  assert.deepEqual(outsideWrites, []);
+});
+
+test('provider-loop ambiguity persists structured clarification without a proposal or mutation', async () => {
+  const { service, rows, txWrites } = setup({
+    complete: async () => ({ text: 'vou resolver o projeto', toolCalls: [{ name: 'create_task', arguments: { title: 'Nova tarefa' } }] }),
+  });
+  let executions = 0;
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'create_task', parameters: { type: 'object' }, validate: () => undefined,
+    authorize: async () => ({ needsClarification: true, field: 'projectName', matches: [{ id: 'p1', name: 'Alpha' }, { id: 'p2', name: 'Alpha' }] }),
+    execute: async () => { executions += 1; return { id: 'must-not-write' }; },
+  }]);
+
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'crie uma tarefa no Alpha', responseMode: AiResponseMode.TEXT });
+  assert.deepEqual(result.proposals, []);
+  assert.equal(rows.proposal.length, 0);
+  assert.equal(executions, 0);
+  assert.match(rows.message.at(-1).content, /Alpha/);
+  assert.deepEqual(txWrites.map((write) => write.kind), ['message', 'message', 'message']);
+});
+
+test('confirmed provider action delegates actor context and records execution invariants', async () => {
+  const activity: any[] = [];
+  const { service, prisma, auditLog, proposalUpdates } = setup({
+    complete: async () => ({ text: 'vou propor a alteração', toolCalls: [{ name: 'demo', arguments: { title: 'Nova tarefa' } }] }),
+  });
+  let currentStatus = 'PENDING';
+  (prisma as any).aiActionProposal.findFirst = async ({ where }: any) => ({
+    id: 'proposal-1', tenantId: actor.tenantId, createdByTenantUserId: actor.tenantUserId,
+    status: where.status ?? currentStatus, expiresAt: new Date(Date.now() + 60_000), toolName: 'demo', argumentsJson: '{}', conversationId: 'conversation-1',
+  });
+  (prisma as any).aiActionProposal.updateMany = async ({ where, data }: any) => {
+    proposalUpdates.push({ where, data });
+    currentStatus = data.status;
+    return { count: 1 };
+  };
+  let receivedInput: any;
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'demo', parameters: { type: 'object' },
+    authorize: async () => undefined,
+    execute: async (input: any) => { receivedInput = input; activity.push({ action: 'task.created', actor: input.actorTenantUserId }); return { id: 'task-1' }; },
+  }]);
+
+  const proposed = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'crie uma tarefa', responseMode: AiResponseMode.TEXT });
+  const executed = await service.confirmProposal(actor, proposed.proposal.id);
+  assert.deepEqual(receivedInput, { tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: {} });
+  assert.equal(activity[0].actor, actor.tenantUserId);
+  assert.equal(executed.status, 'EXECUTED');
+  assert.deepEqual(proposalUpdates.map((entry) => entry.data.status), ['CONFIRMED', 'EXECUTED']);
+  assert.ok(auditLog.some((entry) => entry.action === 'ai.proposal.executed'));
+});
+
 test('expired proposals cannot be confirmed and confirmation revalidates tenant ownership', async () => {
   const { service, prisma } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });
   (prisma as any).aiActionProposal.findFirst = async () => ({

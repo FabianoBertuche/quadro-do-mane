@@ -49,6 +49,12 @@ export interface AiMessageResponse {
   assistantMessage?: AiMessage;
   proposals: AiActionProposal[];
   proposal?: AiActionProposal;
+  toolResults: AiToolResult[];
+}
+
+export interface AiToolResult {
+  toolName: string;
+  result: unknown;
 }
 
 export type AiActionResult = AiActionProposal & {
@@ -131,6 +137,13 @@ function parseProposal(value: unknown): AiActionProposal {
   return { ...value, ...proposal };
 }
 
+function parseToolResult(value: unknown): AiToolResult {
+  if (!isRecord(value) || typeof value.toolName !== 'string' || value.toolName.trim() === '') {
+    throw new Error('Resultado de ferramenta inválido');
+  }
+  return { toolName: value.toolName, result: value.result };
+}
+
 export function getClarificationDetails(content: string): AiClarificationDetails | null {
   try {
     const parsed: unknown = JSON.parse(content);
@@ -184,11 +197,13 @@ export async function sendTextMessage(input: {
   const payload = unwrapData(data);
   if (!isRecord(payload) || payload.message === undefined) throw new Error('Resposta de mensagem enviada inválida');
   const rawProposals = Array.isArray(payload.proposals) ? payload.proposals : payload.proposal ? [payload.proposal] : [];
+  const rawToolResults = Array.isArray(payload.toolResults) ? payload.toolResults : [];
   return {
     message: parseMessage(payload.message),
     assistantMessage: payload.assistantMessage === undefined ? undefined : parseMessage(payload.assistantMessage),
     proposals: rawProposals.map(parseProposal),
     proposal: payload.proposal === undefined ? undefined : parseProposal(payload.proposal),
+    toolResults: rawToolResults.map(parseToolResult),
   };
 }
 

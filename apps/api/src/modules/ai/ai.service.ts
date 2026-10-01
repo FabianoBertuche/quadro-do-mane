@@ -111,8 +111,45 @@ export class AiService {
       ...(model ? { model } : {}),
     };
     let completion: Awaited<ReturnType<AiProvider['complete']>>;
+    let completionMessages = completionInput.messages;
+    let actionTools: Array<{ tool: AiTool; args: unknown }> = [];
+    let clarifiedTools: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
+    const toolResults: Array<{ toolName: string; result: unknown }> = [];
+    let toolCallCount = 0;
     try {
-      completion = await this.provider.complete(completionInput, this.oauth ? await this.oauth.resolveProviderAuth() : undefined);
+      const auth = this.oauth ? await this.oauth.resolveProviderAuth() : undefined;
+      for (let continuation = 0; ; continuation += 1) {
+        completion = await this.provider.complete({ ...completionInput, messages: completionMessages }, auth);
+        toolCallCount += completion.toolCalls.length;
+        const tools = completion.toolCalls.map((toolCall) => {
+          const tool = this.registry.get(toolCall.name);
+          if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
+          this.validateToolArgs(tool, toolCall.arguments);
+          return { tool, args: toolCall.arguments };
+        });
+        const currentClarifications: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
+        const currentReads: Array<{ tool: AiTool; args: unknown }> = [];
+        for (const candidate of tools) {
+          const result = await candidate.tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: candidate.args });
+          if (this.isClarification(result)) currentClarifications.push({ ...candidate, result });
+          else if (candidate.tool.readOnly) currentReads.push(candidate);
+          else actionTools.push(candidate);
+        }
+        if (currentClarifications.length) {
+          clarifiedTools = currentClarifications;
+          break;
+        }
+        for (const { tool, args } of currentReads) {
+          toolResults.push({ toolName: tool.name, result: await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args }) });
+        }
+        if (!currentReads.length) break;
+        if (continuation >= 3) throw new BadRequestException('Limite de consultas do assistente excedido');
+        completionMessages = [
+          ...completionMessages,
+          { role: 'assistant', content: completion.text },
+          ...toolResults.slice(-currentReads.length).map((item) => ({ role: 'tool' as const, content: this.safeJson({ toolName: item.toolName, result: item.result }) })),
+        ];
+      }
     } catch (error) {
       const metadata = error instanceof AiProviderError ? {
         providerStatus: error.metadata.status,
@@ -121,19 +158,6 @@ export class AiService {
       } : {};
       await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'provider.failed', targetId: conversation.id, metadata: { provider: 'AI_PROVIDER', status: 'failed', ...metadata } });
       throw error;
-    }
-    const tools = completion.toolCalls.map((toolCall) => {
-      const tool = this.registry.get(toolCall.name);
-      if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
-      this.validateToolArgs(tool, toolCall.arguments);
-      return { tool, args: toolCall.arguments };
-    });
-    const clarifiedTools: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
-    const toolResults: Array<{ toolName: string; result: unknown }> = [];
-    for (const { tool, args } of tools) {
-      const result = await tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
-      if (this.isClarification(result)) clarifiedTools.push({ tool, args, result });
-      else if (tool.readOnly) toolResults.push({ toolName: tool.name, result: await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args }) });
     }
     const { userMessage, assistantMessage, proposals, clarificationMessages } = await this.persistAtomically(async (tx) => {
       const createdUserMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
@@ -145,14 +169,13 @@ export class AiService {
           createdClarificationMessages.push(await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'assistant', format: 'TEXT', content: this.safeJson({ status: 'needsClarification', toolName: tool.name, result }) } }));
         }
       } else {
-        for (const { tool, args } of tools) {
-          if (tool.readOnly) continue;
+        for (const { tool, args } of actionTools) {
           createdProposals.push(await tx.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(args), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } }));
         }
       }
       return { userMessage: createdUserMessage, assistantMessage: createdAssistantMessage, proposals: createdProposals, clarificationMessages: createdClarificationMessages };
     });
-    await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount: proposals.length } });
+    await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount } });
     return { message: userMessage, assistantMessage, proposals, clarificationMessages, toolResults, proposal: proposals[0] };
   }
 

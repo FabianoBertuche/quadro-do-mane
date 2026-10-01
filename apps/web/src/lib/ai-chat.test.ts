@@ -115,6 +115,24 @@ test('maps message history and sends text with the strict TEXT response mode', a
   }
 });
 
+test('preserves authorized tool results returned with the final assistant response', async () => {
+  const originalPost = api.post;
+  api.post = (async () => ({ data: {
+    message: { id: 'message-1', role: 'user', content: 'Quais projetos?' },
+    assistantMessage: { id: 'message-2', role: 'assistant', content: 'Você pode ver Projeto A.' },
+    proposals: [],
+    toolResults: [{ toolName: 'search_projects', result: [{ id: 'project-1', name: 'Projeto A' }] }],
+  } })) as typeof api.post;
+
+  try {
+    const response = await sendTextMessage({ conversationId: 'conversation-1', text: 'Quais projetos?', responseMode: 'TEXT' });
+    assert.deepEqual(response.toolResults, [{ toolName: 'search_projects', result: [{ id: 'project-1', name: 'Projeto A' }] }]);
+    assert.equal(response.assistantMessage?.content, 'Você pode ver Projeto A.');
+  } finally {
+    api.post = originalPost;
+  }
+});
+
 test('confirms and cancels proposals through their existing endpoints', async () => {
   const originalPost = api.post;
   const requests: string[] = [];
