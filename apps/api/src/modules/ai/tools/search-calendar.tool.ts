@@ -4,6 +4,7 @@ import { bounded, clarification, requirePermission, resolveReadOne, safeDate, va
 
 export class SearchCalendarTool implements AiTool {
   name = 'search_calendar';
+  readOnly = true;
   description = 'Busca eventos autorizados em um período limitado.';
   parameters = { type: 'object', additionalProperties: false, required: [], anyOf: [{ not: { anyOf: [{ required: ['startDate'] }, { required: ['endDate'] }] } }, { required: ['startDate', 'endDate'] }], properties: { startDate: { type: 'string' }, endDate: { type: 'string' }, requestedTenantUserId: { type: 'string' }, requestedUserName: { type: 'string' } } };
   constructor(private readonly events: EventsService, private readonly users: any) {}

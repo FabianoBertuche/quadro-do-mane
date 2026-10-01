@@ -4,6 +4,7 @@ import { bounded, clarification, exact, requirePermission, resolveId, resolveRea
 
 export class SearchTeamsTool implements AiTool {
   name = 'search_teams';
+  readOnly = true;
   description = 'Busca equipes do tenant com relacionamentos redigidos.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, teamId: { type: 'string' } } };
   constructor(private readonly teams: TeamsService, private readonly users: any) {}

@@ -22,6 +22,12 @@ import { CreateCalendarEventTool } from './tools/create-calendar-event.tool';
 import { CreateRoutineTool } from './tools/create-routine.tool';
 import { AddTeamMemberTool } from './tools/add-team-member.tool';
 import { AddProjectMemberTool } from './tools/add-project-member.tool';
+import { SearchProjectsTool } from './tools/search-projects.tool';
+import { SearchUsersTool } from './tools/search-users.tool';
+import { SearchTeamsTool } from './tools/search-teams.tool';
+import { SearchCalendarTool } from './tools/search-calendar.tool';
+import { SearchRoutinesTool } from './tools/search-routines.tool';
+import type { AiTool } from './tools/ai-tool.port';
 import { EventsModule } from '../events/events.module';
 import { DailyRoutineModule } from '../daily-routine/daily-routine.module';
 import { TeamsModule } from '../teams/teams.module';
@@ -35,6 +41,10 @@ import { TemporaryAudioCleanupScheduler } from './media/temporary-audio-cleanup.
 import { OpenAiSpeechToTextProvider } from './providers/openai-speech-to-text.provider';
 import { OpenAiTextToSpeechProvider } from './providers/openai-text-to-speech.provider';
 import OpenAI from 'openai';
+import { ProjectsService } from '../projects/projects.service';
+import { TeamsService } from '../teams/teams.service';
+import { EventsService } from '../events/events.service';
+import { DailyRoutineService } from '../daily-routine/daily-routine.service';
 
 @Module({
   imports: [ProjectsModule, TasksModule, UsersModule, EventsModule, DailyRoutineModule, TeamsModule],
@@ -52,6 +62,11 @@ import OpenAI from 'openai';
     CreateRoutineTool,
     AddTeamMemberTool,
     AddProjectMemberTool,
+    { provide: SearchProjectsTool, inject: [ProjectsService, UsersService], useFactory: (projects: ProjectsService, users: UsersService) => new SearchProjectsTool(projects, users) },
+    { provide: SearchUsersTool, inject: [UsersService], useFactory: (users: UsersService) => new SearchUsersTool(users) },
+    { provide: SearchTeamsTool, inject: [TeamsService, UsersService], useFactory: (teams: TeamsService, users: UsersService) => new SearchTeamsTool(teams, users) },
+    { provide: SearchCalendarTool, inject: [EventsService, UsersService], useFactory: (events: EventsService, users: UsersService) => new SearchCalendarTool(events, users) },
+    { provide: SearchRoutinesTool, inject: [DailyRoutineService, UsersService], useFactory: (routines: DailyRoutineService, users: UsersService) => new SearchRoutinesTool(routines, users) },
     AiAudioService,
     AiOAuthService,
     AiServerRuntimeService,
@@ -94,8 +109,8 @@ import OpenAI from 'openai';
     },
     {
       provide: AiToolRegistryService,
-      inject: [SearchTasksTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool, CreateRoutineTool, AddTeamMemberTool, AddProjectMemberTool],
-      useFactory: (...tools: any[]) => new AiToolRegistryService(tools),
+      inject: [SearchProjectsTool, SearchTasksTool, SearchUsersTool, SearchTeamsTool, SearchCalendarTool, SearchRoutinesTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool, CreateRoutineTool, AddTeamMemberTool, AddProjectMemberTool],
+      useFactory: (...tools: AiTool[]) => new AiToolRegistryService(tools),
     },
     {
       provide: AI_PROVIDER,

@@ -3,6 +3,7 @@ import { bounded, clarification, exact, requirePermission, resolveId, resolveRea
 
 export class SearchUsersTool implements AiTool {
   name = 'search_users';
+  readOnly = true;
   description = 'Busca colaboradores do tenant sem expor dados de contato.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, userId: { type: 'string' } } };
   constructor(private readonly users: any) {}

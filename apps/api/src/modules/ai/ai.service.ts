@@ -129,9 +129,11 @@ export class AiService {
       return { tool, args: toolCall.arguments };
     });
     const clarifiedTools: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
+    const toolResults: Array<{ toolName: string; result: unknown }> = [];
     for (const { tool, args } of tools) {
       const result = await tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
       if (this.isClarification(result)) clarifiedTools.push({ tool, args, result });
+      else if (tool.readOnly) toolResults.push({ toolName: tool.name, result: await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args }) });
     }
     const { userMessage, assistantMessage, proposals, clarificationMessages } = await this.persistAtomically(async (tx) => {
       const createdUserMessage = await tx.aiMessage.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, role: 'user', format: inputFormat, content: text } });
@@ -144,13 +146,14 @@ export class AiService {
         }
       } else {
         for (const { tool, args } of tools) {
+          if (tool.readOnly) continue;
           createdProposals.push(await tx.aiActionProposal.create({ data: { tenantId: actor.tenantId, conversationId: conversation.id, createdByTenantUserId: actor.tenantUserId, toolName: tool.name, argumentsJson: JSON.stringify(args), status: 'PENDING', summary: `Confirmar ação: ${tool.name}`, expiresAt: new Date(Date.now() + 5 * 60_000) } }));
         }
       }
       return { userMessage: createdUserMessage, assistantMessage: createdAssistantMessage, proposals: createdProposals, clarificationMessages: createdClarificationMessages };
     });
     await this.audit.record({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, actorUserId: actor.userId, action: 'message.completed', targetId: conversation.id, metadata: { responseMode: dto.responseMode, toolCallCount: proposals.length } });
-    return { message: userMessage, assistantMessage, proposals, clarificationMessages, proposal: proposals[0] };
+    return { message: userMessage, assistantMessage, proposals, clarificationMessages, toolResults, proposal: proposals[0] };
   }
 
   private async selectedModel(): Promise<string | undefined> {

@@ -4,6 +4,7 @@ import { bounded, clarification, requirePermission, resolveReadOne, validateRead
 
 export class SearchRoutinesTool implements AiTool {
   name = 'search_routines';
+  readOnly = true;
   description = 'Busca rotinas autorizadas sem expor notas privadas.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { requestedTenantUserId: { type: 'string' }, requestedUserName: { type: 'string' } } };
   constructor(private readonly routines: DailyRoutineService, private readonly users: any) {}

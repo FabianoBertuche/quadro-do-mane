@@ -11,6 +11,8 @@ import { AiAuditService } from './ai-audit.service';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
 import { AiProviderError } from './ports/ai-provider.port';
 import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
+import { AiTool } from './tools/ai-tool.port';
+import { SearchProjectsTool } from './tools/search-projects.tool';
 
 const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
 
@@ -320,4 +322,76 @@ test('carries one global OAuth runtime through catalog selection and chat withou
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('serializes the expanded authorized tool contract without identity or credential leakage', async () => {
+  let requestBody: any;
+  const provider = new OpenAiResponsesProvider(
+    { get: (key: string, fallback?: string) => key === 'OPENAI_MODEL' ? 'test-model' : fallback } as any,
+    async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response('data: {"type":"response.output_text.delta","delta":"ok"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n', {
+        status: 200, headers: { 'content-type': 'text/event-stream' },
+      });
+    },
+  );
+  const tools: AiTool[] = [
+    'search_projects', 'search_tasks', 'search_users', 'search_teams', 'search_calendar', 'search_routines',
+    'create_task', 'update_task', 'move_task', 'create_calendar_event', 'create_routine', 'add_team_member', 'add_project_member',
+  ].map((name) => ({
+    name,
+    description: `${name} authorized tool`,
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+    authorize: async () => undefined,
+    execute: async () => undefined,
+  }));
+
+  await provider.complete({
+    messages: [{ role: 'system', content: 'Usuário autenticado: Emanuel Barsotini. Tratamento: pai.' }],
+    tools,
+  }, { type: 'api-key', accessToken: 'provider-secret' });
+
+  assert.deepEqual(requestBody.tools.map((tool: any) => tool.name), tools.map((tool) => tool.name));
+  assert.equal(JSON.stringify(requestBody).includes('person@example.com'), false);
+  assert.equal(JSON.stringify(requestBody).includes('provider-secret'), false);
+  assert.equal(JSON.stringify(requestBody).includes('accessToken'), false);
+});
+
+test('executes an authorized global read without a proposal and preserves the actor boundary', async () => {
+  const actor = { tenantId: 'tenant-a', tenantUserId: 'user-a' };
+  const writes: any[] = [];
+  const projects = {
+    findAll: async (tenantId: string, tenantUserId: string) => {
+      assert.equal(tenantId, actor.tenantId);
+      assert.equal(tenantUserId, actor.tenantUserId);
+      return [{ id: 'project-a', name: 'Visible project', status: 'ACTIVE' }];
+    },
+  };
+  const users = {
+    findOne: async (tenantId: string, tenantUserId: string) => tenantId === actor.tenantId && tenantUserId === actor.tenantUserId
+      ? { role: { name: 'collaborator', rolePermissions: [{ permission: { code: 'projects.view' } }] } }
+      : null,
+  };
+  const readTool = new SearchProjectsTool(projects as any, users as any);
+  const prisma: any = {
+    aiConversation: { findFirst: async () => ({ id: 'conversation-1', tenantId: actor.tenantId, ownerTenantUserId: actor.tenantUserId, contextProjectId: null }) },
+    aiMessage: { findMany: async () => [] },
+    $transaction: async (callback: (tx: any) => Promise<any>) => callback({
+      aiMessage: { create: async ({ data }: any) => { const row = { id: `message-${writes.length + 1}`, ...data }; writes.push(row); return row; } },
+      aiActionProposal: { create: async () => { throw new Error('read must not create a proposal'); } },
+    }),
+  };
+  const service = new AiService(
+    prisma,
+    { complete: async () => ({ text: 'consulta concluída', toolCalls: [{ name: 'search_projects', arguments: {} }] }) },
+    new AiContextService({ project: { findFirst: async () => null }, task: { findMany: async () => [] } } as any),
+    new AiToolRegistryService([readTool]),
+    new AiAuditService({ log: async () => undefined } as any),
+    { resolve: async () => ({ name: 'Maria', address: 'Maria' }) } as any,
+  );
+
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'quais projetos posso ver?', responseMode: 'TEXT' as any });
+  assert.deepEqual((result as any).toolResults, [{ toolName: 'search_projects', result: [{ id: 'project-a', name: 'Visible project', status: 'ACTIVE', owner: undefined, team: undefined, progressPercent: undefined, totalTasks: undefined }] }]);
+  assert.deepEqual(result.proposals, []);
+  assert.equal(writes.length, 2);
 });

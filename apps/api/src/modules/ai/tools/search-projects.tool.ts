@@ -4,6 +4,7 @@ import { bounded, clarification, exact, requirePermission, resolveId, resolveRea
 
 export class SearchProjectsTool implements AiTool {
   name = 'search_projects';
+  readOnly = true;
   description = 'Busca projetos visíveis no tenant e retorna resumos limitados.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, projectId: { type: 'string' } } };
   constructor(private readonly projects: ProjectsService, private readonly users: any) {}

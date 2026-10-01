@@ -19,6 +19,7 @@ export type AiToolResult = AiToolClarification | Record<string, unknown> | unkno
 
 export interface AiTool {
   name: string;
+  readOnly?: boolean;
   description?: string;
   parameters: Record<string, unknown>;
   validate?(args: unknown): unknown;
