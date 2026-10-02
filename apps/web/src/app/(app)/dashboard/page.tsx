@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth';
+import { withStatusCategory } from '@/lib/task-filters';
 import {
   CheckSquare,
   PlayCircle,
@@ -777,11 +778,14 @@ function DrillDownModal({
   const [localOverdue, setLocalOverdue] = useState(filter.overdue || '');
   const [localCompleted, setLocalCompleted] = useState(filter.completed || '');
 
-  const params: Record<string, string> = {};
-  if (statusFilter) params.statusId = statusFilter;
-  if (userFilter) params.assigneeTenantUserId = userFilter;
-  if (localOverdue) params.overdue = localOverdue;
-  if (localCompleted) params.completed = localCompleted;
+  const baseParams: Record<string, string> = {};
+  if (statusFilter) baseParams.statusId = statusFilter;
+  if (userFilter) baseParams.assigneeTenantUserId = userFilter;
+  if (localOverdue) baseParams.overdue = localOverdue;
+  if (localCompleted) baseParams.completed = localCompleted;
+
+  /** A categoria de status vem do card acionado e precisa chegar ao backend. */
+  const params = Object.fromEntries(withStatusCategory(baseParams, filter.statusCategory ?? null));
 
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['tasks', 'drilldown', params],

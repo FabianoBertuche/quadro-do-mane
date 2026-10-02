@@ -281,7 +281,7 @@ export default function OperationalDashboardPage() {
     queryFn: () => api.get('/users?active=true').then((r) => r.data),
   });
 
-  const { data, isLoading, isError, isFetching } = useQuery<ActivityEntry[]>({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery<ActivityEntry[]>({
     queryKey: ['activity-log', { entityType, userId, startDate, endDate, take }],
     queryFn: async () => {
       const params: Record<string, string> = { take: String(take) };
@@ -332,7 +332,9 @@ export default function OperationalDashboardPage() {
           </p>
         </div>
         <button
-          onClick={() => {}}
+          onClick={() => {
+            void refetch();
+          }}
           disabled={isFetching}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors shadow-lg shadow-primary/30"
         >

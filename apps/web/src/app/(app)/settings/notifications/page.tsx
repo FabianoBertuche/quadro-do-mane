@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Bell, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import {
@@ -18,7 +18,23 @@ type DispatchFilters = {
   tenantUserId: string;
 };
 
+/** Retorno de `GET /notifications/notification-preferences`. */
+type NotificationPreference = {
+  category: NotificationCategory;
+  pushEnabled: boolean;
+  lockedByAdmin: boolean;
+};
+
 const initialFilters: DispatchFilters = { category: '', pushStatus: '', tenantUserId: '' };
+
+const preferenceLabel: Record<NotificationCategory, string> = {
+  TASKS: 'Tarefas',
+  CALENDAR: 'Calendário',
+  ROUTINE: 'Rotinas diárias',
+  COLLABORATION: 'Colaboração',
+  PROJECTS_TEAMS: 'Projetos e equipes',
+  SECURITY: 'Segurança',
+};
 
 const safeFailureReason = (reason: string | null) => {
   if (!reason) return 'Sem falha registrada';
@@ -39,7 +55,9 @@ const statusLabel: Record<NotificationPushStatus, string> = {
 };
 
 export default function NotificationDiagnosticsPage() {
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<DispatchFilters>(initialFilters);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const { data, isLoading, isError } = useQuery<NotificationDispatch[]>({
     queryKey: ['notification-dispatches', filters],
     queryFn: () =>
@@ -56,6 +74,38 @@ export default function NotificationDiagnosticsPage() {
 
   const dispatches = data ?? [];
 
+  const {
+    data: preferences = [],
+    isLoading: isLoadingPreferences,
+    isError: isPreferencesError,
+  } = useQuery<NotificationPreference[]>({
+    queryKey: ['notification-preferences'],
+    queryFn: () =>
+      api.get('/notifications/notification-preferences').then((response) => response.data),
+  });
+
+  const updatePreference = useMutation({
+    mutationFn: ({ category, pushEnabled }: { category: NotificationCategory; pushEnabled: boolean }) =>
+      api.patch(`/notifications/notification-preferences/${category}`, { pushEnabled }),
+    onSuccess: () => {
+      setPreferencesError(null);
+      queryClient.invalidateQueries({ queryKey: ['notification-preferences'] });
+    },
+    onError: (error: any) => {
+      setPreferencesError(
+        error?.response?.data?.message ??
+          (error?.response?.status === 409
+            ? 'Esta categoria é gerenciada pela empresa e não pode ser alterada.'
+            : 'Não foi possível salvar a preferência de notificação.'),
+      );
+      // O lock pode ter sido aplicado pela empresa entre a leitura e o envio:
+      // quem tem a palavra final sobre o estado é o servidor.
+      if (error?.response?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ['notification-preferences'] });
+      }
+    },
+  });
+
   return (
     <div className="max-w-5xl space-y-8">
       <div>
@@ -67,6 +117,68 @@ export default function NotificationDiagnosticsPage() {
           Investigue as entregas sem expor dados de dispositivos ou credenciais de push.
         </p>
       </div>
+
+      <section className="space-y-4 rounded-2xl border border-border bg-card p-6 shadow-sm" aria-labelledby="notification-preferences">
+        <div className="flex items-center gap-2">
+          <Bell className="h-5 w-5 text-primary" />
+          <h2 id="notification-preferences" className="font-semibold">Minhas preferências</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Os alertas sempre chegam à Central de Notificações. O que você desliga aqui é apenas o envio por push ao dispositivo.
+        </p>
+        {preferencesError && (
+          <div className="flex items-center gap-2 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>{preferencesError}</span>
+            <button
+              type="button"
+              className="ml-auto text-xs underline opacity-70 hover:opacity-100"
+              onClick={() => setPreferencesError(null)}
+            >
+              Fechar
+            </button>
+          </div>
+        )}
+        {isLoadingPreferences ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">Carregando preferências...</p>
+        ) : isPreferencesError ? (
+          <p className="flex items-center justify-center gap-2 py-4 text-sm text-red-600">
+            <AlertTriangle className="h-4 w-4" /> Não foi possível carregar suas preferências.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {preferences.map((preference) => (
+              <li key={preference.category} className="flex items-center gap-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">
+                    {preferenceLabel[preference.category] ?? preference.category}
+                  </div>
+                  {preference.lockedByAdmin && (
+                    <p className="mt-0.5 text-xs text-amber-600">
+                      Categoria gerenciada pela empresa — a alteração está bloqueada.
+                    </p>
+                  )}
+                </div>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-primary"
+                    checked={preference.pushEnabled}
+                    disabled={preference.lockedByAdmin || updatePreference.isPending}
+                    onChange={(event) =>
+                      updatePreference.mutate({
+                        category: preference.category,
+                        pushEnabled: event.target.checked,
+                      })
+                    }
+                  />
+                  Push
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="space-y-4 rounded-2xl border border-border bg-card p-6 shadow-sm" aria-labelledby="dispatch-filters">
         <div className="flex items-center gap-2">
@@ -111,7 +223,7 @@ export default function NotificationDiagnosticsPage() {
       <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm" aria-labelledby="dispatch-results">
         <div className="border-b border-border p-6">
           <h2 id="dispatch-results" className="font-semibold">Histórico de entregas</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Preferências e auditorias permanecem em uma área separada.</p>
+          <p className="mt-1 text-sm text-muted-foreground">O histórico abaixo é somente leitura.</p>
         </div>
         {isLoading ? (
           <p className="p-8 text-center text-sm text-muted-foreground">Carregando entregas...</p>
