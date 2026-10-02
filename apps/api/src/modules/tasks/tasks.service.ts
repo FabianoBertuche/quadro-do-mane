@@ -106,7 +106,6 @@ export class TasksService {
     if (filters.projectId) where.projectId = filters.projectId;
     if (filters.projectIds) where.projectId = { in: filters.projectIds };
     if (filters.statusId) where.statusId = filters.statusId;
-    if (filters.statusCategory) where.status = { category: filters.statusCategory };
     if (filters.assigneeTenantUserId) where.assigneeTenantUserId = filters.assigneeTenantUserId;
     if (filters.priorityId) where.priorityId = filters.priorityId;
     if (filters.teamId) where.teamId = filters.teamId;
@@ -117,12 +116,19 @@ export class TasksService {
 
     if (filters.overdue) {
       where.dueDate = { lt: new Date() };
-      where.status = { category: { not: 'done' } };
     }
 
-    if (filters.completed) {
-      where.status = { category: 'done' };
-    }
+    /**
+     * Condição de status montada uma vez só. `statusCategory`, `completed` e `overdue`
+     * desembocam no mesmo objeto para que o filtro do card sobreviva à combinação —
+     * escrever direto em `where.status` fazia o último sobrescrever o anterior e a
+     * resposta saía como superconjunto.
+     */
+    const statusWhere: { category?: string; not?: { category: string } } = {};
+    if (filters.statusCategory) statusWhere.category = filters.statusCategory;
+    if (filters.completed) statusWhere.category = 'done';
+    if (filters.overdue) statusWhere.not = { category: 'done' };
+    if (Object.keys(statusWhere).length) where.status = statusWhere;
 
     if (filters.blocked) {
       where.isBlocked = true;
