@@ -137,22 +137,32 @@ Em `apps/api/src/modules/tasks/dto/filter-tasks.dto.ts`, acrescentar o campo com
 Acrescentar o import de `IsIn` junto com os demais `@nestjs/validators` do arquivo.
 
 Em `apps/api/src/modules/tasks/tasks.service.ts`, acrescentar `statusCategory?: string;` ao tipo dos
-parâmetros de `findByFilters` e aplicar o filtro logo depois do bloco de `blocked`:
+parâmetros de `findByFilters`. O filtro precisa **compor** com `completed` e `overdue` em um único
+objeto `where.status`, e não simplesmente escrever por cima deles: o `DrillDownModal` do dashboard
+combina o filtro do card com os dropdowns "Concluídas" e "Atrasadas" nos mesmos `baseParams`, então
+`statusCategory=active&overdue=true` é alcançável com um clique. Com escrita por cima, a categoria
+seria descartada em silêncio e a resposta viria como superconjunto.
 
 ```ts
-    if (filters.statusCategory) where.status = { category: filters.statusCategory };
+    const statusWhere: { category?: string; not?: { category: string } } = {};
+    if (filters.statusCategory) statusWhere.category = filters.statusCategory;
+    if (filters.completed) statusWhere.category = 'done';
+    if (filters.overdue) statusWhere.not = { category: 'done' };
+    if (Object.keys(statusWhere).length) where.status = statusWhere;
 ```
 
-`Task` tem `statusId` como coluna (`schema.prisma`), e o `findByFilters` já filtra por ela com
-`where.statusId`. `statusId` e `status` são campos diferentes, então o Prisma combina os dois com AND
-— não há sobrescrita. **Não** trocar `where.statusId` por `where.status = { id }`, e **não** reescrever
-`where.status` num objeto combinado só por este filtro: seria uma refatoração fora do escopo.
+O `where.statusId` que já existe fica como está: `statusId` é coluna escalar de `Task`
+(`schema.prisma`) e o Prisma combina os dois campos com AND. Não trocar por `where.status = { id }`.
 
-A ordem importa apenas para quem chama com `statusCategory` **e** `overdue`/`completed`, que também
-escrevem `where.status`: o último a escrever vence. Nenhum caller envia essa combinação hoje (o card
-do dashboard envia só `statusCategory`), então não é preciso resolver; se o filtro for placement for
-perfeito para o futuro, aplicar `statusCategory` antes de `overdue`/`completed` faz `overdue` e
-`completed` ganharem, que é o comportamento mais razoável dos dois.
+Semântica resultante: `category` e `not` são combinados pelo Prisma com AND, então
+`statusCategory=active&overdue=true` dá `category = 'active' AND category <> 'done'`. Já
+`statusCategory=active&completed=true` dá a combinação contraditória `category = 'done'`, que retorna
+vazio — que é a resposta honesta para "em andamento e concluídas ao mesmo tempo".
+
+Cobrir com teste: um caso que envie `statusCategory` e `overdue` juntos e afirme o objeto combinado,
+e um caso `statusCategory` + `completed`. Cobrir também que `statusCategory` sozinho continua
+montando `{ category: 'active' }`, para não regredir o caso do card.
+
 
 
 
