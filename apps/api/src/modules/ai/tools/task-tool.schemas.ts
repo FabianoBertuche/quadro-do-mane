@@ -2,7 +2,10 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AiToolClarification, AiToolClarificationMatch } from './ai-tool.port';
 
 export type TaskToolInput = { tenantId: string; actorTenantUserId: string; args: any };
-export type Permission = 'tasks.view' | 'tasks.create' | 'tasks.edit' | 'tasks.change_status' | 'projects.view' | 'users.view' | 'teams.view' | 'calendar.view' | 'calendar.create' | 'calendar.edit' | 'daily_routine.view' | 'daily_routine.manage' | 'teams.manage_members' | 'projects.manage_members';
+import { PermissionCode } from './permission-codes';
+
+/** @deprecated Use `PermissionCode`. Mantido só para não quebrar as tools atuais. */
+export type Permission = PermissionCode;
 
 const objectArgs = (args: unknown, allowed: string[]) => {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
