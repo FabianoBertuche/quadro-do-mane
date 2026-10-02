@@ -104,13 +104,15 @@ export class AiService {
     const identity = await this.identity.resolve({ tenantId: actor.tenantId, tenantUserId: actor.tenantUserId });
     const history = await this.prisma.aiMessage.findMany({ where: { tenantId: actor.tenantId, conversationId: conversation.id, conversation: { ownerTenantUserId: actor.tenantUserId } }, orderBy: { createdAt: 'desc' }, take: Math.max(this.limits.maxHistoryMessages - 1, 0) });
     const model = await this.selectedModel();
+    const visibleTools = await this.registry.listVisible({ tenantId: actor.tenantId, tenantUserId: actor.tenantUserId });
+    const visibleToolNames = new Set(visibleTools.map((tool) => tool.name));
     const completionInput: AiCompletionInput = {
       messages: [
         { role: 'system', content: `Usuário autenticado: ${identity.name}. Tratamento: ${identity.address}. Use este tratamento apenas para se dirigir ao usuário atual.\nUse somente este contexto acessível: ${context.summary}` },
         ...history.reverse().map((message: any) => ({ role: message.role, content: message.content ?? '' })),
         { role: 'user', content: text },
       ],
-      tools: this.registry.list().map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
+      tools: visibleTools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
       ...(model ? { model } : {}),
     };
     let completion: Awaited<ReturnType<AiProvider['complete']>> | undefined;
@@ -128,7 +130,7 @@ export class AiService {
 
     for (const execution of executions) {
       try {
-        const run = await this.runProviderLoop(completionInput, execution, actor);
+        const run = await this.runProviderLoop(completionInput, execution, actor, visibleToolNames);
         completion = run.completion;
         toolResults = run.toolResults;
         clarifiedTools = run.clarifiedTools;
@@ -171,6 +173,7 @@ export class AiService {
     completionInput: AiCompletionInput,
     execution: AiProviderExecution,
     actor: AiActor & { conversationId: string },
+    visibleToolNames: ReadonlySet<string>,
   ) {
     let completionMessages = completionInput.messages;
     let actionTools: Array<{ tool: AiTool; args: unknown }> = [];
@@ -187,30 +190,38 @@ export class AiService {
       const tools = completion.toolCalls.map((toolCall) => {
         const tool = this.registry.get(toolCall.name);
         if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
+        if (!visibleToolNames.has(tool.name)) return { tool, args: undefined, call: toolCall, hidden: true as const };
         const args = this.normalizeToolArgs(tool, toolCall.arguments);
         this.validateToolArgs(tool, args);
-        return { tool, args, call: { ...toolCall, arguments: args as Record<string, unknown> } };
+        return { tool, args, call: { ...toolCall, arguments: args as Record<string, unknown> }, hidden: false as const };
       });
+      const denied = { error: 'Esta ferramenta está indisponível para o seu perfil.' };
       const currentClarifications: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
       const currentReads: Array<{ tool: AiTool; args: unknown; call: typeof completion.toolCalls[number] }> = [];
-      const currentActions = tools.filter(({ tool }) => !tool.readOnly);
+      const currentResults = [] as Array<{ call: typeof completion.toolCalls[number]; result: unknown }>;
+      for (const { tool, call, hidden } of tools) {
+        if (!hidden) continue;
+        currentResults.push({ call, result: denied });
+        toolResults.push({ toolName: tool.name, result: denied });
+      }
+      const currentActions = tools.filter(({ tool, hidden }) => !tool.readOnly && !hidden);
       for (const candidate of tools) {
+        if (candidate.hidden) continue;
         const result = await candidate.tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: candidate.args });
-        if (this.isClarification(result)) currentClarifications.push({ ...candidate, result });
-        else if (candidate.tool.readOnly) currentReads.push(candidate);
+        if (this.isClarification(result)) currentClarifications.push({ tool: candidate.tool, args: candidate.args, result });
+        else if (candidate.tool.readOnly) currentReads.push({ tool: candidate.tool, args: candidate.args, call: candidate.call });
         else actionTools.push({ tool: candidate.tool, args: candidate.args });
       }
       if (currentClarifications.length) {
         clarifiedTools = currentClarifications;
         break;
       }
-      const currentResults = [] as Array<{ call: typeof completion.toolCalls[number]; result: unknown }>;
       for (const { tool, args, call } of currentReads) {
         const result = await tool.execute({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args });
         currentResults.push({ call, result });
         toolResults.push({ toolName: tool.name, result });
       }
-      if (!currentReads.length || currentActions.length) break;
+      if (!currentResults.length || currentActions.length) break;
       if (continuation >= 3) throw new BadRequestException('Limite de consultas do assistente excedido');
       if (!execution.providerInstance.buildToolContinuation) throw new BadRequestException('O provider não suporta continuação de ferramentas');
       completionMessages = execution.providerInstance.buildToolContinuation({ ...completionInput, messages: completionMessages }, completion, currentResults).messages;

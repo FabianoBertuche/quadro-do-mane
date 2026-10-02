@@ -187,6 +187,56 @@ test('adds authenticated identity treatment to the system prompt without email o
   assert.doesNotMatch(systemMessage.content, /email|tenant-a|user-a|@/i);
 });
 
+test('envia ao modelo apenas as tools que o ator pode executar', async () => {
+  const received: any[] = [];
+  const { service } = setup({ complete: async (input: any) => {
+    received.push(input);
+    return { text: 'ok', toolCalls: [] };
+  } });
+  (service as any).registry = new AiToolRegistryService(
+    [
+      { name: 'search_tasks', permission: 'tasks.view', readOnly: true, description: 'buscar', parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => ({}) },
+      { name: 'delete_task', permission: 'tasks.delete', description: 'apagar', parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => ({}) },
+    ],
+    { can: async (_input: any, permission: string) => permission === 'tasks.view', codesFor: async () => ['tasks.view'] } as any,
+  );
+
+  await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'oi', responseMode: AiResponseMode.TEXT });
+
+  assert.deepEqual(received[0].tools.map((entry: any) => entry.name), ['search_tasks']);
+});
+
+test('tool fora do perfil vira recusa no resultado, sem autorizar ou executar', async () => {
+  let authorized = false;
+  let executed = false;
+  let completions = 0;
+  const provider = {
+    complete: async () => {
+      completions += 1;
+      return completions === 1
+        ? { text: 'Apagando.', toolCalls: [{ id: 'c1', name: 'delete_task', arguments: {} }] }
+        : { text: 'Não posso apagar tarefas.', toolCalls: [] };
+    },
+    buildToolContinuation: (input: any) => ({
+      ...input,
+      messages: [...input.messages, { role: 'tool', toolCallId: 'c1', content: JSON.stringify({ error: 'Esta ferramenta está indisponível para o seu perfil.' }) }],
+    }),
+  };
+  const { service } = setup(provider);
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'delete_task', permission: 'tasks.delete', parameters: { type: 'object' },
+    authorize: async () => { authorized = true; },
+    execute: async () => { executed = true; return {}; },
+  }], { can: async () => false, codesFor: async () => [] } as any);
+
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'apaga a tarefa', responseMode: AiResponseMode.TEXT });
+
+  assert.equal(authorized, false);
+  assert.equal(executed, false);
+  assert.equal(result.assistantMessage.content, 'Não posso apagar tarefas.');
+  assert.deepEqual(result.toolResults, [{ toolName: 'delete_task', result: { error: 'Esta ferramenta está indisponível para o seu perfil.' } }]);
+});
+
 test('conversation reads are owned by the authenticated tenant user', async () => {
   const { service, conversationQueries } = setup({ complete: async () => ({ text: 'ok', toolCalls: [] }) });
   await service.listConversations(actor);
