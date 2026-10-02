@@ -210,6 +210,7 @@ test('tool fora do perfil vira recusa no resultado, sem autorizar ou executar', 
   let authorized = false;
   let executed = false;
   let completions = 0;
+  let continuationResults: any[] | undefined;
   const provider = {
     complete: async () => {
       completions += 1;
@@ -217,10 +218,10 @@ test('tool fora do perfil vira recusa no resultado, sem autorizar ou executar', 
         ? { text: 'Apagando.', toolCalls: [{ id: 'c1', name: 'delete_task', arguments: {} }] }
         : { text: 'Não posso apagar tarefas.', toolCalls: [] };
     },
-    buildToolContinuation: (input: any) => ({
-      ...input,
-      messages: [...input.messages, { role: 'tool', toolCallId: 'c1', content: JSON.stringify({ error: 'Esta ferramenta está indisponível para o seu perfil.' }) }],
-    }),
+    buildToolContinuation: (input: any, _completion: any, currentResults: any[]) => {
+      continuationResults = currentResults;
+      return input;
+    },
   };
   const { service } = setup(provider);
   (service as any).registry = new AiToolRegistryService([{
@@ -233,6 +234,11 @@ test('tool fora do perfil vira recusa no resultado, sem autorizar ou executar', 
 
   assert.equal(authorized, false);
   assert.equal(executed, false);
+  assert.equal(completions, 2);
+  assert.deepEqual(continuationResults, [{
+    call: { id: 'c1', name: 'delete_task', arguments: {} },
+    result: { error: 'Esta ferramenta está indisponível para o seu perfil.' },
+  }]);
   assert.equal(result.assistantMessage.content, 'Não posso apagar tarefas.');
   assert.deepEqual(result.toolResults, [{ toolName: 'delete_task', result: { error: 'Esta ferramenta está indisponível para o seu perfil.' } }]);
 });
