@@ -18,17 +18,25 @@ interface ResolvedRole {
  */
 @Injectable()
 export class AiPermissionService {
-  private readonly cache = new Map<string, ResolvedRole>();
+  private readonly cache = new Map<string, Promise<ResolvedRole>>();
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private async roleFor(input: { tenantId: string; tenantUserId: string }): Promise<ResolvedRole> {
+  private roleFor(input: { tenantId: string; tenantUserId: string }): Promise<ResolvedRole> {
     const key = `${input.tenantId}:${input.tenantUserId}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
 
-    const tenantUser = await this.prisma.tenantUser.findFirst({
-      where: { id: input.tenantUserId, tenantId: input.tenantId },
+    const pending = this.prisma.tenantUser.findFirst({
+      where: {
+        id: input.tenantUserId,
+        tenantId: input.tenantId,
+        role: {
+          is: {
+            OR: [{ tenantId: input.tenantId }, { tenantId: null }],
+          },
+        },
+      },
       select: {
         role: {
           select: {
@@ -37,14 +45,18 @@ export class AiPermissionService {
           },
         },
       },
+    }).then((tenantUser) => {
+      const role = tenantUser?.role;
+      return {
+        name: role?.name ?? null,
+        codes: (role?.rolePermissions ?? []).map((item: any) => item.permission.code as string),
+      };
     });
-    const role = tenantUser?.role;
-    const resolved: ResolvedRole = {
-      name: role?.name ?? null,
-      codes: (role?.rolePermissions ?? []).map((item: any) => item.permission.code as string),
-    };
-    this.cache.set(key, resolved);
-    return resolved;
+    this.cache.set(key, pending);
+    pending.catch(() => {
+      if (this.cache.get(key) === pending) this.cache.delete(key);
+    });
+    return pending;
   }
 
   async codesFor(input: { tenantId: string; tenantUserId: string }): Promise<readonly string[]> {
