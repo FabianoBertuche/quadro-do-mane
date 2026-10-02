@@ -48,6 +48,7 @@ import { TeamsService } from '../teams/teams.service';
 import { EventsService } from '../events/events.service';
 import { DailyRoutineService } from '../daily-routine/daily-routine.service';
 import { TasksService } from '../tasks/tasks.service';
+import { AI_PERMISSION_SERVICE, AiPermissionService } from './ai-permission.service';
 
 @Module({
   imports: [ProjectsModule, TasksModule, UsersModule, EventsModule, DailyRoutineModule, TeamsModule],
@@ -57,6 +58,8 @@ import { TasksService } from '../tasks/tasks.service';
     AiContextService,
     AiIdentityContextService,
     AiAuditService,
+    AiPermissionService,
+    { provide: AI_PERMISSION_SERVICE, useExisting: AiPermissionService },
     { provide: SearchTasksTool, inject: [TasksService, UsersService, ProjectsService], useFactory: (tasks: TasksService, users: UsersService, projects: ProjectsService) => new SearchTasksTool(tasks, users, projects) },
     { provide: CreateTaskTool, inject: [TasksService, ProjectsService, UsersService], useFactory: (tasks: TasksService, projects: ProjectsService, users: UsersService) => new CreateTaskTool(tasks, projects, users) },
     { provide: UpdateTaskTool, inject: [TasksService, UsersService, ProjectsService], useFactory: (tasks: TasksService, users: UsersService, projects: ProjectsService) => new UpdateTaskTool(tasks, users, projects) },
@@ -130,6 +133,6 @@ import { TasksService } from '../tasks/tasks.service';
   ],
   // `AiServerRuntimeService` é exportado para o painel administrativo ler o
   // estado global sem duplicar a resolução de conexão/credencial.
-  exports: [AiService, AiServerRuntimeService],
+  exports: [AiService, AiServerRuntimeService, AI_PERMISSION_SERVICE],
 })
 export class AiModule {}
