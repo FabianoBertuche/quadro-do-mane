@@ -119,6 +119,55 @@ cd /root/quadro-do-mane/apps/web && npx tsx --test src/lib/task-filters.spec.ts
 
 Expected: PASS com 3 testes.
 
+> **Correção de 2026-10-02 (achado na execução):** `statusCategory` não existe na API. Confirmado no
+> código: `FilterTasksDto` não tem o campo, `findByFilters` não trata, e o card do dashboard envia
+> `in_progress`, que não pertence ao vocabulário de `TaskStatus.category` no seed
+> (`pending | active | done`). O `dashboard.service.ts` já conta `category: 'active'` como
+> `inProgressTasks`, então `active` é o valor que casa com o número do card. Sem o Step 6b, o filtro
+> deixa de ser descartado pelo cliente e passa a ser descartado pela API.
+
+- [ ] **Step 6b: Fechar o drill-down no lado da API**
+
+Em `apps/api/src/modules/tasks/dto/filter-tasks.dto.ts`, acrescentar o campo com o vocabulário do seed:
+
+```ts
+@ApiPropertyOptional() @IsIn(['pending', 'active', 'done']) @IsOptional() statusCategory?: string;
+```
+
+Acrescentar o import de `IsIn` junto com os demais `@nestjs/validators` do arquivo.
+
+Em `apps/api/src/modules/tasks/tasks.service.ts`, acrescentar `statusCategory?: string;` ao tipo dos
+parâmetros de `findByFilters` e aplicar o filtro logo depois do bloco de `blocked`:
+
+```ts
+    if (filters.statusCategory) where.status = { category: filters.statusCategory };
+```
+
+`Task` tem `statusId` como coluna (`schema.prisma`), e o `findByFilters` já filtra por ela com
+`where.statusId`. `statusId` e `status` são campos diferentes, então o Prisma combina os dois com AND
+— não há sobrescrita. **Não** trocar `where.statusId` por `where.status = { id }`, e **não** reescrever
+`where.status` num objeto combinado só por este filtro: seria uma refatoração fora do escopo.
+
+A ordem importa apenas para quem chama com `statusCategory` **e** `overdue`/`completed`, que também
+escrevem `where.status`: o último a escrever vence. Nenhum caller envia essa combinação hoje (o card
+do dashboard envia só `statusCategory`), então não é preciso resolver; se o filtro for placement for
+perfeito para o futuro, aplicar `statusCategory` antes de `overdue`/`completed` faz `overdue` e
+`completed` ganharem, que é o comportamento mais razoável dos dois.
+
+
+
+Em `apps/web/src/app/(app)/dashboard/page.tsx`, o card "Em Andamento" passa a enviar a categoria do domínio:
+
+```ts
+filter: { statusCategory: 'active' },
+```
+
+Acrescentar `statusCategory` ao tipo do filtro usado no card, caso ele seja declarado.
+
+Cobrir com teste: um caso de `findByFilters` que aplica `statusCategory` e monta
+`status: { category: 'active' }`. Rodar `npx tsc --noEmit` em `apps/api` e
+`node -r ts-node/register --test` no spec tocado.
+
 - [ ] **Step 6: Ligar o dashboard ao filtro**
 
 Em `apps/web/src/app/(app)/dashboard/page.tsx`, localizar o card que dispara o drill-down e substituir a montagem da query por `withStatusCategory`. Localizar por:
