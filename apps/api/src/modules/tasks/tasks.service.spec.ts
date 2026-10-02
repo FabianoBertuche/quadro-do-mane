@@ -252,8 +252,18 @@ test('categoria e atraso combinam numa condição só, sem o atraso apagar a cat
   await service.findByFilters('tenant-1', { statusCategory: 'active', overdue: true });
 
   assert.deepEqual(prisma.task.findMany.mock.calls[0][0].where.status, {
-    category: 'active',
-    not: { category: 'done' },
+    category: { equals: 'active', not: 'done' },
+  });
+});
+
+test('atraso sem categoria mantém a forma antiga do filtro de status', async () => {
+  const { service, prisma } = doubles();
+  prisma.task.findMany.mockImplementation(async () => []);
+
+  await service.findByFilters('tenant-1', { overdue: true });
+
+  assert.deepEqual(prisma.task.findMany.mock.calls[0][0].where.status, {
+    category: { not: 'done' },
   });
 });
 
@@ -262,6 +272,15 @@ test('categoria com concluídas resolve para a categoria concluída', async () =
   prisma.task.findMany.mockImplementation(async () => []);
 
   await service.findByFilters('tenant-1', { statusCategory: 'active', completed: true });
+
+  assert.deepEqual(prisma.task.findMany.mock.calls[0][0].where.status, { category: 'done' });
+});
+
+test('concluídas sem categoria mantém a forma antiga do filtro de status', async () => {
+  const { service, prisma } = doubles();
+  prisma.task.findMany.mockImplementation(async () => []);
+
+  await service.findByFilters('tenant-1', { completed: true });
 
   assert.deepEqual(prisma.task.findMany.mock.calls[0][0].where.status, { category: 'done' });
 });

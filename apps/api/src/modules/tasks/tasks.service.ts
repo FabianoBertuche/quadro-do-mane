@@ -119,15 +119,21 @@ export class TasksService {
     }
 
     /**
-     * Condição de status montada uma vez só. `statusCategory`, `completed` e `overdue`
-     * desembocam no mesmo objeto para que o filtro do card sobreviva à combinação —
-     * escrever direto em `where.status` fazia o último sobrescrever o anterior e a
-     * resposta saía como superconjunto.
+     * Condição de status montada uma vez só. `statusCategory` entra como string e só
+     * vira objeto quando o atraso precisa conviver com ela, porque `overdue` sozinho
+     * tem de continuar com a forma que já estava no ar (`category: { not: 'done' }`),
+     * que exclui a tarefa sem status. `completed` vem por último e sobrescreve com
+     * `'done'`, como antes.
      */
-    const statusWhere: { category?: string; not?: { category: string } } = {};
+    const statusWhere: { category?: string | { equals?: string; not?: string } } = {};
     if (filters.statusCategory) statusWhere.category = filters.statusCategory;
+    if (filters.overdue) {
+      statusWhere.category = {
+        ...(typeof statusWhere.category === 'string' ? { equals: statusWhere.category } : statusWhere.category),
+        not: 'done',
+      };
+    }
     if (filters.completed) statusWhere.category = 'done';
-    if (filters.overdue) statusWhere.not = { category: 'done' };
     if (Object.keys(statusWhere).length) where.status = statusWhere;
 
     if (filters.blocked) {
