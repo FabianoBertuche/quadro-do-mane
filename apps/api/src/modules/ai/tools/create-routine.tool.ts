@@ -3,6 +3,7 @@ import { DailyRoutineService } from '../../daily-routine/daily-routine.service';
 import { UsersService } from '../../users/users.service';
 import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { clarification, requirePermission, resolveOne, TaskToolInput } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 const validate = (args: unknown): Record<string, any> => {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
@@ -19,6 +20,7 @@ const validate = (args: unknown): Record<string, any> => {
 @Injectable()
 export class CreateRoutineTool implements AiTool {
   name = 'create_routine';
+  permission: PermissionCode = 'daily_routine.manage';
   description = 'Cria uma rotina diária com responsável inequívoco.';
   parameters = { type: 'object', additionalProperties: false, required: ['title'], properties: { title: { type: 'string' }, description: { type: 'string' }, scheduledTime: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }, assignedTenantUserId: { type: 'string' }, assignedUserName: { type: 'string' } } };
   validate = validate;

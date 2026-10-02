@@ -1,3 +1,5 @@
+import { PermissionCode } from './permission-codes';
+
 export interface AiToolInput {
   tenantId: string;
   actorTenantUserId: string;
@@ -21,6 +23,8 @@ export interface AiTool {
   name: string;
   readOnly?: boolean;
   description?: string;
+  /** Permissão exigida do ator; ausente mantém a tool visível. */
+  permission?: PermissionCode;
   parameters: Record<string, unknown>;
   validate?(args: unknown): unknown;
   authorize(input: AiToolInput): Promise<void | AiToolResult>;

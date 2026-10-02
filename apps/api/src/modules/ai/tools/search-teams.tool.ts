@@ -1,9 +1,11 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { TeamsService } from '../../teams/teams.service';
 import { bounded, clarification, exact, requirePermission, resolveId, resolveReadOne, validateReadArgs } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class SearchTeamsTool implements AiTool {
   name = 'search_teams';
+  permission: PermissionCode = 'teams.view';
   readOnly = true;
   description = 'Busca equipes do tenant com relacionamentos redigidos.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, teamId: { type: 'string' } } };

@@ -1,9 +1,11 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { ProjectsService } from '../../projects/projects.service';
 import { clarification, resolveId, resolveOne, TaskToolInput, requirePermission, validateSearchArgs, visibleProjects } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class SearchTasksTool implements AiTool {
   name = 'search_tasks';
+  permission: PermissionCode = 'tasks.view';
   readOnly = true;
   description = 'Busca tarefas acessíveis no tenant e retorna resumos limitados. Use myTasks para perguntas sobre as tarefas do usuário autenticado e overdue para tarefas atrasadas.';
   parameters = { type: 'object', additionalProperties: false, properties: { search: { type: 'string' }, projectId: { type: 'string' }, projectName: { type: 'string' }, statusId: { type: 'string' }, statusName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, assigneeName: { type: 'string' }, priorityId: { type: 'string' }, priorityName: { type: 'string' }, myTasks: { type: 'boolean' }, overdue: { type: 'boolean' } } };

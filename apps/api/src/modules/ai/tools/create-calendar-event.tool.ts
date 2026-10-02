@@ -4,6 +4,7 @@ import { ProjectsService } from '../../projects/projects.service';
 import { UsersService } from '../../users/users.service';
 import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { clarification, requirePermission, resolveOne, TaskToolInput, visibleProjects } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 const allowed = ['title', 'description', 'type', 'startAt', 'endAt', 'allDay', 'relatedProjectId', 'relatedProjectName', 'relatedTaskId', 'assigneeTenantUserId', 'assigneeName', 'attendeeIds', 'attendeeNames', 'recurrenceRule', 'recurrenceInterval', 'recurrenceUnit', 'recurrenceEndAt', 'remindDaysBefore'];
 const recurrenceUnits = ['day', 'week', 'month', 'year'] as const;
@@ -44,6 +45,7 @@ const validate = (args: unknown): Record<string, any> => {
 @Injectable()
 export class CreateCalendarEventTool implements AiTool {
   name = 'create_calendar_event';
+  permission: PermissionCode = 'calendar.create';
   description = 'Cria um evento de calendário após resolver projeto e participantes autorizados.';
   parameters = { type: 'object', additionalProperties: false, required: ['title', 'startAt', 'endAt'], properties: {
     title: { type: 'string', minLength: 1 }, description: { type: 'string', minLength: 1 }, type: { type: 'string', minLength: 1 }, startAt: { type: 'string', minLength: 1 }, endAt: { type: 'string', minLength: 1 }, allDay: { type: 'boolean' }, relatedProjectId: { type: 'string', minLength: 1 }, relatedProjectName: { type: 'string', minLength: 1 }, relatedTaskId: { type: 'string', minLength: 1 }, assigneeTenantUserId: { type: 'string', minLength: 1 }, assigneeName: { type: 'string', minLength: 1 }, attendeeIds: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, attendeeNames: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, recurrenceRule: { type: 'string', minLength: 1, enum: recurrenceRules }, recurrenceInterval: { type: 'integer', minimum: 1, maximum: 365 }, recurrenceUnit: { type: 'string', minLength: 1, enum: recurrenceUnits }, recurrenceEndAt: { type: 'string', minLength: 1 }, remindDaysBefore: { type: 'integer', minimum: 0, maximum: 365 },

@@ -3,6 +3,7 @@ import { ProjectsService } from '../../projects/projects.service';
 import { UsersService } from '../../users/users.service';
 import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { clarification, requirePermission, resolveOne, TaskToolInput } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 const validate = (args: unknown) => {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
@@ -15,6 +16,7 @@ const validate = (args: unknown) => {
 @Injectable()
 export class AddProjectMemberTool implements AiTool {
   name = 'add_project_member';
+  permission: PermissionCode = 'projects.manage_members';
   description = 'Adiciona um colaborador a um projeto autorizado.';
   parameters = { type: 'object', additionalProperties: false, required: ['projectId'], properties: { projectId: { type: 'string' }, memberTenantUserId: { type: 'string' }, memberName: { type: 'string' }, roleInProject: { type: 'string' } } };
   validate = validate;

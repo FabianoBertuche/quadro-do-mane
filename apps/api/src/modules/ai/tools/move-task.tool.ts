@@ -2,9 +2,11 @@ import { AiTool, AiToolInput } from './ai-tool.port';
 import { ForbiddenException } from '@nestjs/common';
 import { ProjectsService } from '../../projects/projects.service';
 import { clarification, requirePermission, resolveId, resolveOne, TaskToolInput, validateMoveArgs, visibleProjects } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class MoveTaskTool implements AiTool {
   name = 'move_task';
+  permission: PermissionCode = 'tasks.move';
   description = 'Altera o status de uma tarefa.';
   parameters = { type: 'object', additionalProperties: false, required: ['taskId'], properties: { taskId: { type: 'string' }, statusId: { type: 'string' }, statusName: { type: 'string' } } };
   constructor(private readonly tasks: any, private readonly users: any, private readonly projects?: ProjectsService) {}

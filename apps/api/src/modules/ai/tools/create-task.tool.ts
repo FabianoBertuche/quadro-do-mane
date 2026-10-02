@@ -2,9 +2,11 @@ import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { ForbiddenException } from '@nestjs/common';
 import { ProjectsService } from '../../projects/projects.service';
 import { assertVisibleProject, clarification, missingProject, requirePermission, resolveId, resolveOne, TaskToolInput, validateCreateArgs, visibleProjects } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class CreateTaskTool implements AiTool {
   name = 'create_task';
+  permission: PermissionCode = 'tasks.create';
   description = 'Cria uma tarefa após resolver projeto e referências dentro do tenant.';
   parameters = { type: 'object', additionalProperties: false, required: ['title'], properties: { title: { type: 'string' }, projectId: { type: 'string' }, projectName: { type: 'string' }, description: { type: 'string' }, assigneeName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, statusName: { type: 'string' }, statusId: { type: 'string' }, priorityName: { type: 'string' }, priorityId: { type: 'string' }, startDate: { type: 'string' }, dueDate: { type: 'string' } } };
   constructor(private readonly tasks: any, private readonly projects: ProjectsService, private readonly users: any) {}

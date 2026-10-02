@@ -2,9 +2,11 @@ import { AiTool, AiToolInput } from './ai-tool.port';
 import { ForbiddenException } from '@nestjs/common';
 import { ProjectsService } from '../../projects/projects.service';
 import { clarification, requirePermission, resolveId, resolveOne, TaskToolInput, validateUpdateArgs, visibleProjects } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class UpdateTaskTool implements AiTool {
   name = 'update_task';
+  permission: PermissionCode = 'tasks.edit';
   description = 'Atualiza campos permitidos de uma tarefa.';
   parameters = { type: 'object', additionalProperties: false, required: ['taskId'], properties: { taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, assigneeName: { type: 'string' }, assigneeTenantUserId: { type: 'string' }, statusName: { type: 'string' }, statusId: { type: 'string' }, priorityName: { type: 'string' }, priorityId: { type: 'string' }, startDate: { type: 'string' }, dueDate: { type: 'string' } } };
   constructor(private readonly tasks: any, private readonly users: any, private readonly projects?: ProjectsService) {}

@@ -116,8 +116,8 @@ import { AI_PERMISSION_SERVICE, AiPermissionService } from './ai-permission.serv
     },
     {
       provide: AiToolRegistryService,
-      inject: [SearchProjectsTool, SearchTasksTool, SearchUsersTool, SearchTeamsTool, SearchCalendarTool, SearchRoutinesTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool, CreateRoutineTool, DeleteRoutineTool, AddTeamMemberTool, AddProjectMemberTool],
-      useFactory: (...tools: AiTool[]) => new AiToolRegistryService(tools),
+      inject: [AI_PERMISSION_SERVICE, SearchProjectsTool, SearchTasksTool, SearchUsersTool, SearchTeamsTool, SearchCalendarTool, SearchRoutinesTool, CreateTaskTool, UpdateTaskTool, MoveTaskTool, CreateCalendarEventTool, CreateRoutineTool, DeleteRoutineTool, AddTeamMemberTool, AddProjectMemberTool],
+      useFactory: (permissions: AiPermissionService, ...tools: AiTool[]) => new AiToolRegistryService(tools, permissions),
     },
     {
       provide: AI_PROVIDER,

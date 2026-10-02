@@ -1,8 +1,10 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { bounded, clarification, exact, requirePermission, resolveId, resolveReadOne, validateReadArgs } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class SearchUsersTool implements AiTool {
   name = 'search_users';
+  permission: PermissionCode = 'users.view';
   readOnly = true;
   description = 'Busca colaboradores do tenant sem expor dados de contato.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, userId: { type: 'string' } } };

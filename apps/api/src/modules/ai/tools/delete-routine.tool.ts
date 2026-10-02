@@ -3,6 +3,7 @@ import { DailyRoutineService } from '../../daily-routine/daily-routine.service';
 import { UsersService } from '../../users/users.service';
 import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { requirePermission, TaskToolInput } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 const validate = (args: unknown): { routineId: string } => {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
@@ -16,6 +17,7 @@ const validate = (args: unknown): { routineId: string } => {
 @Injectable()
 export class DeleteRoutineTool implements AiTool {
   name = 'delete_routine';
+  permission: PermissionCode = 'daily_routine.manage';
   description = 'Remove uma rotina diária existente. Use search_routines para encontrar o ID da rotina.';
   parameters = { type: 'object', additionalProperties: false, required: ['routineId'], properties: { routineId: { type: 'string' } } };
   validate = validate;

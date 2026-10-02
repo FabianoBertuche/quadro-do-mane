@@ -8,6 +8,7 @@ import { AiProviderRoutingService, AI_OLLAMA_PROVIDER_FACTORY } from './ai-provi
 import { AiIdentityContextService } from './ai-identity.service';
 import { AiOAuthService } from './ai-oauth.service';
 import { AiServerRuntimeService } from './ai-server-runtime.service';
+import { AI_PERMISSION_SERVICE } from './ai-permission.service';
 import { AiServerRuntimeController } from './ai-server-runtime.controller';
 import { OpenAiResponsesProvider } from './providers/openai-responses.provider';
 import { AiToolRegistryService } from './tools/ai-tool-registry.service';
@@ -75,7 +76,7 @@ test('always supplies the Responses provider while the API-key fallback is disab
   assert.ok(factory(config({})) instanceof OpenAiResponsesProvider);
 });
 
-test('registers every authorized read and action tool with concrete dependencies', () => {
+test('registra todas as tools e injeta as permissões do ator antes delas', () => {
   const providers = Reflect.getMetadata('providers', AiModule) ?? [];
   const expected = [
     SearchProjectsTool, SearchTasksTool, SearchUsersTool, SearchTeamsTool, SearchCalendarTool, SearchRoutinesTool,
@@ -85,7 +86,7 @@ test('registers every authorized read and action tool with concrete dependencies
   for (const tool of expected) assert.ok(providers.some((entry: any) => entry === tool || entry?.provide === tool), `${tool.name} is not registered`);
 
   const registryProvider = providers.find((entry: any) => entry?.provide === AiToolRegistryService);
-  assert.deepEqual(registryProvider.inject, expected);
+  assert.deepEqual(registryProvider.inject, [AI_PERMISSION_SERVICE, ...expected]);
 });
 
 test('constructs task tools with explicit domain service dependencies', () => {
@@ -113,7 +114,7 @@ test('constructs task tools with explicit domain service dependencies', () => {
 test('publishes strict schemas that reject unknown tool arguments', () => {
   const providers = Reflect.getMetadata('providers', AiModule) ?? [];
   const registryProvider = providers.find((entry: any) => entry?.provide === AiToolRegistryService);
-  const tools = registryProvider.useFactory(...registryProvider.inject.map((Tool: any) =>
+  const tools = registryProvider.useFactory({ can: async () => true, codesFor: async () => [] } as any, ...registryProvider.inject.slice(1).map((Tool: any) =>
     new Tool({ findAll: async () => [], findOne: async () => ({}) } as any, { findAll: async () => [], findOne: async () => ({}) } as any, { findByFilters: async () => [], getStatuses: async () => [], getPriorities: async () => [] } as any)));
 
   assert.ok(tools instanceof AiToolRegistryService);

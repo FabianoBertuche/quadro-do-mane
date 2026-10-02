@@ -3,6 +3,7 @@ import { TeamsService } from '../../teams/teams.service';
 import { UsersService } from '../../users/users.service';
 import { AiTool, AiToolInput, AiToolResult } from './ai-tool.port';
 import { clarification, requirePermission, resolveOne, TaskToolInput } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 const validate = (args: unknown) => {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BadRequestException('Argumentos inválidos');
@@ -15,6 +16,7 @@ const validate = (args: unknown) => {
 @Injectable()
 export class AddTeamMemberTool implements AiTool {
   name = 'add_team_member';
+  permission: PermissionCode = 'teams.manage_members';
   description = 'Adiciona um colaborador a uma equipe autorizada.';
   parameters = { type: 'object', additionalProperties: false, required: ['teamId'], properties: { teamId: { type: 'string' }, memberTenantUserId: { type: 'string' }, memberName: { type: 'string' } } };
   validate = validate;

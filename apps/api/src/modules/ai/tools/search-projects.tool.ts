@@ -1,9 +1,11 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { ProjectsService } from '../../projects/projects.service';
 import { bounded, clarification, exact, requirePermission, resolveId, resolveReadOne, validateReadArgs } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class SearchProjectsTool implements AiTool {
   name = 'search_projects';
+  permission: PermissionCode = 'projects.view';
   readOnly = true;
   description = 'Busca projetos visíveis no tenant e retorna resumos limitados.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { search: { type: 'string' }, name: { type: 'string' }, projectId: { type: 'string' } } };

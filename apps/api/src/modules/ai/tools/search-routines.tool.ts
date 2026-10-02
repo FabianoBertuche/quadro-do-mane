@@ -1,9 +1,11 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { DailyRoutineService } from '../../daily-routine/daily-routine.service';
 import { bounded, clarification, requirePermission, resolveReadOne, validateReadArgs } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class SearchRoutinesTool implements AiTool {
   name = 'search_routines';
+  permission: PermissionCode = 'daily_routine.view';
   readOnly = true;
   description = 'Busca rotinas autorizadas sem expor notas privadas.';
   parameters = { type: 'object', additionalProperties: false, required: [], properties: { requestedTenantUserId: { type: 'string' }, requestedUserName: { type: 'string' } } };

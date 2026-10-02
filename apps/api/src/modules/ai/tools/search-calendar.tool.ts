@@ -1,9 +1,11 @@
 import { AiTool, AiToolInput } from './ai-tool.port';
 import { EventsService } from '../../events/events.service';
 import { bounded, clarification, requirePermission, resolveReadOne, safeDate, validateReadArgs } from './task-tool.schemas';
+import { PermissionCode } from './permission-codes';
 
 export class SearchCalendarTool implements AiTool {
   name = 'search_calendar';
+  permission: PermissionCode = 'calendar.view';
   readOnly = true;
   description = 'Busca eventos autorizados em um período limitado.';
   parameters = { type: 'object', additionalProperties: false, required: [], anyOf: [{ not: { anyOf: [{ required: ['startDate'] }, { required: ['endDate'] }] } }, { required: ['startDate', 'endDate'] }], properties: { startDate: { type: 'string' }, endDate: { type: 'string' }, requestedTenantUserId: { type: 'string' }, requestedUserName: { type: 'string' } } };
