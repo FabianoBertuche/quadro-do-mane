@@ -143,25 +143,48 @@ combina o filtro do card com os dropdowns "Concluídas" e "Atrasadas" nos mesmos
 `statusCategory=active&overdue=true` é alcançável com um clique. Com escrita por cima, a categoria
 seria descartada em silêncio e a resposta viria como superconjunto.
 
+**Preservar o shape antigo exatamente como é hoje quando `statusCategory` não vem.** As duas formas
+abaixo não são equivalentes e trocar a que já existe muda um filtro publicado:
+
+| filtro | shape atual | shape com `statusCategory` | não pode virar |
+| --- | --- | --- | --- |
+| `overdue` sozinho | `{ category: { not: 'done' } }` | idem | `{ not: { category: 'done' } }` |
+| `completed` sozinho | `{ category: 'done' }` | idem | — |
+| `statusCategory` sozinho | — | `{ category: 'active' }` | `{ category: { equals: 'active' } }` |
+
+`Task.statusId` é anulável (`schema.prisma`) e `tasks.service.ts` deixa `statusId` null quando o tenant
+não tem status. `{ category: { not: 'done' } }` exige a existência da relação e exclui tarefa sem
+status; `{ not: { category: 'done' } }` não exige, e passaria a incluir. Esse filtro é usado pelo widget
+de atrasadas do dashboard, pelo card "Atrasadas" e pela `TaskFilterBar`.
+
 ```ts
-    const statusWhere: { category?: string; not?: { category: string } } = {};
+    const statusWhere: { category?: string | { equals?: string; not?: string } } = {};
     if (filters.statusCategory) statusWhere.category = filters.statusCategory;
+    if (filters.overdue) {
+      statusWhere.category = {
+        ...(typeof statusWhere.category === 'string' ? { equals: statusWhere.category } : statusWhere.category),
+        not: 'done',
+      };
+    }
     if (filters.completed) statusWhere.category = 'done';
-    if (filters.overdue) statusWhere.not = { category: 'done' };
     if (Object.keys(statusWhere).length) where.status = statusWhere;
 ```
+
+O `typeof === 'string'` é o que impede o embrulho em `equals` de vazar para o caminho do card. E
+`filters.completed` vem por último de propósito: ele vence a precedência, como já fazia.
 
 O `where.statusId` que já existe fica como está: `statusId` é coluna escalar de `Task`
 (`schema.prisma`) e o Prisma combina os dois campos com AND. Não trocar por `where.status = { id }`.
 
-Semântica resultante: `category` e `not` são combinados pelo Prisma com AND, então
-`statusCategory=active&overdue=true` dá `category = 'active' AND category <> 'done'`. Já
-`statusCategory=active&completed=true` dá a combinação contraditória `category = 'done'`, que retorna
-vazio — que é a resposta honesta para "em andamento e concluídas ao mesmo tempo".
+Semântica da composição: `statusCategory=active&overdue=true` dá `{ category: { equals: 'active', not:
+'done' } }`, que o Prisma traduz com AND entre os operadores do mesmo objeto escalar — padrão já usado
+em produção em `daily-routine.service.ts`. `statusCategory=active&completed=true` dá a combinação
+contraditória `{ category: 'done' }`, que retorna vazio: resposta honesta para "em andamento e concluídas".
 
-Cobrir com teste: um caso que envie `statusCategory` e `overdue` juntos e afirme o objeto combinado,
-e um caso `statusCategory` + `completed`. Cobrir também que `statusCategory` sozinho continua
-montando `{ category: 'active' }`, para não regredir o caso do card.
+Cobrir com teste, um caso por linha da tabela mais a composição: `statusCategory` sozinho,
+`statusCategory`+`overdue`, `statusCategory`+`completed`, e `overdue` e `completed` sozinhos — os dois
+últimos existem justamente para travar os shapes pré-existentes, que nenhum teste fixava.
+
 
 
 
