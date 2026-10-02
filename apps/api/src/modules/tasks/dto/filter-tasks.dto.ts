@@ -1,9 +1,11 @@
-import { IsOptional, IsString, IsUUID, IsBooleanString, IsDateString } from 'class-validator';
+import { IsOptional, IsString, IsUUID, IsBooleanString, IsDateString, IsIn } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class FilterTasksDto {
   @ApiPropertyOptional() @IsUUID() @IsOptional() projectId?: string;
   @ApiPropertyOptional() @IsUUID() @IsOptional() statusId?: string;
+  /** Vocabulário de `TaskStatus.category` no seed; `active` é o que o dashboard conta como "em andamento". */
+  @ApiPropertyOptional() @IsIn(['pending', 'active', 'done']) @IsOptional() statusCategory?: string;
   @ApiPropertyOptional() @IsUUID() @IsOptional() assigneeTenantUserId?: string;
   @ApiPropertyOptional() @IsUUID() @IsOptional() priorityId?: string;
   @ApiPropertyOptional() @IsUUID() @IsOptional() teamId?: string;

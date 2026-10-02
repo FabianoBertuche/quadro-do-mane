@@ -86,6 +86,7 @@ export class TasksService {
     projectId?: string;
     projectIds?: string[];
     statusId?: string;
+    statusCategory?: string;
     assigneeTenantUserId?: string;
     priorityId?: string;
     teamId?: string;
@@ -105,6 +106,7 @@ export class TasksService {
     if (filters.projectId) where.projectId = filters.projectId;
     if (filters.projectIds) where.projectId = { in: filters.projectIds };
     if (filters.statusId) where.statusId = filters.statusId;
+    if (filters.statusCategory) where.status = { category: filters.statusCategory };
     if (filters.assigneeTenantUserId) where.assigneeTenantUserId = filters.assigneeTenantUserId;
     if (filters.priorityId) where.priorityId = filters.priorityId;
     if (filters.teamId) where.teamId = filters.teamId;

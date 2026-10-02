@@ -264,7 +264,7 @@ export default function DashboardPage() {
 
   const kpiCards = [
     { label: 'Total de Tarefas', value: overview?.totalTasks ?? '-', icon: CheckSquare, color: 'bg-blue-500/10 text-blue-500', iconBg: 'bg-blue-500', filter: {} as Record<string, string> },
-    { label: 'Em Andamento', value: overview?.inProgressTasks ?? '-', icon: PlayCircle, color: 'bg-amber-500/10 text-amber-500', iconBg: 'bg-amber-500', filter: { statusCategory: 'in_progress' } },
+    { label: 'Em Andamento', value: overview?.inProgressTasks ?? '-', icon: PlayCircle, color: 'bg-amber-500/10 text-amber-500', iconBg: 'bg-amber-500', filter: { statusCategory: 'active' } },
     { label: 'Concluídas', value: overview?.completedTasks ?? '-', icon: CheckCircle2, color: 'bg-emerald-500/10 text-emerald-500', iconBg: 'bg-emerald-500', filter: { completed: 'true' } },
     { label: 'Atrasadas', value: overview?.overdueTasks ?? '-', icon: AlertTriangle, color: 'bg-red-500/10 text-red-500', iconBg: 'bg-red-500', filter: { overdue: 'true' } },
     { label: 'Projetos Ativos', value: overview?.activeProjects ?? '-', icon: FolderKanban, color: 'bg-purple-500/10 text-purple-500', iconBg: 'bg-purple-500', filter: {} as Record<string, string> },

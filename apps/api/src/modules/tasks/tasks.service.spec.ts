@@ -235,3 +235,12 @@ test('notifica somente quando o dueDate persistido muda', async () => {
   assert.equal(input.type, 'task_due_date_changed');
   assert.deepEqual(input.payload, { taskId: 'task-1', projectId: 'project-1', route: '/task/task-1' });
 });
+
+test('a categoria de status vira a condição do status na consulta', async () => {
+  const { service, prisma } = doubles();
+  prisma.task.findMany.mockImplementation(async () => []);
+
+  await service.findByFilters('tenant-1', { statusCategory: 'active' });
+
+  assert.deepEqual(prisma.task.findMany.mock.calls[0][0].where.status, { category: 'active' });
+});
