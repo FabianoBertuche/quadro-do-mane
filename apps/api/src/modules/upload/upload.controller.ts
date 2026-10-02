@@ -16,30 +16,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
 import { RequestUser } from '../../common/interfaces/request-context.interface';
-
-const ALLOWED_MIMES = [
-  // Images
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'image/svg+xml',
-  // Documents
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  // Spreadsheets
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/csv',
-  // Presentations
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  // Text
-  'text/plain',
-] as const;
-
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+import { ALLOWED_MIMES, MAX_FILE_SIZE } from './upload.constants';
 
 interface MulterFile {
   buffer: Buffer;
