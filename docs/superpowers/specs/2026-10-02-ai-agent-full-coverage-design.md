@@ -33,6 +33,7 @@ inviável. O programa é entregue em ondas; esta spec cobre as duas primeiras.
 | Tipos de anexo no chat | Texto/código + imagens (vision) + extração de PDF/DOCX/XLSX |
 | Bugs de UI | Corrigir os quatro encontrados na auditoria |
 | Arquitetura | Toolkits por domínio com exposição por permissão |
+| Semântica de permissão do agente | Espelhar o `PermissionGuard`: só `admin` ignora a checagem |
 | Entrega | Ondas, cada uma com spec → plano → ciclo próprio |
 
 ## Mapa de ondas
@@ -106,9 +107,42 @@ Três fatos do código atual:
 ### Permissão como dado da tool
 
 `AiTool` (`tools/ai-tool.port.ts:20`) ganha `permission?: PermissionCode`.
-Cada tool declara a permissão uma vez; o `authorize()` passa a ser o
-`requirePermission` genérico já existente (`task-tool.schemas.ts:69`), sem
-repetição por tool.
+Cada tool declara a permissão uma vez; o `authorize()` passa a ser a
+autorização do `AiPermissionService`, sem repetição por tool.
+
+### `AiPermissionService`
+
+`requirePermission` (`task-tool.schemas.ts:69`) resolve uma query por tool
+chamada. Com ~60 tools isso vira uma query por tool por mensagem. Novo
+`apps/api/src/modules/ai/ai-permission.service.ts`, com uma consulta por
+mensagem e resultado reaproveitado:
+
+- `codesFor({ tenantId, tenantUserId })` — resolve o conjunto de códigos do
+  papel via `tenantUser.role.rolePermissions`, memoizado por
+  `tenantId:tenantUserId` no processo
+- `can(input, permission)` — `true` para `admin`; demais papéis só com o código
+  no conjunto
+- `invalidate(tenantId, tenantUserId)` — para os testes e para uso quando uma
+  mudança de papel invalida a memoização
+
+### Correção de semântica: só `admin` ignora permissões
+
+Hoje as duas camadas discordam:
+
+| camada | bypass |
+|---|---|
+| `PermissionGuard` (HTTP/UI) | apenas `admin` (`permission.guard.ts:38-40`) |
+| `requirePermission` (IA) | `admin` **e** `gestor` (`task-tool.schemas.ts:73`) |
+
+Ou seja, o agente hoje é mais permissivo que a tela: um gestor apaga tarefa
+pelo chat, mas não pela interface, porque o seed não lhe dá `tasks.delete`.
+
+`AiPermissionService` passa a espelhar o `PermissionGuard`. Isso fecha um
+escalonamento de privilégio real e faz agente e tela concordarem.
+
+**Efeito colateral aceito:** `gestor` perde `delete_task`, `delete_project` e
+`delete_team` pelo agente, porque o seed não lhes dá `*.delete`. As tools de
+exclusão continuam existindo e operam para `admin`.
 
 ### Exposição por permissão
 
@@ -184,7 +218,8 @@ Leitura executa direto; escrita vira proposta de confirmação.
 `tasks.delete`, `projects.delete` e `teams.delete` estão somente no papel
 `admin` — `prisma/seed.ts:202-235` não os concede a gestor nem a colaborador.
 As tools de exclusão ficam, portanto, restritas a admin. Coerente com a
-permissão, ainda que a cobertura pedida tenha sido total.
+permissão, ainda que a cobertura pedida tenha sido total. Vale o mesmo para
+qualquer endpoint guardado por `PermissionGuard`.
 
 ### Ajustes derivados
 
@@ -264,6 +299,9 @@ confirmação — perder o acesso entre pedir e confirmar bloqueia a ação.
 - `tools/registry.spec.ts`: `listVisible` filtra por papel. Colaborador não vê
   `delete_task`; convidado recebe apenas leitura; gestor vê create/update e não
   vê delete.
+- `ai-permission.service.spec.ts`: `admin` passa em qualquer código; `gestor`
+  sem o código é negado; códigos são resolvidos uma vez por usuário e
+  `invalidate` limpa a memoização.
 - `tools/permission-codes.spec.ts`: `permission-codes.ts` bate exatamente com
   `prisma/seed.ts:104-168`.
 - `upload/attachment-intake.spec.ts`: recusa `file://`, `localhost`,
