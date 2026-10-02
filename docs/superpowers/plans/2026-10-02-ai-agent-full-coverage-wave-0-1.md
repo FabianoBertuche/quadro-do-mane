@@ -14,6 +14,8 @@
 
 - Idioma de todo código, nome de símbolo público, mensagem de erro e comentário: **português do Brasil**. Exceções já existentes no arquivo: `name`, `readOnly`, `description`, `parameters`, `validate`, `authorize`, `execute` e os nomes de tool, que são **snake_case em inglês** e **não** podem ser traduzidos.
 - Toda tool de escrita declara `readOnly = false` (ou omite) e por isso passa por `AiActionProposal`. Toda tool de leitura declara `readOnly = true`.
+- **Toda tool registra a permissão na forma `permission: PermissionCode = '<código>'`, com o tipo explícito e o import `import { PermissionCode } from './permission-codes';` (ou `'../permission-codes'`).** A anotação explícita é obrigatória: `permission = 'x'` sem tipo é inferido como `string` e quebra `implements AiTool` sob `permission?: PermissionCode`.
+- Toda tool passa a declarar `permission`. Tool sem o campo é enviada a qualquer ator e anula o gating por perfil.
 - Nenhum resumo de tool pode devolver ID bruto como rótulo. ID só para encadeamento interno entre tools.
 - Schemas de tool usam `additionalProperties: false` e rejeitam campo desconhecido com `BadRequestException('Campo não suportado: <campo>')`.
 - `AiToolInput` sempre carrega `{ tenantId, actorTenantUserId, args }`. Nunca confiar em tenant vindo do modelo.
@@ -592,6 +594,37 @@ export interface AiTool {
 }
 ```
 
+Declarar a permissão também nas 14 tools que já existem. Sem isso elas ficam sem `permission` e `listVisible` as envia a qualquer ator, o que anula o gating por perfil (o `authorize` continua barrando, mas o modelo passa a ver e tentar tools que não pode usar):
+
+| Arquivo | `permission` |
+| --- | --- |
+| `tools/search-tasks.tool.ts` | `tasks.view` |
+| `tools/create-task.tool.ts` | `tasks.create` |
+| `tools/update-task.tool.ts` | `tasks.edit` |
+| `tools/move-task.tool.ts` | `tasks.move` |
+| `tools/search-projects.tool.ts` | `projects.view` |
+| `tools/search-users.tool.ts` | `users.view` |
+| `tools/search-teams.tool.ts` | `teams.view` |
+| `tools/search-calendar.tool.ts` | `calendar.view` |
+| `tools/search-routines.tool.ts` | `daily_routine.view` |
+| `tools/create-calendar-event.tool.ts` | `calendar.create` |
+| `tools/create-routine.tool.ts` | `daily_routine.manage` |
+| `tools/delete-routine.tool.ts` | `daily_routine.manage` |
+| `tools/add-team-member.tool.ts` | `teams.manage_members` |
+| `tools/add-project-member.tool.ts` | `projects.manage_members` |
+
+Em cada arquivo, acrescentar o campo logo abaixo de `readonly name = '...'` e o import:
+
+```ts
+import { PermissionCode } from './permission-codes';
+```
+
+```ts
+  permission: PermissionCode = 'tasks.view';
+```
+
+Conferir o nome do arquivo de cada tool antes de editar: a lista acima usa o nome da classe exportada.
+
 - [ ] **Step 4: Implementar `listVisible`**
 
 Subcrever `apps/api/src/modules/ai/tools/ai-tool-registry.service.ts`:
@@ -750,25 +783,33 @@ test('envia ao modelo apenas as tools que o ator pode executar', async () => {
   assert.deepEqual(received[0].tools.map((entry: any) => entry.name), ['search_tasks']);
 });
 
-test('tool fora do perfil é recusada antes de executar', async () => {
+test('tool fora do perfil vira recusa no resultado, sem executar', async () => {
   let executed = false;
-  const hidden = { name: 'delete_task', permission: 'tasks.delete', parameters: { type: 'object' }, authorize: async () => undefined, execute: async () => { executed = true; return {}; } };
-  const registry = new AiToolRegistryService(
-    [hidden],
-    { can: async () => false, codesFor: async () => [] } as any,
-  );
-  const { service } = setup(
-    { complete: async () => ({ text: 'ok', toolCalls: [{ id: 'c1', name: 'delete_task', arguments: {} }] }) },
-    undefined,
-    undefined,
-    { registry },
-  );
+  let completions = 0;
+  const provider = {
+    complete: async () => {
+      completions += 1;
+      return completions === 1
+        ? { text: 'Apagando.', toolCalls: [{ id: 'c1', name: 'delete_task', arguments: {} }] }
+        : { text: 'Não posso apagar tarefas.', toolCalls: [] };
+    },
+    buildToolContinuation: (input: any) => ({
+      ...input,
+      messages: [...input.messages, { role: 'tool', toolCallId: 'c1', content: JSON.stringify({ error: 'Esta ferramenta está indisponível para o seu perfil.' }) }],
+    }),
+  };
+  const { service } = setup(provider);
+  (service as any).registry = new AiToolRegistryService([{
+    name: 'delete_task', permission: 'tasks.delete', parameters: { type: 'object' },
+    authorize: async () => undefined,
+    execute: async () => { executed = true; return {}; },
+  }], { can: async () => false, codesFor: async () => [] } as any);
 
-  await assert.rejects(
-    () => service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'apaga', responseMode: AiResponseMode.TEXT }),
-    /indisponível para o seu perfil/,
-  );
+  const result = await service.sendMessage({ ...actor, conversationId: 'conversation-1' }, { text: 'apaga a tarefa', responseMode: AiResponseMode.TEXT });
+
   assert.equal(executed, false);
+  assert.equal(result.assistantMessage.content, 'Não posso apagar tarefas.');
+  assert.deepEqual(result.toolResults, [{ toolName: 'delete_task', result: { error: 'Esta ferramenta está indisponível para o seu perfil.' } }]);
 });
 ```
 
@@ -803,7 +844,7 @@ const run = await this.runProviderLoop(completionInput, execution, actor, visibl
 
 - [ ] **Step 4: Distinguir tool escondida de tool inexistente**
 
-Em `runProviderLoop`, trocar a assinatura e o bloco que resolve a tool (linhas 170 e 187-193):
+Em `runProviderLoop`, trocar a assinatura (linha 170) por esta, acrescentando o quarto parâmetro:
 
 ```ts
 private async runProviderLoop(
@@ -814,16 +855,43 @@ private async runProviderLoop(
 ) {
 ```
 
+Depois, substituir todo o bloco que vai de `const tools = completion.toolCalls.map(` até o fim do laço `for (const candidate of tools)`. A tool escondida vira um resultado de recusa no meio da conversa, e não um `throw`: abortar o turno com 403 mostraria erro ao usuário em vez de o assistente explicar o que não pode fazer. Ela nunca chega a `authorize` nem a `execute`.
+
 ```ts
-const tools = completion.toolCalls.map((toolCall) => {
-  const tool = this.registry.get(toolCall.name);
-  if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
-  if (!visibleToolNames.has(tool.name)) throw new ForbiddenException('Esta ferramenta está indisponível para o seu perfil.');
-  const args = this.normalizeToolArgs(tool, toolCall.arguments);
-  this.validateToolArgs(tool, args);
-  return { tool, args, call: { ...toolCall, arguments: args as Record<string, unknown> } };
-});
+      const tools = completion.toolCalls.map((toolCall) => {
+        const tool = this.registry.get(toolCall.name);
+        if (!tool) throw new BadRequestException(`Ferramenta não disponível: ${toolCall.name}`);
+        if (!visibleToolNames.has(tool.name)) return { tool, args: undefined, call: toolCall, hidden: true as const };
+        const args = this.normalizeToolArgs(tool, toolCall.arguments);
+        this.validateToolArgs(tool, args);
+        return { tool, args, call: { ...toolCall, arguments: args as Record<string, unknown> }, hidden: false as const };
+      });
+      const denied = { error: 'Esta ferramenta está indisponível para o seu perfil.' };
+      const currentClarifications: Array<{ tool: AiTool; args: unknown; result: AiToolClarification }> = [];
+      const currentReads: Array<{ tool: AiTool; args: unknown; call: typeof completion.toolCalls[number] }> = [];
+      const currentResults = [] as Array<{ call: typeof completion.toolCalls[number]; result: unknown }>;
+      for (const { tool, call, hidden } of tools) {
+        if (!hidden) continue;
+        currentResults.push({ call, result: denied });
+        toolResults.push({ toolName: tool.name, result: denied });
+      }
+      const currentActions = tools.filter(({ tool, hidden }) => !tool.readOnly && !hidden);
+      for (const candidate of tools) {
+        if (candidate.hidden) continue;
+        const result = await candidate.tool.authorize({ tenantId: actor.tenantId, actorTenantUserId: actor.tenantUserId, args: candidate.args });
+        if (this.isClarification(result)) currentClarifications.push({ tool: candidate.tool, args: candidate.args, result });
+        else if (candidate.tool.readOnly) currentReads.push({ tool: candidate.tool, args: candidate.args, call: candidate.call });
+        else actionTools.push({ tool: candidate.tool, args: candidate.args });
+      }
 ```
+
+A condição de continuação passa a contar `currentResults` em vez de `currentReads`, para que um turno com apenas tools escondidas ainda faça o provider responder em vez de persistir o texto da primeira chamada:
+
+```ts
+      if (!currentResults.length || currentActions.length) break;
+```
+
+Remover o import de `ForbiddenException` do topo do arquivo se e somente se ele não for usado em outro ponto de `ai.service.ts`.
 
 - [ ] **Step 5: Rodar o teste e ver passar**
 
@@ -1290,7 +1358,7 @@ const DENIED = 'Você não tem permissão para usar esta ferramenta';
 export class ListTaskCommentsTool implements AiTool {
   name = 'list_task_comments';
   readOnly = true;
-  permission = 'tasks.view';
+  permission: PermissionCode = 'tasks.view';
   description = 'Lista os comentários de uma tarefa com o nome de quem escreveu.';
   parameters = { type: 'object', additionalProperties: false, properties: { taskId: { type: 'string' }, taskName: { type: 'string' } } };
   validate = (args: unknown) => objectArgs(args, taskTargetFields);
@@ -1317,7 +1385,7 @@ export class ListTaskCommentsTool implements AiTool {
 @Injectable()
 export class AddTaskCommentTool implements AiTool {
   name = 'add_task_comment';
-  permission = 'tasks.comment';
+  permission: PermissionCode = 'tasks.comment';
   description = 'Comenta em uma tarefa. Use search_tasks para achar a tarefa.';
   parameters = {
     type: 'object', additionalProperties: false, required: ['content'],
@@ -1346,7 +1414,7 @@ export class AddTaskCommentTool implements AiTool {
 @Injectable()
 export class DeleteTaskCommentTool implements AiTool {
   name = 'delete_task_comment';
-  permission = 'tasks.comment';
+  permission: PermissionCode = 'tasks.comment';
   description = 'Remove um comentário de tarefa.';
   parameters = { type: 'object', additionalProperties: false, required: ['commentId'], properties: { commentId: { type: 'string' } } };
   validate = (args: unknown) => ({ commentId: nonEmpty((objectArgs(args, ['commentId']) as any).commentId, 'commentId') });
@@ -1380,7 +1448,7 @@ import { objectArgs, nonEmpty } from '../task-tool.schemas';
 @Injectable()
 export class CreateTaskChecklistTool implements AiTool {
   name = 'create_task_checklist';
-  permission = 'tasks.checklist_manage';
+  permission: PermissionCode = 'tasks.checklist_manage';
   description = 'Cria uma checklist numa tarefa.';
   parameters = { type: 'object', additionalProperties: false, required: ['taskId', 'title'], properties: { taskId: { type: 'string' }, title: { type: 'string' } } };
   validate = (args: unknown) => {
@@ -1399,7 +1467,7 @@ export class CreateTaskChecklistTool implements AiTool {
 @Injectable()
 export class AddTaskChecklistItemTool implements AiTool {
   name = 'add_task_checklist_item';
-  permission = 'tasks.checklist_manage';
+  permission: PermissionCode = 'tasks.checklist_manage';
   description = 'Adiciona um item a uma checklist de tarefa.';
   parameters = { type: 'object', additionalProperties: false, required: ['checklistId', 'content'], properties: { checklistId: { type: 'string' }, content: { type: 'string' } } };
   validate = (args: unknown) => {
@@ -1418,7 +1486,7 @@ export class AddTaskChecklistItemTool implements AiTool {
 @Injectable()
 export class ToggleTaskChecklistItemTool implements AiTool {
   name = 'toggle_task_checklist_item';
-  permission = 'tasks.checklist_manage';
+  permission: PermissionCode = 'tasks.checklist_manage';
   description = 'Marca ou desmarca um item de checklist.';
   parameters = { type: 'object', additionalProperties: false, required: ['itemId'], properties: { itemId: { type: 'string' } } };
   validate = (args: unknown) => ({ itemId: nonEmpty((objectArgs(args, ['itemId']) as any).itemId, 'itemId') });
@@ -1463,7 +1531,7 @@ const httpUrl = (value: unknown) => {
 export class ListTaskAttachmentsTool implements AiTool {
   name = 'list_task_attachments';
   readOnly = true;
-  permission = 'tasks.view';
+  permission: PermissionCode = 'tasks.view';
   description = 'Lista os anexos de uma tarefa com nome, tipo e tamanho.';
   parameters = { type: 'object', additionalProperties: false, required: ['taskId'], properties: { taskId: { type: 'string' } } };
   validate = (args: unknown) => ({ taskId: nonEmpty((objectArgs(args, ['taskId']) as any).taskId, 'taskId') });
@@ -1486,7 +1554,7 @@ export class ListTaskAttachmentsTool implements AiTool {
 @Injectable()
 export class AttachTaskFileTool implements AiTool {
   name = 'attach_task_file';
-  permission = 'tasks.attachments_manage';
+  permission: PermissionCode = 'tasks.attachments_manage';
   description = 'Baixa uma URL pública e anexa o arquivo numa tarefa. Aceita imagens, PDF, planilha, apresentação ou texto.';
   parameters = {
     type: 'object', additionalProperties: false, required: ['taskId', 'url'],
@@ -1519,7 +1587,7 @@ export class AttachTaskFileTool implements AiTool {
 @Injectable()
 export class DeleteTaskAttachmentTool implements AiTool {
   name = 'delete_task_attachment';
-  permission = 'tasks.attachments_manage';
+  permission: PermissionCode = 'tasks.attachments_manage';
   description = 'Remove um anexo de uma tarefa.';
   parameters = { type: 'object', additionalProperties: false, required: ['taskId', 'attachmentId'], properties: { taskId: { type: 'string' }, attachmentId: { type: 'string' } } };
   validate = (args: unknown) => {
@@ -1550,7 +1618,7 @@ import { resolveTaskTarget, taskTargetFields } from './task-target';
 @Injectable()
 export class DeleteTaskTool implements AiTool {
   name = 'delete_task';
-  permission = 'tasks.delete';
+  permission: PermissionCode = 'tasks.delete';
   description = 'Exclui uma tarefa. Use search_tasks para achar a tarefa e confirme com o usuário.';
   parameters = { type: 'object', additionalProperties: false, properties: { taskId: { type: 'string' }, taskName: { type: 'string' } } };
   validate = (args: unknown) => objectArgs(args, taskTargetFields);
@@ -1775,7 +1843,7 @@ const DENIED = 'Você não tem permissão para usar esta ferramenta';
 @Injectable()
 export class CreateProjectTool implements AiTool {
   name = 'create_project';
-  permission = 'projects.create';
+  permission: PermissionCode = 'projects.create';
   description = 'Cria um projeto. Confirme o nome e, se houver, a equipe com o usuário.';
   parameters = {
     type: 'object', additionalProperties: false, required: ['name'],
@@ -1797,7 +1865,7 @@ export class CreateProjectTool implements AiTool {
 @Injectable()
 export class UpdateProjectTool implements AiTool {
   name = 'update_project';
-  permission = 'projects.edit';
+  permission: PermissionCode = 'projects.edit';
   description = 'Atualiza um projeto existente. Aceita projectId ou projectName.';
   parameters = {
     type: 'object', additionalProperties: false,
@@ -1828,7 +1896,7 @@ export class UpdateProjectTool implements AiTool {
 @Injectable()
 export class DeleteProjectTool implements AiTool {
   name = 'delete_project';
-  permission = 'projects.delete';
+  permission: PermissionCode = 'projects.delete';
   description = 'Exclui um projeto e todas as tarefas dele. Confirme com o usuário antes.';
   parameters = { type: 'object', additionalProperties: false, required: ['projectId'], properties: { projectId: { type: 'string' } } };
   validate = (args: unknown) => ({ projectId: nonEmpty((objectArgs(args, ['projectId']) as any).projectId, 'projectId') });
@@ -1843,7 +1911,7 @@ export class DeleteProjectTool implements AiTool {
 @Injectable()
 export class RemoveProjectMemberTool implements AiTool {
   name = 'remove_project_member';
-  permission = 'projects.manage_members';
+  permission: PermissionCode = 'projects.manage_members';
   description = 'Remove uma pessoa da equipe do projeto. Use search_users para achar a pessoa.';
   parameters = {
     type: 'object', additionalProperties: false, required: ['projectId'],
@@ -2028,7 +2096,7 @@ const teamRows = async (teams: TeamsService, tenantId: string) => teams.findAll(
 @Injectable()
 export class CreateTeamTool implements AiTool {
   name = 'create_team';
-  permission = 'teams.create';
+  permission: PermissionCode = 'teams.create';
   description = 'Cria uma equipe. Confirme o nome e o gestor com o usuário.';
   parameters = {
     type: 'object', additionalProperties: false, required: ['name'],
@@ -2050,7 +2118,7 @@ export class CreateTeamTool implements AiTool {
 @Injectable()
 export class UpdateTeamTool implements AiTool {
   name = 'update_team';
-  permission = 'teams.edit';
+  permission: PermissionCode = 'teams.edit';
   description = 'Atualiza uma equipe existente. Aceita teamId ou teamName.';
   parameters = {
     type: 'object', additionalProperties: false,
@@ -2079,7 +2147,7 @@ export class UpdateTeamTool implements AiTool {
 @Injectable()
 export class DeleteTeamTool implements AiTool {
   name = 'delete_team';
-  permission = 'teams.delete';
+  permission: PermissionCode = 'teams.delete';
   description = 'Exclui uma equipe. Confirme com o usuário antes.';
   parameters = { type: 'object', additionalProperties: false, required: ['teamId'], properties: { teamId: { type: 'string' } } };
   validate = (args: unknown) => ({ teamId: nonEmpty((objectArgs(args, ['teamId']) as any).teamId, 'teamId') });
@@ -2094,7 +2162,7 @@ export class DeleteTeamTool implements AiTool {
 @Injectable()
 export class RemoveTeamMemberTool implements AiTool {
   name = 'remove_team_member';
-  permission = 'teams.manage_members';
+  permission: PermissionCode = 'teams.manage_members';
   description = 'Remove uma pessoa da equipe. Use search_users para achar a pessoa.';
   parameters = {
     type: 'object', additionalProperties: false, required: ['teamId'],
