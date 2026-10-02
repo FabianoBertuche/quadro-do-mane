@@ -95,8 +95,9 @@ export async function fetchOpenAiModels(
   });
   if (!response.ok) throw new Error(`OpenAI model catalog unavailable (${response.status})`);
   const body = await response.json().catch(() => ({}));
-  if (!Array.isArray(body?.data)) throw new Error('OpenAI model catalog response is invalid');
-  return body.data.flatMap((model: any) => model?.visibility === 'list'
+  const models = Array.isArray(body?.models) ? body.models : body?.data;
+  if (!Array.isArray(models)) throw new Error('OpenAI model catalog response is invalid');
+  return models.flatMap((model: any) => model?.visibility === 'list'
     && typeof model.slug === 'string' && typeof model.display_name === 'string'
     ? [{ slug: model.slug, displayName: model.display_name }]
     : []);

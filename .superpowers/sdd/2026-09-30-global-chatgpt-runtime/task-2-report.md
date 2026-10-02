@@ -140,3 +140,8 @@ nest build exited 0
 git diff --check
 exited 0
 ```
+
+## OAuth e2e scope fix (2026-09-30)
+
+- Added aiServerRuntime mock (upsert/findUnique/update) to ai-oauth.e2e.spec.ts and rewired aiOAuthConnection mock methods to match AiOAuthService's global runtime model (create/update/findFirst/updateMany with runtime-scoped semantics). The runtimeView tracks global connection ID and selected model state so the e2e passes.
+- Verification: node -r ts-node/register --test apps/api/src/modules/ai/ai-oauth.e2e.spec.ts apps/api/src/modules/ai/ai-server-runtime.service.spec.ts apps/api/src/modules/ai/ai-oauth.service.spec.ts apps/api/src/modules/ai/ai.module.spec.ts apps/api/src/modules/ai/ai-oauth.controller.spec.ts apps/api/src/modules/ai/ai.controller.spec.ts (41 passed, 0 failed). npm run build (exit 0). git diff --check (exit 0). Commit 169a88b.

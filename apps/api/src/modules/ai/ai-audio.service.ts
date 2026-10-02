@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, GoneException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, GoneException, Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RequestUser } from '../../common/interfaces/request-context.interface';
 import { AiService, AiActor } from './ai.service';
@@ -39,8 +39,8 @@ export class AiAudioService {
     @Inject(SPEECH_TO_TEXT_PROVIDER) private readonly speechToText: SpeechToTextProvider,
     @Inject(TEXT_TO_SPEECH_PROVIDER) private readonly textToSpeech: TextToSpeechProvider,
     private readonly temporaryAudio: TemporaryAudioService,
-    limits: Partial<AiAudioLimits> = {},
-    private readonly audit?: { record(input: { tenantId: string; actorTenantUserId: string; actorUserId?: string; action: string; targetId?: string; metadata?: Record<string, unknown> }): Promise<void> },
+    @Optional() limits: Partial<AiAudioLimits> = {},
+    @Optional() private readonly audit?: { record(input: { tenantId: string; actorTenantUserId: string; actorUserId?: string; action: string; targetId?: string; metadata?: Record<string, unknown> }): Promise<void> },
   ) {
     this.limits = { maxBytes: MAX_AI_AUDIO_BYTES, maxDurationSeconds: MAX_AI_AUDIO_DURATION_SECONDS, ...limits };
   }

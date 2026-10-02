@@ -26,9 +26,12 @@ const optionalDate = (value: unknown, field: string) => {
 };
 
 export const validateSearchArgs = (args: unknown) => {
-  const value = objectArgs(args, ['search', 'projectId', 'projectName', 'statusId', 'statusName', 'assigneeTenantUserId', 'assigneeName', 'priorityId', 'priorityName']);
+  const value = objectArgs(args, ['search', 'projectId', 'projectName', 'statusId', 'statusName', 'assigneeTenantUserId', 'assigneeName', 'priorityId', 'priorityName', 'myTasks', 'overdue']);
   for (const field of ['search', 'projectId', 'projectName', 'statusId', 'statusName', 'assigneeTenantUserId', 'assigneeName', 'priorityId', 'priorityName']) {
     if (value[field] !== undefined && typeof value[field] !== 'string') throw new BadRequestException(`${field} inválido`);
+  }
+  for (const field of ['myTasks', 'overdue']) {
+    if (value[field] !== undefined && typeof value[field] !== 'boolean') throw new BadRequestException(`${field} inválido`);
   }
   return value;
 };
@@ -120,6 +123,14 @@ export const assertVisibleProject = (projects: any[], projectId: string, field =
 
 export const exact = (value: unknown) => typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 
+const nameMatches = (items: any[], name: string) => {
+  const requested = exact(name);
+  const exactMatches = items.filter((item) => exact(item.name ?? item.user?.name) === requested);
+  return exactMatches.length
+    ? exactMatches
+    : items.filter((item) => exact(item.name ?? item.user?.name).includes(requested));
+};
+
 const clarificationMatch = (item: any, field: string): AiToolClarificationMatch => {
   const name = item.name ?? item.user?.name;
   if (typeof item.id !== 'string' || typeof name !== 'string') throw new ForbiddenException(`${field} não encontrado no tenant`);
@@ -127,14 +138,14 @@ const clarificationMatch = (item: any, field: string): AiToolClarificationMatch 
 };
 
 export const resolveOne = (items: any[], name: string, field: string) => {
-  const matches = items.filter((item) => exact(item.name ?? item.user?.name) === exact(name));
+  const matches = nameMatches(items, name);
   if (matches.length > 1) return { needsClarification: true as const, field, matches: matches.map((item) => clarificationMatch(item, field)) };
   if (matches.length === 0) throw new ForbiddenException(`${field} não encontrado no tenant`);
   return matches[0];
 };
 
 export const resolveReadOne = (items: any[], name: string, field: string) => {
-  const matches = items.filter((item) => exact(item.name ?? item.user?.name) === exact(name));
+  const matches = nameMatches(items, name);
   if (matches.length > 1) {
     return {
       needsClarification: true as const,

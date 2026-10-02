@@ -9,6 +9,7 @@ import {
   AiStreamingProvider,
   AiToolCall,
   AiProviderError,
+  AiToolResultForCall,
 } from '../ports/ai-provider.port';
 
 export type ResponsesFetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -52,11 +53,11 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
       if (!response.ok) throw await this.providerError(response);
       try {
         const text = '';
-        const toolCalls = new Map<string, { name: string; arguments: string }>();
+        const toolCalls = new Map<string, { id: string; callId: string; name: string; arguments: string }>();
         let outputText = text;
         for await (const event of this.readStream(response)) {
           if (event.type === 'text.delta') outputText += event.delta;
-          if (event.type === 'tool_call.started') toolCalls.set(event.id, { name: event.name, arguments: toolCalls.get(event.id)?.arguments ?? '' });
+          if (event.type === 'tool_call.started') toolCalls.set(event.id, { id: event.id, callId: event.callId ?? event.id, name: event.name, arguments: toolCalls.get(event.id)?.arguments ?? '' });
           if (event.type === 'tool_call.delta') {
             const call = toolCalls.get(event.id);
             if (call) call.arguments += event.delta;
@@ -73,6 +74,35 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
       }
     }
     throw new Error('AI provider request failed');
+  }
+
+  buildToolContinuation(input: AiCompletionInput, completion: AiCompletionResult, results: AiToolResultForCall[]): AiCompletionInput {
+    return {
+      ...input,
+      messages: [
+        ...input.messages,
+        ...completion.toolCalls.map((call) => ({
+          type: 'function_call' as const,
+          call_id: this.requireCallId(call),
+          name: call.name,
+          arguments: JSON.stringify(call.arguments),
+        })),
+        ...results.map(({ call, result }) => ({
+          type: 'function_call_output' as const,
+          call_id: this.requireCallId(call),
+          output: this.serializeToolResult(result),
+        })),
+      ],
+    };
+  }
+
+  private requireCallId(call: AiToolCall): string {
+    if (!call.id) throw new Error('AI provider returned a tool call without an id');
+    return call.id;
+  }
+
+  private serializeToolResult(result: unknown): string {
+    return typeof result === 'string' ? result : JSON.stringify(result ?? null);
   }
 
   async *stream(input: AiCompletionInput, auth?: AiProviderAuth): AsyncIterable<AiProviderStreamEvent> {
@@ -130,7 +160,7 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
       let event: any;
       try { event = JSON.parse(payload); } catch { throw this.safeStreamError('AI provider returned malformed stream', requestId); }
       if (event.type === 'response.output_text.delta') return [{ type: 'text.delta', delta: event.delta ?? '' }];
-      if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') return [{ type: 'tool_call.started', id: event.item.id ?? event.item.call_id, name: event.item.name }];
+       if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') return [{ type: 'tool_call.started', id: event.item.id ?? event.item.call_id, callId: event.item.call_id ?? event.item.id, name: event.item.name }];
       if (event.type === 'response.function_call_arguments.delta') return [{ type: 'tool_call.delta', id: event.item_id, delta: event.delta ?? '' }];
       if (event.type === 'response.function_call_arguments.done') return [{ type: 'tool_call.done', id: event.item_id, arguments: event.arguments ?? '' }];
       if (event.type === 'response.output_item.done' && event.item?.type === 'function_call') return [{ type: 'tool_call.done', id: event.item.id ?? event.item.call_id, arguments: event.item.arguments ?? '' }];
@@ -141,8 +171,8 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
         terminal = true;
         const output: AiProviderStreamEvent[] = [];
         for (const item of event.response.output ?? []) {
-          if (item.type === 'function_call') {
-            output.push({ type: 'tool_call.started', id: item.id ?? item.call_id, name: item.name });
+           if (item.type === 'function_call') {
+             output.push({ type: 'tool_call.started', id: item.id ?? item.call_id, callId: item.call_id ?? item.id, name: item.name });
             if (item.arguments !== undefined) output.push({ type: 'tool_call.done', id: item.id ?? item.call_id, arguments: item.arguments });
           }
         }
@@ -179,13 +209,13 @@ export class OpenAiResponsesProvider implements AiProvider, AiStreamingProvider 
     if (!terminal) throw this.safeStreamError('AI response incomplete', requestId);
   }
 
-  private parseToolCalls(calls: Map<string, { name: string; arguments: string }>): AiToolCall[] {
+  private parseToolCalls(calls: Map<string, { id: string; callId: string; name: string; arguments: string }>): AiToolCall[] {
     const toolCalls: AiToolCall[] = [];
     for (const call of calls.values()) {
       let args: unknown;
       try { args = JSON.parse(call.arguments || '{}'); } catch { throw new Error('AI provider returned invalid tool arguments'); }
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('AI provider returned invalid tool arguments');
-      toolCalls.push({ name: call.name, arguments: args as Record<string, unknown> });
+      toolCalls.push({ ...(call.callId ? { id: call.callId } : {}), name: call.name, arguments: args as Record<string, unknown> });
     }
     return toolCalls;
   }

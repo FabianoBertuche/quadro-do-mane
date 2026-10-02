@@ -71,11 +71,24 @@ credentials were required.
 - The running API image predates the current worktree: internal requests to
   `/api/ai/runtime` and `/api/settings/ai/providers` returned `404`, not a
   redacted response or authorization status. Rebuilding/restarting shared API
-  and web containers was intentionally not performed because migration and
-  database host configuration were not safe to complete in this workspace.
+  and web containers was initially deferred because the production compose
+  file referenced stale `mm-*` names. The active stack uses `quadro-network`
+  and `quadro-postgres`; migration was subsequently applied there, and the
+  API/web images were rebuilt and restarted with `docker-compose.yml`.
 - No connected account was available for a live catalog check. The mocked
   integration test and focused runtime/provider tests verify catalog ordering,
   filtering, redaction, and request propagation without network calls.
+
+## Final deployment verification
+
+- `20260930120000_add_ai_server_runtime` applied successfully against the
+  active `quadro-postgres` database; `prisma migrate status` reports the schema
+  up to date.
+- `quadro-api` is healthy, `quadro-web` and `quadro-caddy` are running, and
+  the rebuilt API maps `/api/ai/runtime` and `/api/settings/ai/providers`.
+- Unauthenticated requests to both new endpoints return `401 Unauthorized`.
+- The web root responds through Caddy (`308`, matching the existing redirect
+  behavior). No live OAuth account was available for catalog verification.
 
 ## Commit Scope
 

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { TemporaryAudioService } from './temporary-audio.service';
 
 interface TimerApi {
@@ -12,8 +12,8 @@ export class TemporaryAudioCleanupScheduler implements OnModuleInit, OnModuleDes
 
   constructor(
     private readonly media: TemporaryAudioService,
-    private readonly intervalMs = 60_000,
-    private readonly timerApi: TimerApi = globalThis,
+    @Optional() private readonly intervalMs = 60_000,
+    @Optional() private readonly timerApi: TimerApi = globalThis,
   ) {}
 
   onModuleInit(): void {

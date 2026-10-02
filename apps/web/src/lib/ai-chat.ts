@@ -44,6 +44,21 @@ export interface AiMessagePage {
   pendingProposals: AiActionProposal[];
 }
 
+export function mergeAiMessageResponse(page: AiMessagePage, response: AiMessageResponse): AiMessagePage {
+  const incomingMessages = [response.message, response.assistantMessage].filter(
+    (message): message is AiMessage => message !== undefined,
+  );
+  const messages = [...page.messages];
+  for (const message of incomingMessages) {
+    if (!messages.some((current) => current.id === message.id)) messages.push(message);
+  }
+  const pendingProposals = [...page.pendingProposals];
+  for (const proposal of response.proposals) {
+    if (!pendingProposals.some((current) => current.id === proposal.id)) pendingProposals.push(proposal);
+  }
+  return { messages, pendingProposals };
+}
+
 export interface AiMessageResponse {
   message: AiMessage;
   assistantMessage?: AiMessage;

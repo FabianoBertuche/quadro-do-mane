@@ -54,7 +54,36 @@ test('normalizes streamed function-call arguments and completed output', async (
 
   const result = await provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' });
 
-  assert.deepEqual(result.toolCalls, [{ name: 'create_task', arguments: { title: 'Planejar' } }]);
+  assert.deepEqual(result.toolCalls, [{ id: 'call-1', name: 'create_task', arguments: { title: 'Planejar' } }]);
+});
+
+test('formats a multi-call Responses continuation with preserved call ids and function outputs', async () => {
+  let request: any;
+  const provider = new OpenAiResponsesProvider(config as any, async (_url, init) => {
+    request = JSON.parse(String(init?.body));
+    return response('data: {"type":"response.completed","response":{"status":"completed"}}\n');
+  });
+  const firstInput = { ...input, messages: [{ role: 'user' as const, content: 'consulte os projetos' }] };
+  const completion = {
+    text: '',
+    toolCalls: [
+      { id: 'call-projects', name: 'search_projects', arguments: { search: 'A' } },
+      { id: 'call-users', name: 'search_users', arguments: { search: 'B' } },
+    ],
+  };
+  const continuation = (provider as any).buildToolContinuation(firstInput, completion, [
+    { call: completion.toolCalls[0], result: [{ id: 'project-1', name: 'Projeto A' }] },
+    { call: completion.toolCalls[1], result: [{ id: 'user-1', name: 'Pessoa B' }] },
+  ]);
+
+  await provider.complete(continuation, { accessToken: 'oauth-token', type: 'oauth' });
+  assert.deepEqual(request.input, [
+    { role: 'user', content: 'consulte os projetos' },
+    { type: 'function_call', call_id: 'call-projects', name: 'search_projects', arguments: '{"search":"A"}' },
+    { type: 'function_call', call_id: 'call-users', name: 'search_users', arguments: '{"search":"B"}' },
+    { type: 'function_call_output', call_id: 'call-projects', output: '[{"id":"project-1","name":"Projeto A"}]' },
+    { type: 'function_call_output', call_id: 'call-users', output: '[{"id":"user-1","name":"Pessoa B"}]' },
+  ]);
 });
 
 test('refreshes OAuth once after a 401 and retries with the refreshed bearer token', async () => {
@@ -167,7 +196,7 @@ test('merges function-call argument deltas with the arguments.done event', async
 
   const result = await provider.complete(input, { accessToken: 'oauth-token', type: 'oauth' });
 
-  assert.deepEqual(result.toolCalls, [{ name: 'create_task', arguments: { title: 'Done' } }]);
+  assert.deepEqual(result.toolCalls, [{ id: 'call-2', name: 'create_task', arguments: { title: 'Done' } }]);
 });
 
 test('does not retry a second OAuth 401', async () => {

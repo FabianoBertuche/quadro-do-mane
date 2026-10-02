@@ -40,3 +40,22 @@ Implemented explicit registry wiring and end-to-end authorization/provider cover
 - API build and typecheck: passed.
 - Web build and typecheck: passed.
 - Full diff whitespace check: passed.
+
+## Latest Review Follow-up
+
+- Provider tool calls now retain adapter-issued IDs.
+- Responses continuations use `function_call` plus `function_call_output` items and exact `call_id` values.
+- Chat Completions continuations use the assistant `tool_calls` message followed by `tool_call_id` tool messages.
+- The service delegates continuation formatting to the configured provider adapter and no longer creates generic role-tool payloads.
+- Added exact multiple-call payload tests for both configured OpenAI adapters.
+- Replaced the synthetic action/activity test with the real `CreateRoutineTool` and `DailyRoutineService` path, asserting tenant/actor propagation, domain activity logging, confirmation state transitions, and AI audit logging.
+- `providerMetaJson.toolCallCount` now counts calls across all continuation passes.
+
+Latest verification:
+
+- AI/OAuth/tool suite: 196 passed, 1 unrelated pre-existing `ai-audio.service.spec.ts` cleanup failure.
+- Focused provider/service/OAuth suite: 58 passed.
+- API build and typecheck: passed.
+- Web build and typecheck: passed.
+- Web `ai-chat` tests: 10 passed using `node -r ts-node/register --test` with CommonJS compiler overrides.
+- `git diff --check`: passed.

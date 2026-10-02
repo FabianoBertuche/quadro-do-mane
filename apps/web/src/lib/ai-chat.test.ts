@@ -9,6 +9,7 @@ import {
   getClarificationDetails,
   listConversations,
   listMessages,
+  mergeAiMessageResponse,
   sendTextMessage,
 } from './ai-chat';
 
@@ -131,6 +132,24 @@ test('preserves authorized tool results returned with the final assistant respon
   } finally {
     api.post = originalPost;
   }
+});
+
+test('merges a successful send response into the cached message page', () => {
+  const page = {
+    messages: [{ id: 'existing', role: 'assistant' as const, content: 'Anterior' }],
+    pendingProposals: [],
+  };
+  const response = {
+    message: { id: 'user-1', role: 'user' as const, content: 'Oi' },
+    assistantMessage: { id: 'assistant-1', role: 'assistant' as const, content: 'Olá' },
+    proposals: [],
+    toolResults: [],
+  };
+
+  assert.deepEqual(mergeAiMessageResponse(page, response), {
+    messages: [page.messages[0], response.message, response.assistantMessage],
+    pendingProposals: [],
+  });
 });
 
 test('confirms and cancels proposals through their existing endpoints', async () => {
