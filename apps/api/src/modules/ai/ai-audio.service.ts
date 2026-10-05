@@ -18,6 +18,14 @@ export const MAX_AI_AUDIO_BYTES = positiveEnv('AI_AUDIO_MAX_BYTES', 10 * 1024 * 
 export const MAX_AI_AUDIO_DURATION_SECONDS = positiveEnv('AI_AUDIO_MAX_DURATION_SECONDS', 5 * 60);
 export const AI_AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4', 'audio/m4a'] as const;
 
+/**
+ * Normaliza o mimetype antes da checagem de permissão: navegadores enviam
+ * parâmetros (`audio/webm;codecs=opus`) e caixas variadas, que a comparação
+ * exata recusaria mesmo sendo um tipo permitido.
+ */
+export const normalizeAudioMimeType = (mimeType: string): string =>
+  mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+
 export interface AiAudioLimits {
   maxBytes: number;
   maxDurationSeconds: number;
@@ -121,7 +129,7 @@ export class AiAudioService {
   }
 
   private async validateAudio(buffer: Buffer, mimeType: string) {
-    if (!AI_AUDIO_MIME_TYPES.includes(mimeType as (typeof AI_AUDIO_MIME_TYPES)[number])) {
+    if (!AI_AUDIO_MIME_TYPES.includes(normalizeAudioMimeType(mimeType) as (typeof AI_AUDIO_MIME_TYPES)[number])) {
       throw new BadRequestException('Tipo de áudio não permitido');
     }
     if (!buffer?.length || buffer.length > this.limits.maxBytes) {

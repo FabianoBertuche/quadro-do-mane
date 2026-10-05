@@ -33,6 +33,14 @@ test('audio endpoint is multipart with the fixed field, MIME filter and size lim
   assert.equal(accepted, true);
 });
 
+test('MIME filter accepts browser recorder types with codec parameters', () => {
+  for (const mimetype of ['audio/webm;codecs=opus', 'audio/mp4;codecs="mp4a.40.2"', 'Audio/WebM;Codecs=Opus']) {
+    let accepted = false;
+    AI_AUDIO_UPLOAD_OPTIONS.fileFilter({}, { mimetype } as any, (error: Error | null) => { accepted = !error; });
+    assert.equal(accepted, true, mimetype);
+  }
+});
+
 test('download verifies ownership through the service and sends the audio content type', async () => {
   const service = { getAudio: async (user: any, key: string) => {
     assert.equal(user, actor);

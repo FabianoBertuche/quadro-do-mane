@@ -7,7 +7,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { TenantContextGuard } from '../../common/guards/tenant-context.guard';
 import { RequestUser } from '../../common/interfaces/request-context.interface';
-import { AiAudioService, AI_AUDIO_MIME_TYPES, MAX_AI_AUDIO_BYTES } from './ai-audio.service';
+import { AiAudioService, AI_AUDIO_MIME_TYPES, MAX_AI_AUDIO_BYTES, normalizeAudioMimeType } from './ai-audio.service';
 import { SendAiAudioDto } from './dto/send-ai-audio.dto';
 
 interface UploadedAudio {
@@ -19,7 +19,7 @@ export const AI_AUDIO_UPLOAD_OPTIONS = {
   fieldName: 'audio',
   limits: { fileSize: MAX_AI_AUDIO_BYTES },
   fileFilter: (_request: unknown, file: { mimetype: string }, callback: (error: Error | null, acceptFile: boolean) => void) => {
-    if (!AI_AUDIO_MIME_TYPES.includes(file.mimetype as any)) return callback(new BadRequestException('Tipo de áudio não permitido'), false);
+    if (!AI_AUDIO_MIME_TYPES.includes(normalizeAudioMimeType(file.mimetype) as any)) return callback(new BadRequestException('Tipo de áudio não permitido'), false);
     callback(null, true);
   },
 };

@@ -201,7 +201,9 @@ export default function AiChatPage() {
     }
     recorder.onstop = () => {
       stopTracks();
-      const type = recorder.mimeType || 'audio/webm';
+      // O MediaRecorder informa parâmetros (`audio/webm;codecs=opus`); o
+      // upload leva só tipo/subtipo para a checagem de MIME do backend.
+      const type = (recorder.mimeType || 'audio/webm').split(';')[0]?.trim().toLowerCase() || 'audio/webm';
       const blob = new Blob(chunksRef.current, { type });
       chunksRef.current = [];
       recorderRef.current = null;
