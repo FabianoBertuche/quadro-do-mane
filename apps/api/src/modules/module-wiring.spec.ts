@@ -18,7 +18,7 @@ test('ProjectsModule imports NotificationsModule for its dispatcher dependency',
 });
 
 test('AiService treats security limits as an optional dependency', () => {
-  assert.ok(Reflect.getMetadata(OPTIONAL_DEPS_METADATA, AiService)?.includes(5));
+  assert.ok(Reflect.getMetadata(OPTIONAL_DEPS_METADATA, AiService)?.includes(6));
 });
 
 test('AiAudioService treats optional limits and audit dependencies as optional', () => {

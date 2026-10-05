@@ -52,7 +52,7 @@ export class AiService {
     public registry: AiToolRegistryService,
     private readonly audit: AiAuditService,
     private readonly identity: AiIdentityContextService,
-    @Optional() limits: Partial<AiSecurityLimits> = {},
+    @Optional() @Inject('AI_SECURITY_LIMITS') limits: Partial<AiSecurityLimits> = {},
     @Optional() @Inject(AI_RATE_LIMITER) private readonly rateLimiter?: AiRateLimiter,
     @Optional() @Inject(AI_OAUTH_SERVICE) private readonly oauth?: AiOAuthService,
     @Optional() @Inject(AI_SERVER_RUNTIME) private readonly runtime?: AiServerRuntimeService,
@@ -252,9 +252,9 @@ export class AiService {
     }
   }
 
-  private async persistAtomically<T>(work: (tx: PrismaService) => Promise<T>): Promise<T> {
+  private async persistAtomically(work: (tx: PrismaService) => Promise<any>): Promise<any> {
     if (typeof (this.prisma as { $transaction?: unknown }).$transaction === 'function') {
-      return this.prisma.$transaction((tx: PrismaService) => work(tx));
+      return (this.prisma as any).$transaction((tx: PrismaService) => work(tx));
     }
     return work(this.prisma);
   }

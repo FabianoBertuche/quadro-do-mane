@@ -63,9 +63,12 @@ export const validateUpdateArgs = (args: unknown) => {
 };
 
 export const validateMoveArgs = (args: unknown) => {
-  const value = objectArgs(args, ['taskId', 'statusId', 'statusName']);
+  const value = objectArgs(args, ['taskId', 'statusId', 'statusName', 'kanbanPosition']);
   nonEmpty(value.taskId, 'taskId');
   if (!value.statusId && !value.statusName) throw new BadRequestException('statusId ou statusName é obrigatório');
+  if (value.kanbanPosition !== undefined && (typeof value.kanbanPosition !== 'number' || !Number.isInteger(value.kanbanPosition) || value.kanbanPosition < 0)) {
+    throw new BadRequestException('kanbanPosition deve ser inteiro não‑negativo');
+  }
   return value;
 };
 

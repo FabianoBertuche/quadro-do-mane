@@ -164,7 +164,7 @@ export default function NotificationDiagnosticsPage() {
                     type="checkbox"
                     className="h-4 w-4 accent-primary"
                     checked={preference.pushEnabled}
-                    disabled={preference.lockedByAdmin || updatePreference.isPending}
+                    disabled={preference.lockedByAdmin || (updatePreference.isPending && updatePreference.variables?.category === preference.category)}
                     onChange={(event) =>
                       updatePreference.mutate({
                         category: preference.category,

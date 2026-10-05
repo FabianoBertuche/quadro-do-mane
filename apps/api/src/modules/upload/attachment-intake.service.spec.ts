@@ -1,15 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Readable } from 'node:stream';
 import { AttachmentIntakeService, DnsLookup, isBlockedAddress } from './attachment-intake.service';
 import { MAX_FILE_SIZE } from './upload.constants';
 
 const uploads = { uploadFile: async (params: any) => ({ id: 'att-1', ...params }) } as any;
 
-const respond = (body: string, headers: Record<string, string> = {}) => ({
-  status: 200,
-  headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
-  arrayBuffer: async () => new TextEncoder().encode(body).buffer,
-});
+const respond = (body: string | Buffer | Buffer[], headers: Record<string, string> = {}, status = 200) => {
+  const stream = Readable.from(Array.isArray(body) ? body : [body]);
+  let destroyed = false;
+  return {
+    status,
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+    body: stream,
+    destroy: () => {
+      destroyed = true;
+      stream.destroy();
+    },
+    get destroyed() { return destroyed; },
+  };
+};
 
 const publicDns: DnsLookup = async () => [{ address: '8.8.8.8', family: 4 }];
 const serviceWith = (fetchImpl: any, lookup: DnsLookup = publicDns) => new AttachmentIntakeService(uploads, fetchImpl, lookup);
@@ -35,12 +45,15 @@ test('aceita endereços públicos', () => {
 
 test('baixa a URL pública e registra o anexo', async () => {
   let captured: any;
-  const service = serviceWith(async (url: string) => {
+  let approvedAddress: string | undefined;
+  const service = serviceWith(async (url: string, init: any) => {
     captured = url;
+    approvedAddress = init.address;
     return respond('conteúdo', { 'content-type': 'text/plain' });
   });
   const saved = await service.intakeByUrl(input);
   assert.equal(captured, input.url);
+  assert.equal(approvedAddress, '8.8.8.8');
   assert.equal(saved.fileName, 'relatorio.txt');
   assert.equal(saved.mimeType, 'text/plain');
 });
@@ -51,8 +64,10 @@ test('recusa esquema que não seja http ou https', async () => {
 });
 
 test('recusa arquivo acima de 100 MB', async () => {
-  const service = serviceWith(async () => respond('x', { 'content-length': String(MAX_FILE_SIZE + 1), 'content-type': 'text/plain' }));
+  const response = respond('x', { 'content-length': String(MAX_FILE_SIZE + 1), 'content-type': 'text/plain' });
+  const service = serviceWith(async () => response);
   await assert.rejects(() => service.intakeByUrl(input), /tamanho/i);
+  assert.equal(response.destroyed, true);
 });
 
 test('recusa MIME fora da lista', async () => {
@@ -67,7 +82,8 @@ test('segue no máximo dois redirecionamentos e revalida o destino', async () =>
     return {
       status: 302,
       headers: { get: (name: string) => (name.toLowerCase() === 'location' ? 'https://outro.exemplo.com/a.txt' : null) },
-      arrayBuffer: async () => new ArrayBuffer(0),
+      body: Readable.from([]),
+      destroy: () => undefined,
     };
   });
   await assert.rejects(() => service.intakeByUrl(input), /redirecionamento/i);
@@ -107,4 +123,48 @@ test('não expõe o destino quando a resolução DNS falha', async () => {
     throw new Error('getaddrinfo ENOTFOUND segredo.exemplo.com');
   });
   await assert.rejects(() => service.intakeByUrl(input), /não foi possível baixar o anexo/i);
+});
+
+test('recusa URL com credenciais', async () => {
+  const service = serviceWith(async () => respond('x', { 'content-type': 'text/plain' }));
+  await assert.rejects(() => service.intakeByUrl({ ...input, url: 'https://user:secret@files.exemplo.com/a.txt' }), /não permitido/i);
+});
+
+test('recusa URL com porta não padrão', async () => {
+  const service = serviceWith(async () => respond('x', { 'content-type': 'text/plain' }));
+  await assert.rejects(() => service.intakeByUrl({ ...input, url: 'https://files.exemplo.com:8443/a.txt' }), /não permitido/i);
+});
+
+test('recusa redirect para DNS privado antes de conectar', async () => {
+  let calls = 0;
+  const first = respond('', { location: 'https://interno.exemplo.com/a.txt' }, 302);
+  const service = serviceWith(async () => {
+    calls += 1;
+    return first;
+  }, async (hostname) => hostname === 'interno.exemplo.com'
+    ? [{ address: '10.0.0.1', family: 4 }]
+    : [{ address: '8.8.8.8', family: 4 }]);
+  await assert.rejects(() => service.intakeByUrl(input), /destino não permitido/i);
+  assert.equal(calls, 1);
+  assert.equal(first.destroyed, true);
+});
+
+test('encerra resposta em redirect sem Location', async () => {
+  const response = respond('', {}, 302);
+  const service = serviceWith(async () => response);
+  await assert.rejects(() => service.intakeByUrl(input), /redirecionamento sem destino/i);
+  assert.equal(response.destroyed, true);
+});
+
+test('cancela stream quando o corpo excede 100 MB sem Content-Length', async () => {
+  const response = respond([Buffer.alloc(MAX_FILE_SIZE), Buffer.alloc(1)], { 'content-type': 'text/plain' });
+  const service = serviceWith(async () => response);
+  await assert.rejects(() => service.intakeByUrl(input), /tamanho/i);
+  assert.equal(response.destroyed, true);
+});
+
+test('sanitiza nome de arquivo e aplica fallback após a limpeza', async () => {
+  const service = serviceWith(async () => respond('x', { 'content-type': 'text/plain' }));
+  const saved = await service.intakeByUrl({ ...input, fileName: '\u0000<>:"|?*' });
+  assert.equal(saved.fileName, 'anexo');
 });

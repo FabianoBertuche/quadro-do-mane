@@ -48,7 +48,7 @@ const doubles = (rows: any[] = [], oldTask: any = task()) => {
   const prisma: any = {
     taskStatus: {
       findFirst: mock(async () => ({ id: 'status-1' })),
-      findUnique: mock(async () => ({ category: 'in_progress', name: 'Em andamento' })),
+      findUnique: mock(async () => ({ category: 'active', name: 'Em andamento' })),
     },
     task: {
       create: mock(async (args: any) => ({ ...task(), ...args.data, updatedAt: new Date('2026-09-28T10:00:00.000Z'), status: null, priority: null, project: null })),
@@ -191,7 +191,7 @@ test('notifica creator e responsáveis de um comentário, sem notificar seu auto
 });
 
 test('notifica conclusão e usa a versão persistida da tarefa como occurrence key', async () => {
-  const oldTask = task({ assigneeTenantUserId: 'assignee-1', statusId: 'status-open', status: { category: 'in_progress', name: 'Em andamento' } });
+  const oldTask = task({ assigneeTenantUserId: 'assignee-1', statusId: 'status-open', status: { category: 'active', name: 'Em andamento' } });
   const { service, dispatcher, prisma } = doubles([], oldTask);
   prisma.task.update.mockImplementation(async (args: any) => ({
     ...oldTask,
@@ -216,7 +216,7 @@ test('mapeia retorno ao status não concluído para reabertura e outros status p
     ...oldTask,
     ...args.data,
     updatedAt: new Date('2026-09-28T12:00:00.000Z'),
-    status: { category: 'in_progress', name: 'Em andamento' },
+    status: { category: 'active', name: 'Em andamento' },
     priority: null,
   }));
 
