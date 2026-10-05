@@ -7,6 +7,7 @@ import { UploadService } from './upload.service';
 import { ALLOWED_MIMES, MAX_FILE_SIZE } from './upload.constants';
 
 export const ATTACHMENT_FETCH = Symbol('ATTACHMENT_FETCH');
+export const ATTACHMENT_DNS_LOOKUP = Symbol('ATTACHMENT_DNS_LOOKUP');
 export const MAX_REDIRECTS = 2;
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -71,7 +72,7 @@ const readBody = async (response: AttachmentResponse) => {
 
 @Injectable()
 export class AttachmentIntakeService {
-  constructor(private readonly uploads: UploadService, @Optional() @Inject(ATTACHMENT_FETCH) private readonly fetchImpl: AttachmentFetch = defaultAttachmentFetch, private readonly lookup: DnsLookup = dns.lookup) {}
+  constructor(private readonly uploads: UploadService, @Optional() @Inject(ATTACHMENT_FETCH) private readonly fetchImpl: AttachmentFetch = defaultAttachmentFetch, @Optional() @Inject(ATTACHMENT_DNS_LOOKUP) private readonly lookup: DnsLookup = dns.lookup) {}
   async intakeByUrl(input: { tenantId: string; uploadedByTenantUserId: string; taskId?: string; projectId?: string; url: string; fileName?: string }) {
     let target = validatedUrl(input.url);
     for (let redirect = 0; ; redirect += 1) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MODULE_METADATA, OPTIONAL_DEPS_METADATA } from '@nestjs/common/constants';
 import { AiService } from './ai/ai.service';
+import { AttachmentIntakeService } from './upload/attachment-intake.service';
 import { AiAudioService } from './ai/ai-audio.service';
 import { TemporaryAudioCleanupScheduler } from './ai/media/temporary-audio-cleanup.scheduler';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -21,6 +22,11 @@ test('AiService treats security limits as an optional dependency', () => {
   assert.ok(Reflect.getMetadata(OPTIONAL_DEPS_METADATA, AiService)?.includes(6));
 });
 
+test('AttachmentIntakeService treats fetch and DNS lookup as optional dependencies', () => {
+  const optionalDependencies = Reflect.getMetadata(OPTIONAL_DEPS_METADATA, AttachmentIntakeService) ?? [];
+  assert.ok(optionalDependencies.includes(1));
+  assert.ok(optionalDependencies.includes(2));
+});
 test('AiAudioService treats optional limits and audit dependencies as optional', () => {
   const optionalDependencies = Reflect.getMetadata(OPTIONAL_DEPS_METADATA, AiAudioService) ?? [];
   assert.ok(optionalDependencies.includes(5));
