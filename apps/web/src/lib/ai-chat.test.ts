@@ -10,6 +10,7 @@ import {
   listConversations,
   listMessages,
   mergeAiMessageResponse,
+  sendAudioMessage,
   sendTextMessage,
 } from './ai-chat';
 
@@ -207,7 +208,54 @@ test('maps clarification messages and ambiguous names when the field is absent',
          { id: 'Ana', name: 'Ana' },
          { id: 'Anabela', name: 'Anabela' },
        ],
-       message: 'Qual pessoa você quis dizer?',
-     },
+      message: 'Qual pessoa você quis dizer?',
+    },
   );
+});
+
+test('sends audio as multipart with response mode and parses the TTS key', async () => {
+  const originalPost = api.post;
+  const requests: Array<{ url: string; data?: unknown }> = [];
+  api.post = (async (url: string, data?: unknown) => {
+    requests.push({ url, data });
+    return { data: {
+      message: { id: 'message-1', role: 'user', content: ' transcrição ', format: 'AUDIO' },
+      assistantMessage: { id: 'message-2', role: 'assistant', content: 'Feito.', audioObjectKey: 'audio/key-1' },
+      proposals: [],
+      toolResults: [],
+    } };
+  }) as typeof api.post;
+
+  try {
+    const audio = new Blob(['fake-audio'], { type: 'audio/webm' });
+    const response = await sendAudioMessage({ conversationId: 'conversation-1', audio, filename: 'comando.webm', responseMode: 'AUDIO' });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/ai/conversations/conversation-1/audio');
+    const form = requests[0].data as FormData;
+    assert.ok(form instanceof FormData);
+    assert.equal(form.get('responseMode'), 'AUDIO');
+    const file = form.get('audio');
+    assert.ok(file instanceof Blob);
+    assert.equal(response.message.content, ' transcrição ');
+    assert.equal(response.assistantMessage?.audioObjectKey, 'audio/key-1');
+  } finally {
+    api.post = originalPost;
+  }
+});
+
+test('keeps the TTS audio key on text responses for the player', async () => {
+  const originalPost = api.post;
+  api.post = (async () => ({ data: {
+    message: { id: 'message-1', role: 'user', content: 'Oi' },
+    assistantMessage: { id: 'message-2', role: 'assistant', content: 'Olá em voz.', audioObjectKey: 'audio/key-2' },
+    proposals: [],
+    toolResults: [],
+  } })) as typeof api.post;
+
+  try {
+    const response = await sendTextMessage({ conversationId: 'conversation-1', text: 'Oi', responseMode: 'AUDIO' });
+    assert.equal(response.assistantMessage?.audioObjectKey, 'audio/key-2');
+  } finally {
+    api.post = originalPost;
+  }
 });

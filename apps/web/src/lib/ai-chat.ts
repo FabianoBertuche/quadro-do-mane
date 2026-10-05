@@ -2,6 +2,7 @@ import { api } from './api';
 
 export type AiMessageRole = 'user' | 'assistant' | 'system';
 export type AiProposalStatus = 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'EXECUTED' | 'FAILED';
+export type AiResponseMode = 'TEXT' | 'AUDIO';
 
 export interface AiConversation {
   id: string;
@@ -15,6 +16,7 @@ export interface AiMessage {
   role: AiMessageRole;
   content: string | null;
   format?: string;
+  audioObjectKey?: string;
   localStatus?: 'sending' | 'failed';
   createdAt?: string;
   [key: string]: unknown;
@@ -134,6 +136,7 @@ function parseMessage(value: unknown): AiMessage {
     role: value.role,
   };
   if (typeof value.format === 'string') message.format = value.format;
+  if (typeof value.audioObjectKey === 'string') message.audioObjectKey = value.audioObjectKey;
   if (typeof value.createdAt === 'string') message.createdAt = value.createdAt;
   return { ...value, ...message };
 }
@@ -205,10 +208,28 @@ export async function listMessages(conversationId: string): Promise<AiMessagePag
 export async function sendTextMessage(input: {
   conversationId: string;
   text: string;
-  responseMode: 'TEXT';
+  responseMode: AiResponseMode;
 }): Promise<AiMessageResponse> {
   const { conversationId, text, responseMode } = input;
   const { data } = await api.post(`/ai/conversations/${conversationId}/messages`, { text, responseMode });
+  return parseMessageResponse(data);
+}
+
+export async function sendAudioMessage(input: {
+  conversationId: string;
+  audio: Blob;
+  filename?: string;
+  responseMode: AiResponseMode;
+}): Promise<AiMessageResponse> {
+  const { conversationId, audio, filename, responseMode } = input;
+  const form = new FormData();
+  form.append('audio', audio, filename ?? 'comando.webm');
+  form.append('responseMode', responseMode);
+  const { data } = await api.post(`/ai/conversations/${conversationId}/audio`, form);
+  return parseMessageResponse(data);
+}
+
+function parseMessageResponse(data: unknown): AiMessageResponse {
   const payload = unwrapData(data);
   if (!isRecord(payload) || payload.message === undefined) throw new Error('Resposta de mensagem enviada inválida');
   const rawProposals = Array.isArray(payload.proposals) ? payload.proposals : payload.proposal ? [payload.proposal] : [];
