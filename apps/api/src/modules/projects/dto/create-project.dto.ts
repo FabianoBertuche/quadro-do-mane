@@ -2,7 +2,7 @@ import { IsNotEmpty, IsOptional, IsString, IsUUID, IsEnum, IsDateString, IsInt, 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateProjectDto {
-  @ApiProperty() @IsString() @IsNotEmpty() name: string = '';
+  @ApiProperty() @IsString() @IsNotEmpty() name: string;
   @ApiPropertyOptional() @IsString() @IsOptional() code?: string;
   @ApiPropertyOptional() @IsString() @IsOptional() description?: string;
   @ApiPropertyOptional() @IsString() @IsOptional() priority?: string;

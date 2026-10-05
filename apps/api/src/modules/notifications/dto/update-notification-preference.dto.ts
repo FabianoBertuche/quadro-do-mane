@@ -12,5 +12,5 @@ export class UpdateNotificationPreferenceDto {
     return v;
   })
   @IsBoolean()
-  pushEnabled: boolean = false;
+  pushEnabled: boolean;
 }

@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "build": "nest build",
+    "test:unit": "node -r ts-node/register --test $(find src -name '*.spec.ts' ! -name '*.e2e.spec.ts')",
+    "test:e2e": "node -r ts-node/register --test $(find src -name '*.e2e.spec.ts')",
     "test:events": "node -r ts-node/register --test src/modules/events/events.service.spec.ts",
     "test:tasks": "node -r ts-node/register --test src/modules/tasks/tasks.service.spec.ts",
     "test:routines": "node -r ts-node/register --test src/modules/daily-routine/daily-routine.service.spec.ts",
